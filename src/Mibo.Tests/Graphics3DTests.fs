@@ -160,37 +160,7 @@ let tests =
         Expect.floatClose Accuracy.medium (float d2) 25.0 "Second mesh distance squared should be 25"
     ]
  
-    testList "FrameExecution" [
-      testCase "flushSegment calls sort and draw functions" <| fun _ ->
-        let opaque = ResizeArray<struct (float32 * RenderCmd3D)>()
-        let transparent = ResizeArray<struct (float32 * RenderCmd3D)>()
-        opaque.Add struct (10f, Unchecked.defaultof<RenderCmd3D>)
-        
-        let mutable opaqueSorted = false
-        let mutable transparentSorted = false
-        let mutable drawCalls = 0
-        
-        let lists : FrameOrchestration.RenderLists = {
-          Opaque = opaque
-          Transparent = transparent
-        }
-        let pipeline = {
-          new FrameOrchestration.IRenderPipeline with
-            member _.ClearLists() = ()
-            member _.FlushSegment() = ()
-            member _.SortOpaque() = opaqueSorted <- true
-            member _.SortTransparent() = transparentSorted <- true
-            member _.DrawMesh _ = drawCalls <- drawCalls + 1
-            member _.DrawSprites _ _ = ()
-        }
-        
-        pipeline |> FrameExecution.flushSegment lists
-            
-        Expect.isTrue opaqueSorted "Opaque sort should have been called"
-        Expect.isTrue transparentSorted "Transparent sort should have been called"
-        Expect.equal drawCalls 1 "Should have called drawMeshCmd once"
-        Expect.equal opaque.Count 0 "Opaque list should be cleared"
-    ]
+
 
 
     testList "Draw3D Builders" [

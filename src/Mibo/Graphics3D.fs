@@ -275,13 +275,13 @@ module internal CameraState =
       let mutable right = Vector3.Cross(upAxis, viewDir)
 
       if right.LengthSquared() < 0.000001f then
-        struct (Vector3.Right, Vector3.Up)
+        struct (camInfo.Basis.Right, camInfo.Basis.Up)
       else
         right.Normalize()
         let mutable up = Vector3.Cross(viewDir, right)
 
         if up.LengthSquared() < 0.000001f then
-          struct (Vector3.Right, Vector3.Up)
+          struct (camInfo.Basis.Right, camInfo.Basis.Up)
         else
           up.Normalize()
           struct (right, up)
@@ -553,32 +553,7 @@ module internal FrameOrchestration =
 
     pipeline.FlushSegment()
 
-module internal FrameExecution =
-  let flushSegment
-    (lists: FrameOrchestration.RenderLists)
-    (pipeline: FrameOrchestration.IRenderPipeline)
-    =
-    if lists.Opaque.Count = 0 && lists.Transparent.Count = 0 then
-      ()
-    else
-      pipeline.SortOpaque()
-      pipeline.SortTransparent()
 
-      // Execute opaque then transparent
-      for i = 0 to lists.Opaque.Count - 1 do
-        let struct (_, cmd) = lists.Opaque[i]
-        pipeline.DrawMesh cmd
-
-      pipeline.DrawSprites Opaque lists.Opaque
-
-      for i = 0 to lists.Transparent.Count - 1 do
-        let struct (_, cmd) = lists.Transparent[i]
-        pipeline.DrawMesh cmd
-
-      pipeline.DrawSprites Transparent lists.Transparent
-
-      lists.Opaque.Clear()
-      lists.Transparent.Clear()
 
 module internal SpriteRendering =
   [<Struct>]
@@ -869,7 +844,35 @@ type Batch3DRenderer<'Model>
         member _.ClearLists() = clearLists()
 
         member self.FlushSegment() =
-          self |> FrameExecution.flushSegment lists
+          if lists.Opaque.Count = 0 && lists.Transparent.Count = 0 then
+            ()
+          else
+            self.SortOpaque()
+            self.SortTransparent()
+
+            // Execute opaque then transparent
+            for i = 0 to lists.Opaque.Count - 1 do
+              let struct (_, cmd) = lists.Opaque[i]
+
+              match cmd with
+              | DrawMesh _
+              | DrawSkinned _ -> self.DrawMesh cmd
+              | _ -> ()
+
+            self.DrawSprites Opaque lists.Opaque
+
+            for i = 0 to lists.Transparent.Count - 1 do
+              let struct (_, cmd) = lists.Transparent[i]
+
+              match cmd with
+              | DrawMesh _
+              | DrawSkinned _ -> self.DrawMesh cmd
+              | _ -> ()
+
+            self.DrawSprites Transparent lists.Transparent
+
+            lists.Opaque.Clear()
+            lists.Transparent.Clear()
 
         member _.SortOpaque() =
           if config.SortOpaqueFrontToBack then
