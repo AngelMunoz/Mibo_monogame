@@ -157,80 +157,53 @@ module internal DeviceState =
     RasterizerState: RasterizerState
   }
 
-  let save(gd: GraphicsDevice) : SavedStates = {
+  let inline save(gd: GraphicsDevice) : SavedStates = {
     BlendState = gd.BlendState
     DepthStencilState = gd.DepthStencilState
     RasterizerState = gd.RasterizerState
   }
 
-  let restore (gd: GraphicsDevice) (states: SavedStates) =
+  let inline restore (gd: GraphicsDevice) (states: SavedStates) =
     gd.BlendState <- states.BlendState
     gd.DepthStencilState <- states.DepthStencilState
     gd.RasterizerState <- states.RasterizerState
 
-  let applyRasterizer (rasterizer: RasterizerState) (gd: GraphicsDevice) =
+  let inline applyRasterizer (rasterizer: RasterizerState) (gd: GraphicsDevice) =
     gd.RasterizerState <- rasterizer
 
-  [<Struct>]
-  type PassContext = {
-    Device: GraphicsDevice
-    Config: Batch3DConfig
-    Pass: RenderPass
-  }
-
-  let private applyMeshStates(ctx: PassContext) =
-    match ctx.Pass with
-    | Opaque ->
-      ctx.Device.DepthStencilState <- ctx.Config.OpaqueDepthStencilState
-      ctx.Device.BlendState <- ctx.Config.OpaqueBlendState
-    | Transparent ->
-      ctx.Device.DepthStencilState <- ctx.Config.TransparentDepthStencilState
-      ctx.Device.BlendState <- ctx.Config.TransparentBlendState
-
-    applyRasterizer ctx.Config.RasterizerState ctx.Device
-
-  let applyMeshPass
+  let inline applyMeshPass
     (config: Batch3DConfig)
     (pass: RenderPass)
     (gd: GraphicsDevice)
     =
-    let ctx: PassContext = {
-      Device = gd
-      Config = config
-      Pass = pass
-    }
-
-    applyMeshStates ctx
-
-  let private applySpriteStates(ctx: PassContext) =
-    match ctx.Pass with
+    match pass with
     | Opaque ->
-      ctx.Device.BlendState <- ctx.Config.SpriteOpaqueBlendState
-      ctx.Device.DepthStencilState <- ctx.Config.SpriteOpaqueDepthStencilState
+      gd.DepthStencilState <- config.OpaqueDepthStencilState
+      gd.BlendState <- config.OpaqueBlendState
     | Transparent ->
-      ctx.Device.BlendState <- ctx.Config.SpriteTransparentBlendState
+      gd.DepthStencilState <- config.TransparentDepthStencilState
+      gd.BlendState <- config.TransparentBlendState
 
-      ctx.Device.DepthStencilState <-
-        ctx.Config.SpriteTransparentDepthStencilState
+    gd.RasterizerState <- config.RasterizerState
 
-    applyRasterizer ctx.Config.SpriteRasterizerState ctx.Device
-    ctx.Device.SamplerStates[0] <- ctx.Config.SpriteSamplerState
-
-  let applySpritePass
+  let inline applySpritePass
     (config: Batch3DConfig)
     (pass: RenderPass)
     (gd: GraphicsDevice)
     =
-    let ctx: PassContext = {
-      Device = gd
-      Config = config
-      Pass = pass
-    }
+    match pass with
+    | Opaque ->
+      gd.BlendState <- config.SpriteOpaqueBlendState
+      gd.DepthStencilState <- config.SpriteOpaqueDepthStencilState
+    | Transparent ->
+      gd.BlendState <- config.SpriteTransparentBlendState
+      gd.DepthStencilState <- config.SpriteTransparentDepthStencilState
 
-    applySpriteStates ctx
+    gd.RasterizerState <- config.SpriteRasterizerState
+    gd.SamplerStates[0] <- config.SpriteSamplerState
 
 module StandardEffects =
-  let defaultLighting(effect: BasicEffect) =
+  let inline defaultLighting(effect: BasicEffect) =
     effect.LightingEnabled <- true
     effect.AmbientLightColor <- Vector3(0.2f, 0.2f, 0.2f)
     effect.DirectionalLight0.Enabled <- true
@@ -306,10 +279,10 @@ module internal EffectConfig =
     Setup: EffectSetup voption
   }
 
-  let createBasicEffectCache() : ConditionalWeakTable<BasicEffect, obj> =
+  let inline createBasicEffectCache() : ConditionalWeakTable<BasicEffect, obj> =
     ConditionalWeakTable<BasicEffect, obj>()
 
-  let applyBasicEffectLighting
+  let inline applyBasicEffectLighting
     (cache: ConditionalWeakTable<BasicEffect, obj>)
     (enableCache: bool)
     (effect: BasicEffect)
@@ -370,19 +343,17 @@ module internal EffectConfig =
 
 
 module internal MeshDrawing =
-  let drawModel
+  let inline drawModel
     (ctx: EffectConfig.MeshDrawContext)
     (args: EffectConfig.MeshEffectArgs)
     (model: Model)
     =
-    // Set pass-specific device state.
-    ctx.GraphicsDevice |> DeviceState.applyMeshPass ctx.Config ctx.Pass
+    DeviceState.applyMeshPass ctx.Config ctx.Pass ctx.GraphicsDevice
 
     for mesh in model.Meshes do
       for part in mesh.MeshParts do
         part.Effect |> EffectConfig.setupMeshEffect ctx args
 
-      // Execute draw after effects are configured.
       mesh.Draw()
 
 
@@ -570,7 +541,7 @@ module internal SpriteRendering =
     CameraInfo: CameraState.CameraInfo
   }
 
-  let private flushSpriteQuadBatch
+  let inline private flushSpriteQuadBatch
     (effect: Effect)
     (state: SpriteQuadBatch.State)
     =
@@ -838,6 +809,19 @@ type Batch3DRenderer<'Model>
     e.VertexColorEnabled <- true
     e
 
+  // Cached sort comparers to avoid per-frame allocations
+  let opaqueComparer =
+    { new Collections.Generic.IComparer<struct (float32 * RenderCmd3D)> with
+        member _.Compare(struct (da, _), struct (db, _)) =
+          compare da db
+    }
+
+  let transparentComparer =
+    { new Collections.Generic.IComparer<struct (float32 * RenderCmd3D)> with
+        member _.Compare(struct (da, _), struct (db, _)) =
+          compare db da
+    }
+
   // Renderer-lifetime pipeline; Draw just executes.
   let pipeline: FrameOrchestration.IRenderPipeline =
     { new FrameOrchestration.IRenderPipeline with
@@ -876,19 +860,10 @@ type Batch3DRenderer<'Model>
 
         member _.SortOpaque() =
           if config.SortOpaqueFrontToBack then
-            opaque.Sort
-              { new Collections.Generic.IComparer<struct (float32 * RenderCmd3D)> with
-                  member _.Compare(struct (da, _), struct (db, _)) =
-                    compare da db
-              }
+            opaque.Sort opaqueComparer
 
         member _.SortTransparent() =
-          transparent.Sort
-            { new Collections.Generic.IComparer<struct (float32 * RenderCmd3D)> with
-                member _.Compare(struct (da, _), struct (db, _)) =
-                  // Descending: far -> near
-                  compare db da
-            }
+          transparent.Sort transparentComparer
 
         member _.DrawMesh(cmd) =
           // Uses latest View/Projection from renderState.
@@ -1044,7 +1019,7 @@ type Draw3DBuilder = {
 /// <summary>Functions for building and submitting 3D draw commands.</summary>
 module Draw3D =
   /// <summary>Starts a mesh drawing command.</summary>
-  let mesh model transform = {
+  let inline mesh model transform = {
     Model = model
     Transform = transform
     Color = ValueNone
@@ -1053,25 +1028,25 @@ module Draw3D =
     Setup = ValueNone
   }
 
-  let meshTransparent model transform = {
+  let inline meshTransparent model transform = {
     mesh model transform with
         Pass = Transparent
   }
 
-  let inPass pass (b: Draw3DBuilder) = { b with Pass = pass }
+  let inline inPass pass (b: Draw3DBuilder) = { b with Pass = pass }
 
-  let withColor col (b: Draw3DBuilder) = { b with Color = ValueSome col }
-  let withTexture tex (b: Draw3DBuilder) = { b with Texture = ValueSome tex }
+  let inline withColor col (b: Draw3DBuilder) = { b with Color = ValueSome col }
+  let inline withTexture tex (b: Draw3DBuilder) = { b with Texture = ValueSome tex }
 
   /// <summary>Configure the effect for this draw command.</summary>
-  let withEffect (setup: EffectSetup) (b: Draw3DBuilder) = {
+  let inline withEffect (setup: EffectSetup) (b: Draw3DBuilder) = {
     b with
         Setup = ValueSome setup
   }
 
   /// <summary>Helper: configure a standard <see cref="T:Microsoft.Xna.Framework.Graphics.BasicEffect"/> with typical parameters (World/View/Proj).</summary>
   /// <remarks>This restores the default behavior of previous versions.</remarks>
-  let withBasicEffect(b: Draw3DBuilder) =
+  let inline withBasicEffect(b: Draw3DBuilder) =
     b
     |> withEffect(fun effect ctx ->
       match effect with
@@ -1083,22 +1058,22 @@ module Draw3D =
       | _ -> ())
 
   /// <summary>Submits the draw command to the renderer's buffer.</summary>
-  let submit (buffer: RenderBuffer<RenderCmd3D>) (b: Draw3DBuilder) =
+  let inline submit (buffer: RenderBuffer<RenderCmd3D>) (b: Draw3DBuilder) =
     buffer.Add(
       (),
       DrawMesh(b.Pass, b.Model, b.Transform, b.Color, b.Texture, b.Setup)
     )
 
   /// <summary>Submits a camera change command to the buffer.</summary>
-  let camera (cam: Camera) (buffer: RenderBuffer<RenderCmd3D>) =
+  let inline camera (cam: Camera) (buffer: RenderBuffer<RenderCmd3D>) =
     buffer.Add((), SetCamera cam)
 
   /// <summary>Set viewport for multi-camera rendering (split-screen, minimaps, etc).</summary>
-  let viewport (vp: Viewport) (buffer: RenderBuffer<RenderCmd3D>) =
+  let inline viewport (vp: Viewport) (buffer: RenderBuffer<RenderCmd3D>) =
     buffer.Add((), SetViewport vp)
 
   /// <summary>Clear color and/or depth buffer. Use between cameras in multi-camera setups.</summary>
-  let clear
+  let inline clear
     (color: Color voption)
     (clearDepth: bool)
     (buffer: RenderBuffer<RenderCmd3D>)
@@ -1106,14 +1081,14 @@ module Draw3D =
     buffer.Add((), ClearTarget(color, clearDepth))
 
   /// <summary>Submits a custom drawing command to the buffer.</summary>
-  let custom
+  let inline custom
     (draw: GameContext * Matrix * Matrix -> unit)
     (buffer: RenderBuffer<RenderCmd3D>)
     =
     buffer.Add((), DrawCustom draw)
 
   /// <summary>Submits a skinned model draw command to the buffer.</summary>
-  let skinned
+  let inline skinned
     (pass: RenderPass)
     (model: Model)
     (transform: Matrix)
@@ -1133,7 +1108,7 @@ module Draw3D =
       )
     )
 
-  let skinnedWithColor
+  let inline skinnedWithColor
     (pass: RenderPass)
     (color: Color)
     (model: Model)
@@ -1157,7 +1132,7 @@ module Draw3D =
   // --- Sprite3D helpers (90% path) ---
 
   /// <summary>Create a quad with sensible defaults (white tint, full UVs).</summary>
-  let quad3D (center: Vector3) (right: Vector3) (up: Vector3) : Quad3D = {
+  let inline quad3D (center: Vector3) (right: Vector3) (up: Vector3) : Quad3D = {
     Center = center
     Right = right
     Up = up
@@ -1166,22 +1141,22 @@ module Draw3D =
   }
 
   /// <summary>Create a quad on the XZ plane (useful for ground decals).</summary>
-  let quadOnXZ (center: Vector3) (size: Vector2) : Quad3D =
+  let inline quadOnXZ (center: Vector3) (size: Vector2) : Quad3D =
     let right = Vector3(size.X * 0.5f, 0.0f, 0.0f)
     let up = Vector3(0.0f, 0.0f, size.Y * 0.5f)
     quad3D center right up
 
   /// <summary>Create a quad on the XY plane (useful for in-world UI).</summary>
-  let quadOnXY (center: Vector3) (size: Vector2) : Quad3D =
+  let inline quadOnXY (center: Vector3) (size: Vector2) : Quad3D =
     let right = Vector3(size.X * 0.5f, 0.0f, 0.0f)
     let up = Vector3(0.0f, size.Y * 0.5f, 0.0f)
     quad3D center right up
 
-  let withQuadColor (color: Color) (q: Quad3D) = { q with Color = color }
-  let withQuadUv (uv: UvRect) (q: Quad3D) = { q with Uv = uv }
+  let inline withQuadColor (color: Color) (q: Quad3D) = { q with Color = color }
+  let inline withQuadUv (uv: UvRect) (q: Quad3D) = { q with Uv = uv }
 
   /// <summary>Create a billboard with sensible defaults (white tint, full UVs, spherical).</summary>
-  let billboard3D (position: Vector3) (size: Vector2) : Billboard3D = {
+  let inline billboard3D (position: Vector3) (size: Vector2) : Billboard3D = {
     Position = position
     Size = size
     Rotation = 0.0f
@@ -1190,25 +1165,25 @@ module Draw3D =
     Mode = Spherical
   }
 
-  let withBillboardRotation (rotation: float32) (b: Billboard3D) = {
+  let inline withBillboardRotation (rotation: float32) (b: Billboard3D) = {
     b with
         Rotation = rotation
   }
 
-  let withBillboardColor (color: Color) (b: Billboard3D) = {
+  let inline withBillboardColor (color: Color) (b: Billboard3D) = {
     b with
         Color = color
   }
 
-  let withBillboardUv (uv: UvRect) (b: Billboard3D) = { b with Uv = uv }
+  let inline withBillboardUv (uv: UvRect) (b: Billboard3D) = { b with Uv = uv }
 
-  let cylindrical (upAxis: Vector3) (b: Billboard3D) = {
+  let inline cylindrical (upAxis: Vector3) (b: Billboard3D) = {
     b with
         Mode = Cylindrical upAxis
   }
 
   /// <summary>Draw a textured quad using the built-in unlit Sprite3D pipeline.</summary>
-  let quad
+  let inline quad
     (texture: Texture2D)
     (quad: Quad3D)
     (buffer: RenderBuffer<RenderCmd3D>)
@@ -1223,7 +1198,7 @@ module Draw3D =
     )
 
   /// <summary>Draw a textured quad (transparent pass) using the built-in unlit Sprite3D pipeline.</summary>
-  let quadTransparent
+  let inline quadTransparent
     (texture: Texture2D)
     (quad: Quad3D)
     (buffer: RenderBuffer<RenderCmd3D>)
@@ -1238,7 +1213,7 @@ module Draw3D =
     )
 
   /// <summary>Draw a camera-facing billboard using the built-in unlit Sprite3D pipeline.</summary>
-  let billboard
+  let inline billboard
     (texture: Texture2D)
     (billboard: Billboard3D)
     (buffer: RenderBuffer<RenderCmd3D>)
@@ -1253,7 +1228,7 @@ module Draw3D =
     )
 
   /// <summary>Draw a billboard in the opaque pass using the built-in unlit Sprite3D pipeline.</summary>
-  let billboardOpaque
+  let inline billboardOpaque
     (texture: Texture2D)
     (billboard: Billboard3D)
     (buffer: RenderBuffer<RenderCmd3D>)
@@ -1270,7 +1245,7 @@ module Draw3D =
   // --- Effect-driven helpers (advanced path) ---
 
   /// <summary>Draw a quad using a custom effect. Setup is invoked for this command (View/Proj provided).</summary>
-  let quadEffect
+  let inline quadEffect
     (pass: RenderPass)
     (effect: Effect)
     (setup: EffectSetup voption)
@@ -1288,7 +1263,7 @@ module Draw3D =
     )
 
   /// <summary>Draw a billboard using a custom effect. Setup is invoked for this command (View/Proj provided).</summary>
-  let billboardEffect
+  let inline billboardEffect
     (pass: RenderPass)
     (effect: Effect)
     (setup: EffectSetup voption)
@@ -1308,7 +1283,7 @@ module Draw3D =
   // --- Line helpers ---
 
   /// <summary>Draw a single line segment using the built-in unlit line pipeline.</summary>
-  let line
+  let inline line
     (p1: Vector3)
     (p2: Vector3)
     (color: Color)
@@ -1317,7 +1292,7 @@ module Draw3D =
     buffer.Add((), DrawLine(struct (p1, p2, color), Opaque))
 
   /// <summary>Draw a single line segment (transparent pass) using the built-in unlit line pipeline.</summary>
-  let lineTransparent
+  let inline lineTransparent
     (p1: Vector3)
     (p2: Vector3)
     (color: Color)
@@ -1326,7 +1301,7 @@ module Draw3D =
     buffer.Add((), DrawLine(struct (p1, p2, color), Transparent))
 
   /// <summary>Draw multiple line segments using the built-in unlit line pipeline.</summary>
-  let lines
+  let inline lines
     (verts: VertexPositionColor[])
     (lineCount: int)
     (buffer: RenderBuffer<RenderCmd3D>)
@@ -1334,7 +1309,7 @@ module Draw3D =
     buffer.Add((), DrawLines(verts, lineCount, Opaque))
 
   /// <summary>Draw multiple line segments (transparent pass) using the built-in unlit line pipeline.</summary>
-  let linesTransparent
+  let inline linesTransparent
     (verts: VertexPositionColor[])
     (lineCount: int)
     (buffer: RenderBuffer<RenderCmd3D>)
@@ -1342,7 +1317,7 @@ module Draw3D =
     buffer.Add((), DrawLines(verts, lineCount, Transparent))
 
   /// <summary>Draw multiple line segments using a custom effect.</summary>
-  let linesEffect
+  let inline linesEffect
     (pass: RenderPass)
     (effect: Effect)
     (setup: EffectSetup voption)
