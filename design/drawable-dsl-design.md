@@ -183,8 +183,8 @@ type RenderBuilder(buffer: RenderBuffer<Drawable>) =
         for item in source do body item
 
     /// Nested drawable
-    [<CustomOperation("entity")>]
-    member inline _.Entity((), [<InlineIfLambda>] configure: DrawableBuilder -> unit) =
+    [<CustomOperation("draw")>]
+    member inline _.Draw((), [<InlineIfLambda>] configure: DrawableBuilder -> unit) =
         let builder = DrawableBuilder(buffer)
         configure builder
 
@@ -201,7 +201,7 @@ let render (buffer: RenderBuffer<Drawable>) = RenderBuilder(buffer)
 ```fsharp
 let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<Drawable>) =
     render buffer {
-        entity {
+        draw {
             mesh cubeMesh
             at (10f, 0f, 5f)
         }
@@ -212,7 +212,7 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<Drawable>) =
 
 ```fsharp
 render buffer {
-    entity {
+    draw {
         mesh characterMesh
         at playerPosition
         rotatedBy playerRotation
@@ -229,13 +229,13 @@ let characterTransform = Matrix.CreateWorld(charPos, charForward, Vector3.Up)
 
 render buffer {
     // Character
-    entity {
+    draw {
         mesh characterMesh
         withTransform characterTransform
     }
 
     // Weapon relative to character
-    entity {
+    draw {
         mesh swordMesh
         relativeTo characterTransform
         offset (Vector3(0.5f, 1.2f, 0f))  // Local offset from hand
@@ -248,7 +248,7 @@ render buffer {
 
 ```fsharp
 render buffer {
-    entity {
+    draw {
         mesh turretMesh
         at turretPosition
         lookAt targetPosition  // Computes rotation to face target
@@ -265,7 +265,7 @@ let childLocal = Matrix.CreateScale(0.5f) * Matrix.CreateTranslation(Vector3(1f,
 let childWorld = childLocal * parentWorld
 
 render buffer {
-    entity {
+    draw {
         mesh childMesh
         withTransform childWorld
     }
@@ -280,7 +280,7 @@ render buffer {
 render buffer {
     // Render many similar entities
     for entity in model.Entities do
-        entity {
+        draw {
             mesh entity.Mesh
             at entity.Position
             rotatedBy entity.Rotation
@@ -289,7 +289,7 @@ render buffer {
 
     // Instanced trees - same mesh, different transforms
     for tree in model.Trees do
-        entity {
+        draw {
             mesh treeMesh
             at tree.Position
             scaledBy tree.Scale
@@ -335,7 +335,7 @@ render buffer {
 let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<Drawable>) =
     render buffer {
         for entity in model.Entities do
-            entity {
+            draw {
                 mesh entity.Mesh
                 at entity.Position
                 rotatedBy entity.Rotation
@@ -401,12 +401,12 @@ type RenderBuilder(buffer: RenderBuffer<Drawable>) =
 
 ```fsharp
 // Tier 1: Nothing - pipeline default
-render buffer { entity { mesh cube; at origin } }
+render buffer { draw { mesh cube; at origin } }
 
 // Tier 2: Preset
 render buffer {
     withLighting Lighting.defaultSunlight
-    entity { mesh cube; at origin }
+    draw { mesh cube; at origin }
 }
 
 // Tier 3: Custom
@@ -415,7 +415,7 @@ render buffer {
         AmbientColor = Color(0.1f, 0.1f, 0.15f)
         Lights = [| Light.Directional sunConfig |]
     }
-    entity { mesh cube; at origin }
+    draw { mesh cube; at origin }
 }
 ```
 
@@ -433,14 +433,14 @@ Shadows are **pipeline-level infrastructure**, not DSL content:
 
 ```fsharp
 // Per-drawable shadow flags
-entity {
+draw {
     mesh treeMesh
     at treePosition
     withMaterialFlags (CastsShadow ||| ReceivesShadow)
 }
 
 // Non-shadow-casting object (e.g., grass)
-entity {
+draw {
     mesh grassMesh
     at grassPosition
     withMaterialFlags ReceivesShadow  // Only receives, doesn't cast
@@ -454,7 +454,7 @@ entity {
 ### Custom Effect (per-drawable shader override)
 
 ```fsharp
-entity {
+draw {
     mesh waterMesh
     at waterPosition
     withEffect (fun effect ctx ->
@@ -468,7 +468,7 @@ entity {
 
 ```fsharp
 render buffer {
-    entity { mesh terrain; at origin }
+    draw { mesh terrain; at origin }
 
     // Direct GraphicsDevice access
     custom (fun device camera ->
@@ -483,7 +483,7 @@ render buffer {
 
 ```fsharp
 render buffer {
-    entity { mesh cube; at origin }
+    draw { mesh cube; at origin }
 
     // Existing RenderCmd3D for sprites, lines, etc.
     raw (DrawLine(p1, p2, Color.Red, Opaque))

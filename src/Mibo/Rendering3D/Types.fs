@@ -83,18 +83,23 @@ type Mesh = {
 }
 
 module Mesh =
-  /// Create a Mesh from MonoGame Model's first mesh part
-  let fromModelMeshPart(part: ModelMeshPart) : Mesh =
-    let vb = part.VertexBuffer
-    let ib = part.IndexBuffer
-    // Approximate bounding - caller should provide accurate bounds
-    {
-      VertexBuffer = vb
-      IndexBuffer = ib
-      IndexCount = part.PrimitiveCount * 3
-      BoundingBox = BoundingBox(Vector3(-1f, -1f, -1f), Vector3(1f, 1f, 1f))
-      BoundingSphere = BoundingSphere(Vector3.Zero, 1f)
-    }
+  /// Create a Mesh from a ModelMesh (uses ModelMesh.BoundingSphere for correct culling)
+  let fromModelMesh(modelMesh: ModelMesh) : Mesh seq =
+    modelMesh.MeshParts
+    |> Seq.map(fun part ->
+      let bounds = modelMesh.BoundingSphere
+
+      {
+        VertexBuffer = part.VertexBuffer
+        IndexBuffer = part.IndexBuffer
+        IndexCount = part.PrimitiveCount * 3
+        BoundingBox = BoundingBox.CreateFromSphere(bounds)
+        BoundingSphere = bounds
+      })
+
+  /// Create all meshes from a Model
+  let fromModel(model: Model) : Mesh seq =
+    model.Meshes |> Seq.collect fromModelMesh
 
   /// Create a Mesh with explicit bounds
   let create
@@ -260,6 +265,8 @@ module Drawable =
 type RenderCommand =
   /// Set camera for subsequent draws
   | SetCamera of camera: Camera
+  /// Set lighting for subsequent draws (overrides config default)
+  | SetLighting of lighting: LightingState
   /// Set viewport region (for split-screen, minimap, etc.)
   | SetViewport of viewport: Viewport
   /// Clear the current render target
