@@ -18,7 +18,7 @@ type IRenderPipeline =
 
 /// Pipeline state container
 type internal PipelineState = {
-  Config: PipelineConfig
+  mutable Config: PipelineConfig
   mutable Device: GraphicsDevice
   mutable RtPool: IRenderTargetPool
   mutable BasicEffect: BasicEffect
@@ -128,31 +128,36 @@ module internal Shared =
     effect.View <- camera.View
     effect.Projection <- camera.Projection
 
-  let renderDrawableWithEffect (state: PipelineState) (drawable: Drawable) (effect: Effect) =
+  let renderDrawableWithEffect
+    (state: PipelineState)
+    (drawable: Drawable)
+    (effect: Effect)
+    =
     let mesh = drawable.Mesh
     state.Device.SetVertexBuffer(mesh.VertexBuffer)
     state.Device.Indices <- mesh.IndexBuffer
 
     let setParam (name: string) (value: obj) =
-        let p = effect.Parameters.[name]
-        if not (isNull p) then
-            match value with
-            | :? Matrix as m -> p.SetValue(m)
-            | :? Vector3 as v -> p.SetValue(v)
-            | :? Vector4 as v -> p.SetValue(v)
-            | :? float32 as f -> p.SetValue(f)
-            | :? Texture2D as t -> p.SetValue(t)
-            | :? Color as c -> p.SetValue(c.ToVector4())
-            | _ -> ()
+      let p = effect.Parameters.[name]
+
+      if not(isNull p) then
+        match value with
+        | :? Matrix as m -> p.SetValue(m)
+        | :? Vector3 as v -> p.SetValue(v)
+        | :? Vector4 as v -> p.SetValue(v)
+        | :? float32 as f -> p.SetValue(f)
+        | :? Texture2D as t -> p.SetValue(t)
+        | :? Color as c -> p.SetValue(c.ToVector4())
+        | _ -> ()
 
     setParam "World" drawable.Transform
     setParam "View" state.CurrentCamera.View
     setParam "Projection" state.CurrentCamera.Projection
-    
+
     setParam "AlbedoColor" drawable.Material.PBR.AlbedoColor
     setParam "Metallic" drawable.Material.PBR.Metallic
     setParam "Roughness" drawable.Material.PBR.Roughness
-    
+
     match drawable.Material.PBR.AlbedoMap with
     | ValueSome tex -> setParam "AlbedoMap" tex
     | ValueNone -> ()
@@ -163,6 +168,7 @@ module internal Shared =
 
     for pass in effect.CurrentTechnique.Passes do
       pass.Apply()
+
       state.Device.DrawIndexedPrimitives(
         PrimitiveType.TriangleList,
         0,
@@ -170,49 +176,64 @@ module internal Shared =
         mesh.IndexCount / 3
       )
 
+  let setTarget (device: GraphicsDevice) (target: RenderTarget2D) =
+    let current = device.GetRenderTargets()
+
+    if isNull(box target) then
+      if current.Length > 0 then
+        device.SetRenderTarget(null)
+    elif
+      current.Length <> 1 || current.[0].RenderTarget <> (target :> Texture)
+    then
+      device.SetRenderTarget(target)
+
   let renderDrawableFallback (state: PipelineState) (drawable: Drawable) =
     let mesh = drawable.Mesh
     let effect = mesh.Effect
-    
+
     state.Device.SetVertexBuffer(mesh.VertexBuffer)
     state.Device.Indices <- mesh.IndexBuffer
 
     // Set standard matrices
     match box effect with
     | :? IEffectMatrices as em ->
-        em.World <- drawable.Transform
-        em.View <- state.CurrentCamera.View
-        em.Projection <- state.CurrentCamera.Projection
+      em.World <- drawable.Transform
+      em.View <- state.CurrentCamera.View
+      em.Projection <- state.CurrentCamera.Projection
     | _ ->
-        // Try to set parameters by name if not implementing IEffectMatrices
-        let set (name: string) (m: Matrix) =
-            let p = effect.Parameters.[name]
-            if not (isNull p) then p.SetValue(m)
-        set "World" drawable.Transform
-        set "View" state.CurrentCamera.View
-        set "Projection" state.CurrentCamera.Projection
+      // Try to set parameters by name if not implementing IEffectMatrices
+      let set (name: string) (m: Matrix) =
+        let p = effect.Parameters.[name]
+
+        if not(isNull p) then
+          p.SetValue(m)
+
+      set "World" drawable.Transform
+      set "View" state.CurrentCamera.View
+      set "Projection" state.CurrentCamera.Projection
 
     // Apply Material overrides ONLY if they are not default
     match effect with
     | :? BasicEffect as be ->
-        // Lighting
-        configureBasicEffectLighting be state.CurrentLighting
-        
-        // Color override
-        if drawable.Material.PBR.AlbedoColor <> Color.White then
-            be.DiffuseColor <- drawable.Material.PBR.AlbedoColor.ToVector3()
-            be.Alpha <- float32 drawable.Material.PBR.AlbedoColor.A / 255f
-        
-        // Texture override
-        match drawable.Material.PBR.AlbedoMap with
-        | ValueSome tex -> 
-            be.TextureEnabled <- true
-            be.Texture <- tex
-        | ValueNone -> ()
+      // Lighting
+      configureBasicEffectLighting be state.CurrentLighting
+
+      // Color override
+      if drawable.Material.PBR.AlbedoColor <> Color.White then
+        be.DiffuseColor <- drawable.Material.PBR.AlbedoColor.ToVector3()
+        be.Alpha <- float32 drawable.Material.PBR.AlbedoColor.A / 255f
+
+      // Texture override
+      match drawable.Material.PBR.AlbedoMap with
+      | ValueSome tex ->
+        be.TextureEnabled <- true
+        be.Texture <- tex
+      | ValueNone -> ()
     | _ -> ()
 
     for pass in effect.CurrentTechnique.Passes do
       pass.Apply()
+
       state.Device.DrawIndexedPrimitives(
         PrimitiveType.TriangleList,
         0,
@@ -245,101 +266,147 @@ module internal Shared =
         mesh.IndexCount / 3
       )
 
-  let renderShadowPass (state: PipelineState) =
+  let renderShadowPass(state: PipelineState) =
     match state.CustomShaders.TryGetValue(ShaderBase.ShadowCaster) with
     | true, shadowEffect ->
-        let frustum = BoundingFrustum(state.CurrentCamera.View * state.CurrentCamera.Projection)
-        let corners = frustum.GetCorners()
-        
-        let mutable shadowMapIndex = 0
-        for light in state.CurrentLighting.Lights do
-            match light with
-            | Directional dl when ValueOption.isSome dl.Shadow && shadowMapIndex < state.ShadowMaps.Count ->
-                let shadowMap = state.ShadowMaps.[shadowMapIndex]
-                state.Device.SetRenderTarget(shadowMap)
-                state.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, Color.White, 1.0f, 0)
+      let frustum =
+        BoundingFrustum(
+          state.CurrentCamera.View * state.CurrentCamera.Projection
+        )
 
-                // Compute Light View fitting the camera frustum
-                let lightRotation = Matrix.CreateLookAt(Vector3.Zero, dl.Direction, Vector3.Up)
-                let lightView = Matrix.CreateLookAt(Vector3.Zero, dl.Direction, Vector3.Up)
-                
-                // Transform frustum corners to light space to find bounds
-                let mutable minX, minY, minZ = infinityf, infinityf, infinityf
-                let mutable maxX, maxY, maxZ = -infinityf, -infinityf, -infinityf
-                
-                for i in 0 .. corners.Length - 1 do
-                    let lp = Vector3.Transform(corners.[i], lightView)
-                    minX <- min minX lp.X
-                    minY <- min minY lp.Y
-                    minZ <- min minZ lp.Z
-                    maxX <- max maxX lp.X
-                    maxY <- max maxY lp.Y
-                    maxZ <- max maxZ lp.Z
+      let corners = frustum.GetCorners()
 
-                // Add some padding and depth room
-                let lightProj = Matrix.CreateOrthographicOffCenter(minX, maxX, minY, maxY, minZ - 50.0f, maxZ)
+      let mutable shadowMapIndex = 0
 
-                for i in 0 .. state.OpaqueDrawables.Count - 1 do
-                    let struct (_, drawable) = state.OpaqueDrawables.[i]
-                    if drawable.Material.Flags.HasFlag(MaterialFlags.CastsShadow) then
-                        renderDrawableShadow state drawable shadowEffect lightView lightProj
-                
-                shadowMapIndex <- shadowMapIndex + 1
-            | _ -> ()
-        
-        match state.MainSceneTarget with
-        | ValueSome rt -> state.Device.SetRenderTarget(rt)
-        | ValueNone -> state.Device.SetRenderTarget(null)
+      for light in state.CurrentLighting.Lights do
+        match light with
+        | Directional dl when
+          ValueOption.isSome dl.Shadow
+          && shadowMapIndex < state.ShadowMaps.Count
+          ->
+          let shadowMap = state.ShadowMaps.[shadowMapIndex]
+          state.Device.SetRenderTarget(shadowMap)
+
+          state.Device.Clear(
+            ClearOptions.Target ||| ClearOptions.DepthBuffer,
+            Color.White,
+            1.0f,
+            0
+          )
+
+          // Compute Light View fitting the camera frustum
+          let lightRotation =
+            Matrix.CreateLookAt(Vector3.Zero, dl.Direction, Vector3.Up)
+
+          let lightView =
+            Matrix.CreateLookAt(Vector3.Zero, dl.Direction, Vector3.Up)
+
+          // Transform frustum corners to light space to find bounds
+          let mutable minX, minY, minZ = infinityf, infinityf, infinityf
+          let mutable maxX, maxY, maxZ = -infinityf, -infinityf, -infinityf
+
+          for i in 0 .. corners.Length - 1 do
+            let lp = Vector3.Transform(corners.[i], lightView)
+            minX <- min minX lp.X
+            minY <- min minY lp.Y
+            minZ <- min minZ lp.Z
+            maxX <- max maxX lp.X
+            maxY <- max maxY lp.Y
+            maxZ <- max maxZ lp.Z
+
+          // Add some padding and depth room
+          let lightProj =
+            Matrix.CreateOrthographicOffCenter(
+              minX,
+              maxX,
+              minY,
+              maxY,
+              minZ - 50.0f,
+              maxZ
+            )
+
+          for i in 0 .. state.OpaqueDrawables.Count - 1 do
+            let struct (_, drawable) = state.OpaqueDrawables.[i]
+
+            if drawable.Material.Flags.HasFlag(MaterialFlags.CastsShadow) then
+              renderDrawableShadow
+                state
+                drawable
+                shadowEffect
+                lightView
+                lightProj
+
+          shadowMapIndex <- shadowMapIndex + 1
+        | _ -> ()
+
+      match state.MainSceneTarget with
+      | ValueSome rt -> setTarget state.Device rt
+      | ValueNone -> setTarget state.Device null
     | false, _ -> ()
 
   let renderFullScreenQuad (device: GraphicsDevice) (effect: Effect) =
     let vertices = [|
-        VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
-        VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
-        VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
-        VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
+      VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
+      VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
+      VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
+      VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
     |]
+
     for pass in effect.CurrentTechnique.Passes do
-        pass.Apply()
-        device.DrawUserPrimitives(PrimitiveType.TriangleStrip, vertices, 0, 2)
+      pass.Apply()
+      device.DrawUserPrimitives(PrimitiveType.TriangleStrip, vertices, 0, 2)
 
   let renderPostProcess (state: PipelineState) (sceneTarget: RenderTarget2D) =
     match state.Config.PostProcess with
     | ValueSome pp ->
-        // 1. Bloom Pass (Structural)
-        pp.Bloom |> ValueOption.iter (fun bloomCfg ->
-            match state.CustomShaders.TryGetValue(ShaderBase.Bloom) with
-            | true, bloomEffect ->
-                if not (isNull bloomEffect.Parameters.["Threshold"]) then bloomEffect.Parameters.["Threshold"].SetValue(bloomCfg.Threshold)
-                if not (isNull bloomEffect.Parameters.["Intensity"]) then bloomEffect.Parameters.["Intensity"].SetValue(bloomCfg.Intensity)
-                // Shared.renderFullScreenQuad state.Device bloomEffect
-                ()
-            | false, _ -> ()
-        )
+      // 1. Bloom Pass (Structural)
+      pp.Bloom
+      |> ValueOption.iter(fun bloomCfg ->
+        match state.CustomShaders.TryGetValue(ShaderBase.Bloom) with
+        | true, bloomEffect ->
+          if not(isNull bloomEffect.Parameters.["Threshold"]) then
+            bloomEffect.Parameters.["Threshold"].SetValue(bloomCfg.Threshold)
 
-        // 2. Final Post-Process (ToneMapping, Gamma, SSAO composite)
-        match state.CustomShaders.TryGetValue(ShaderBase.PostProcess) with
-        | true, ppEffect ->
-            state.Device.SetRenderTarget(null) // Back to backbuffer
-            if not (isNull ppEffect.Parameters.["SceneTexture"]) then ppEffect.Parameters.["SceneTexture"].SetValue(sceneTarget)
-            
-            let tmMode =
-                match pp.ToneMapping with
-                | ToneMappingConfig.None -> 0
-                | Reinhard -> 1
-                | ACES -> 2
-                | Filmic -> 3
-                | AgX -> 4
-            
-            if not (isNull ppEffect.Parameters.["ToneMapping"]) then ppEffect.Parameters.["ToneMapping"].SetValue(tmMode)
-            renderFullScreenQuad state.Device ppEffect
-        | false, _ ->
-            state.Device.SetRenderTarget(null)
-            if not (isNull (box state.SpriteBatch)) then
-                state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
-                state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-                state.SpriteBatch.Draw(sceneTarget, state.Device.Viewport.Bounds, Color.White)
-                state.SpriteBatch.End()
+          if not(isNull bloomEffect.Parameters.["Intensity"]) then
+            bloomEffect.Parameters.["Intensity"].SetValue(bloomCfg.Intensity)
+          // Shared.renderFullScreenQuad state.Device bloomEffect
+          ()
+        | false, _ -> ())
+
+      // 2. Final Post-Process (ToneMapping, Gamma, SSAO composite)
+      let tmMode =
+        match pp.ToneMapping with
+        | ToneMappingConfig.None -> 0
+        | Reinhard -> 1
+        | ACES -> 2
+        | Filmic -> 3
+        | AgX -> 4
+
+      match state.CustomShaders.TryGetValue(ShaderBase.PostProcess) with
+      | true, ppEffect ->
+        setTarget state.Device null // Back to backbuffer
+
+        if not(isNull ppEffect.Parameters.["SceneTexture"]) then
+          ppEffect.Parameters.["SceneTexture"].SetValue(sceneTarget)
+
+        if not(isNull ppEffect.Parameters.["ToneMapping"]) then
+          ppEffect.Parameters.["ToneMapping"].SetValue(tmMode)
+
+        renderFullScreenQuad state.Device ppEffect
+      | false, _ ->
+        setTarget state.Device null
+
+        if not(isNull(box state.SpriteBatch)) then
+          state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
+
+          state.SpriteBatch.Draw(
+            sceneTarget,
+            state.Device.Viewport.Bounds,
+            Color.White
+          )
+
+          state.SpriteBatch.End()
     | ValueNone -> ()
 
   /// Batch a drawable into the appropriate list (opaque or transparent)
@@ -391,10 +458,10 @@ module internal Forward =
       // Render opaque first (with depth write)
       state.Device.DepthStencilState <- DepthStencilState.Default
 
-      let draw (d: Drawable) =
-          match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
-          | true, effect -> Shared.renderDrawableWithEffect state d effect
-          | false, _ -> Shared.renderDrawableFallback state d
+      let draw(d: Drawable) =
+        match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
+        | true, effect -> Shared.renderDrawableWithEffect state d effect
+        | false, _ -> Shared.renderDrawableFallback state d
 
       for i in 0 .. state.OpaqueDrawables.Count - 1 do
         let struct (_, drawable) = state.OpaqueDrawables.[i]
@@ -467,6 +534,9 @@ module internal Forward =
     | SetCamera camera -> processSetCamera state camera
     | SetLighting lighting -> processSetLighting state lighting
     | SetViewport viewport -> processSetViewport state viewport
+    | SetMode mode -> 
+      flushDrawBatch state
+      state.Config <- { state.Config with Mode = mode }
     | ClearTarget(colorOpt, clearDepth) ->
       processClearTarget state colorOpt clearDepth
     | Draw drawable -> Shared.batchDrawable state drawable
@@ -482,19 +552,22 @@ module internal Forward =
 
     // Acquire scene target if needed for post-processing
     let sceneTarget =
-        match state.Config.PostProcess with
-        | ValueSome _ when not (isNull (box state.RtPool)) ->
-            let spec = { 
-                Width = state.Device.PresentationParameters.BackBufferWidth
-                Height = state.Device.PresentationParameters.BackBufferHeight
-                Format = SurfaceFormat.Color
-                DepthFormat = DepthFormat.Depth24 
-            }
-            let rt = state.RtPool.Acquire spec
-            state.Device.SetRenderTarget(rt)
-            state.MainSceneTarget <- ValueSome rt
-            ValueSome rt
-        | _ -> ValueNone
+      match state.Config.PostProcess with
+      | ValueSome _ when not(isNull(box state.RtPool)) ->
+        let spec = {
+          Width = state.Device.PresentationParameters.BackBufferWidth
+          Height = state.Device.PresentationParameters.BackBufferHeight
+          Format = SurfaceFormat.Color
+          DepthFormat = DepthFormat.Depth24
+        }
+
+        let rt = state.RtPool.Acquire spec
+        Shared.setTarget state.Device rt
+        state.MainSceneTarget <- ValueSome rt
+        ValueSome rt
+
+        
+      | _ -> ValueNone
 
     // Process all commands
     for i in 0 .. buffer.Count - 1 do
@@ -503,12 +576,12 @@ module internal Forward =
 
     // Flush any remaining draws
     flushDrawBatch state
-    
-    // Post-process
-    sceneTarget |> ValueOption.iter (fun rt -> Shared.renderPostProcess state rt)
 
-    if not (isNull (box state.RtPool)) then
-        state.RtPool.ReleaseAll()
+    // Post-process
+    sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+
+    if not(isNull(box state.RtPool)) then
+      state.RtPool.ReleaseAll()
 
 // ============================================================================
 // ForwardPlus - Forward+ rendering
@@ -525,67 +598,85 @@ module internal ForwardPlus =
   }
 
   /// Projects a sphere to screen-space AABB
-  let private projectSphere (camera: Mibo.Rendering.Graphics3D.Camera) (viewport: Viewport) (center: Vector3) (radius: float32) =
+  let private projectSphere
+    (camera: Mibo.Rendering.Graphics3D.Camera)
+    (viewport: Viewport)
+    (center: Vector3)
+    (radius: float32)
+    =
     let viewPos = Vector3.Transform(center, camera.View)
-    
+
     // Simplistic AABB projection: find min/max in view space and project
     // In a real impl, this would be more precise
     let points = [|
-        viewPos + Vector3(-radius, -radius, 0f)
-        viewPos + Vector3(radius, radius, 0f)
+      viewPos + Vector3(-radius, -radius, 0f)
+      viewPos + Vector3(radius, radius, 0f)
     |]
-    
+
     let mutable minX, minY = 1f, 1f
     let mutable maxX, maxY = -1f, -1f
-    
+
     for p in points do
-        let clip = Vector4.Transform(p, camera.Projection)
-        let ndc = Vector2(clip.X / clip.W, clip.Y / clip.W)
-        minX <- min minX ndc.X
-        minY <- min minY ndc.Y
-        maxX <- max ndc.X ndc.X
-        maxY <- max ndc.Y ndc.Y
-        
+      let clip = Vector4.Transform(p, camera.Projection)
+      let ndc = Vector2(clip.X / clip.W, clip.Y / clip.W)
+      minX <- min minX ndc.X
+      minY <- min minY ndc.Y
+      maxX <- max ndc.X ndc.X
+      maxY <- max ndc.Y ndc.Y
+
     // NDC [-1, 1] to Viewport [0, Size]
     let toScreen x size = (x + 1f) * 0.5f * float32 size
     let left = toScreen minX viewport.Width |> int |> max 0
     let right = toScreen maxX viewport.Width |> int |> min viewport.Width
     let top = toScreen -maxY viewport.Height |> int |> max 0 // Flip Y
     let bottom = toScreen -minY viewport.Height |> int |> min viewport.Height
-    
+
     struct (left, top, right, bottom)
 
-  let cullLights (state: PipelineState) : LightGrid =
-    let viewport = 
-        if isNull (box state.Device) then Viewport(0, 0, 1280, 720)
-        else state.Device.Viewport
+  let cullLights(state: PipelineState) : LightGrid =
+    let viewport =
+      if isNull(box state.Device) then
+        Viewport(0, 0, 1280, 720)
+      else
+        state.Device.Viewport
+
     let tilesX = (viewport.Width + TileSize - 1) / TileSize
     let tilesY = (viewport.Height + TileSize - 1) / TileSize
-    
+
     let tileData = Array.init (tilesX * tilesY) (fun _ -> ResizeArray<int>())
-    
+
     let lights = state.CurrentLighting.Lights
+
     for i = 0 to lights.Length - 1 do
-        match lights.[i] with
-        | Directional _ -> 
-            // Directional lights affect all tiles
-            for j = 0 to tileData.Length - 1 do tileData.[j].Add(i)
-        | Point pl ->
-            let struct (l, t, r, b) = projectSphere state.CurrentCamera viewport pl.Position pl.Range
-            for ty = t / TileSize to b / TileSize do
-                if ty >= 0 && ty < tilesY then
-                    for tx = l / TileSize to r / TileSize do
-                        if tx >= 0 && tx < tilesX then
-                            tileData.[ty * tilesX + tx].Add(i)
-        | Spot sl ->
-            let struct (l, t, r, b) = projectSphere state.CurrentCamera viewport sl.Position sl.Range
-            for ty = t / TileSize to b / TileSize do
-                if ty >= 0 && ty < tilesY then
-                    for tx = l / TileSize to r / TileSize do
-                        if tx >= 0 && tx < tilesX then
-                            tileData.[ty * tilesX + tx].Add(i)
-                            
-    { TilesX = tilesX; TilesY = tilesY; TileData = tileData |> Array.map (fun x -> x.ToArray()) }
+      match lights.[i] with
+      | Directional _ ->
+        // Directional lights affect all tiles
+        for j = 0 to tileData.Length - 1 do
+          tileData.[j].Add(i)
+      | Point pl ->
+        let struct (l, t, r, b) =
+          projectSphere state.CurrentCamera viewport pl.Position pl.Range
+
+        for ty = t / TileSize to b / TileSize do
+          if ty >= 0 && ty < tilesY then
+            for tx = l / TileSize to r / TileSize do
+              if tx >= 0 && tx < tilesX then
+                tileData.[ty * tilesX + tx].Add(i)
+      | Spot sl ->
+        let struct (l, t, r, b) =
+          projectSphere state.CurrentCamera viewport sl.Position sl.Range
+
+        for ty = t / TileSize to b / TileSize do
+          if ty >= 0 && ty < tilesY then
+            for tx = l / TileSize to r / TileSize do
+              if tx >= 0 && tx < tilesX then
+                tileData.[ty * tilesX + tx].Add(i)
+
+    {
+      TilesX = tilesX
+      TilesY = tilesY
+      TileData = tileData |> Array.map(fun x -> x.ToArray())
+    }
 
   let flushDrawBatch(state: PipelineState) =
     if
@@ -609,16 +700,19 @@ module internal ForwardPlus =
       // 3. Render Opaque
       state.Device.DepthStencilState <- DepthStencilState.Default
 
-      let draw (d: Drawable) =
-          match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
-          | true, effect -> 
-              // Bind tile data
-              if not (isNull effect.Parameters.["TilesX"]) then effect.Parameters.["TilesX"].SetValue(_lightGrid.TilesX)
-              if not (isNull effect.Parameters.["TilesY"]) then effect.Parameters.["TilesY"].SetValue(_lightGrid.TilesY)
-              // Note: TileData binding would typically involve a Texture2D or StructuredBuffer in HLSL
-              
-              Shared.renderDrawableWithEffect state d effect
-          | false, _ -> Shared.renderDrawableFallback state d
+      let draw(d: Drawable) =
+        match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
+        | true, effect ->
+          // Bind tile data
+          if not(isNull effect.Parameters.["TilesX"]) then
+            effect.Parameters.["TilesX"].SetValue(_lightGrid.TilesX)
+
+          if not(isNull effect.Parameters.["TilesY"]) then
+            effect.Parameters.["TilesY"].SetValue(_lightGrid.TilesY)
+          // Note: TileData binding would typically involve a Texture2D or StructuredBuffer in HLSL
+
+          Shared.renderDrawableWithEffect state d effect
+        | false, _ -> Shared.renderDrawableFallback state d
 
       for i in 0 .. state.OpaqueDrawables.Count - 1 do
         let struct (_, drawable) = state.OpaqueDrawables.[i]
@@ -654,6 +748,9 @@ module internal ForwardPlus =
     | SetLighting lighting ->
       state.CurrentLighting <- lighting
       Shared.configureBasicEffectLighting state.BasicEffect lighting
+    | SetMode mode ->
+      flushDrawBatch state
+      state.Config <- { state.Config with Mode = mode }
     | SetViewport viewport ->
       flushDrawBatch state
       state.Device.Viewport <- viewport
@@ -678,35 +775,39 @@ module internal ForwardPlus =
     (state: PipelineState)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
-    Shared.resetFrameState state
+    if not (state.CustomShaders.ContainsKey(ShaderBase.PBRForward)) then
+        Forward.render state buffer
+    else
+        Shared.resetFrameState state
 
-    // Acquire scene target if needed for post-processing
-    let sceneTarget =
-        match state.Config.PostProcess with
-        | ValueSome _ when not (isNull (box state.RtPool)) ->
-            let spec = { 
-                Width = state.Device.PresentationParameters.BackBufferWidth
-                Height = state.Device.PresentationParameters.BackBufferHeight
-                Format = SurfaceFormat.Color
-                DepthFormat = DepthFormat.Depth24 
+        // Acquire scene target if needed for post-processing
+        let sceneTarget =
+          match state.Config.PostProcess with
+          | ValueSome _ when not(isNull(box state.RtPool)) ->
+            let spec = {
+              Width = state.Device.PresentationParameters.BackBufferWidth
+              Height = state.Device.PresentationParameters.BackBufferHeight
+              Format = SurfaceFormat.Color
+              DepthFormat = DepthFormat.Depth24
             }
+
             let rt = state.RtPool.Acquire spec
-            state.Device.SetRenderTarget(rt)
+            Shared.setTarget state.Device rt
             state.MainSceneTarget <- ValueSome rt
             ValueSome rt
-        | _ -> ValueNone
+          | _ -> ValueNone
 
-    for i in 0 .. buffer.Count - 1 do
-      let struct (_, cmd) = buffer.[i]
-      processCommand state cmd
+        for i in 0 .. buffer.Count - 1 do
+          let struct (_, cmd) = buffer.[i]
+          processCommand state cmd
 
-    flushDrawBatch state
-    
-    // Post-process
-    sceneTarget |> ValueOption.iter (fun rt -> Shared.renderPostProcess state rt)
+        flushDrawBatch state
 
-    if not(isNull(box state.RtPool)) then
-      state.RtPool.ReleaseAll()
+        // Post-process
+        sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+
+        if not(isNull(box state.RtPool)) then
+          state.RtPool.ReleaseAll()
 
 // ============================================================================
 // Deferred - Deferred rendering implementation
@@ -735,7 +836,12 @@ module internal Deferred =
       }
 
       let rtAlbedo = state.RtPool.Acquire albedoSpec
-      let rtNormal = state.RtPool.Acquire { normalSpec with DepthFormat = DepthFormat.Depth24 }
+
+      let rtNormal =
+        state.RtPool.Acquire {
+          normalSpec with
+              DepthFormat = DepthFormat.Depth24
+        }
 
       match state.CustomShaders.TryGetValue(ShaderBase.GBufferFill) with
       | true, effect ->
@@ -751,62 +857,102 @@ module internal Deferred =
           let struct (_, drawable) = state.OpaqueDrawables.[i]
           Shared.renderDrawableWithEffect state drawable effect
 
-        // Restore scene target or backbuffer
+        // Restore scene target or backbuffer for lighting pass
         match state.MainSceneTarget with
-        | ValueSome rt -> state.Device.SetRenderTarget(rt)
-        | ValueNone -> state.Device.SetRenderTarget(null)
-        
-        ValueSome (rtAlbedo, rtNormal)
+        | ValueSome rt -> Shared.setTarget state.Device rt
+        | ValueNone -> Shared.setTarget state.Device null
+
+        ValueSome(rtAlbedo, rtNormal)
       | false, _ ->
-        // Fallback: forward render to backbuffer
+        // Fallback: Ensure correct target is set before drawing
+        match state.MainSceneTarget with
+        | ValueSome rt -> Shared.setTarget state.Device rt
+        | ValueNone -> Shared.setTarget state.Device null
+
         for i in 0 .. state.OpaqueDrawables.Count - 1 do
           let struct (_, drawable) = state.OpaqueDrawables.[i]
           Shared.renderDrawableFallback state drawable
+
         ValueNone
     else
+      match state.MainSceneTarget with
+      | ValueSome rt -> Shared.setTarget state.Device rt
+      | ValueNone -> Shared.setTarget state.Device null
+
       for i in 0 .. state.OpaqueDrawables.Count - 1 do
         let struct (_, drawable) = state.OpaqueDrawables.[i]
         Shared.renderDrawableFallback state drawable
+
       ValueNone
 
   let bindLighting (effect: Effect) (lighting: LightingState) =
     let setParam (name: string) (value: obj) =
-        let p = effect.Parameters.[name]
-        if not (isNull p) then
-            match value with
-            | :? Vector3 as v -> p.SetValue(v)
-            | :? float32 as f -> p.SetValue(f)
-            | :? (Vector3[]) as va -> p.SetValue(va)
-            | _ -> ()
+      let p = effect.Parameters.[name]
 
-    setParam "AmbientColor" (lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity)
-    
-    let lightDirs = lighting.Lights |> Array.choose (function Directional dl -> Some dl.Direction | _ -> Microsoft.FSharp.Core.Option.None)
-    let lightColors = lighting.Lights |> Array.choose (function Directional dl -> Some (dl.Color.ToVector3() * dl.Intensity) | _ -> Microsoft.FSharp.Core.Option.None)
-    
+      if not(isNull p) then
+        match value with
+        | :? Vector3 as v -> p.SetValue(v)
+        | :? float32 as f -> p.SetValue(f)
+        | :? (Vector3[]) as va -> p.SetValue(va)
+        | _ -> ()
+
+    setParam
+      "AmbientColor"
+      (lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity)
+
+    let lightDirs =
+      lighting.Lights
+      |> Array.choose (function
+        | Directional dl -> Some dl.Direction
+        | _ -> Microsoft.FSharp.Core.Option.None)
+
+    let lightColors =
+      lighting.Lights
+      |> Array.choose (function
+        | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
+        | _ -> Microsoft.FSharp.Core.Option.None)
+
     if lightDirs.Length > 0 then
-        setParam "LightDirections" lightDirs
-        setParam "LightColors" lightColors
+      setParam "LightDirections" lightDirs
+      setParam "LightColors" lightColors
 
-  let renderLighting (state: PipelineState) (gBuffer: (RenderTarget2D * RenderTarget2D) voption) =
+  let renderLighting
+    (state: PipelineState)
+    (gBuffer: (RenderTarget2D * RenderTarget2D) voption)
+    =
     match gBuffer with
-    | ValueSome (albedo, normal) ->
-        match state.CustomShaders.TryGetValue(ShaderBase.DeferredLighting) with
-        | true, effect ->
-            // Bind G-Buffer textures
-            if not (isNull effect.Parameters.["AlbedoMap"]) then effect.Parameters.["AlbedoMap"].SetValue(albedo)
-            if not (isNull effect.Parameters.["NormalMap"]) then effect.Parameters.["NormalMap"].SetValue(normal)
-            
-            bindLighting effect state.CurrentLighting
-            
-            Shared.renderFullScreenQuad state.Device effect
-        | false, _ -> 
-            // Fallback: blit albedo to current target
-            if not (isNull (box state.SpriteBatch)) then
-                state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
-                state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-                state.SpriteBatch.Draw(albedo, state.Device.Viewport.Bounds, Color.White)
-                state.SpriteBatch.End()
+    | ValueSome(albedo, normal) ->
+      match state.CustomShaders.TryGetValue(ShaderBase.DeferredLighting) with
+      | true, effect ->
+        // Bind G-Buffer textures
+        if not(isNull effect.Parameters.["AlbedoMap"]) then
+          effect.Parameters.["AlbedoMap"].SetValue(albedo)
+
+        if not(isNull effect.Parameters.["NormalMap"]) then
+          effect.Parameters.["NormalMap"].SetValue(normal)
+
+        bindLighting effect state.CurrentLighting
+
+        Shared.renderFullScreenQuad state.Device effect
+      | false, _ ->
+        // Fallback: blit albedo to current target
+        if not(isNull(box state.SpriteBatch)) then
+          // Use AlphaBlend if we want to respect existing background,
+          // but Opaque is faster if we assume GBuffer is full screen.
+          state.SpriteBatch.Begin(
+            SpriteSortMode.Immediate,
+            BlendState.AlphaBlend
+          )
+
+          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
+
+          state.SpriteBatch.Draw(
+            albedo,
+            state.Device.Viewport.Bounds,
+            Color.White
+          )
+
+          state.SpriteBatch.End()
     | ValueNone -> ()
 
   let flushDrawBatch(state: PipelineState) =
@@ -818,11 +964,15 @@ module internal Deferred =
       // Sort
       state.OpaqueDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
         d1.CompareTo(d2))
+
       state.TransparentDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
         d2.CompareTo(d1))
 
       // Render Shadows
       Shared.renderShadowPass state
+
+      // Set Opaque state
+      state.Device.DepthStencilState <- DepthStencilState.Default
 
       // Pass 1: G-Buffer (Opaque)
       let gBuffer = renderGBuffer state
@@ -833,15 +983,16 @@ module internal Deferred =
       // Pass 3: Transparent (Forward)
       if state.TransparentDrawables.Count > 0 then
         state.Device.BlendState <- BlendState.AlphaBlend
-        
-        let draw (d: Drawable) =
-            match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
-            | true, effect -> Shared.renderDrawableWithEffect state d effect
-            | false, _ -> Shared.renderDrawableFallback state d
+
+        let draw(d: Drawable) =
+          match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
+          | true, effect -> Shared.renderDrawableWithEffect state d effect
+          | false, _ -> Shared.renderDrawableFallback state d
 
         for i in 0 .. state.TransparentDrawables.Count - 1 do
           let struct (_, drawable) = state.TransparentDrawables.[i]
           draw drawable
+
         state.Device.BlendState <- BlendState.Opaque
 
       state.OpaqueDrawables.Clear()
@@ -855,6 +1006,9 @@ module internal Deferred =
       state.CameraWasSet <- true
       Shared.configureBasicEffectCamera state.BasicEffect camera
     | SetLighting lighting -> state.CurrentLighting <- lighting
+    | SetMode mode ->
+      flushDrawBatch state
+      state.Config <- { state.Config with Mode = mode }
     | SetViewport viewport ->
       flushDrawBatch state
       state.Device.Viewport <- viewport
@@ -877,35 +1031,43 @@ module internal Deferred =
     (state: PipelineState)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
-    Shared.resetFrameState state
+    let hasShaders = 
+        state.CustomShaders.ContainsKey(ShaderBase.GBufferFill) && 
+        state.CustomShaders.ContainsKey(ShaderBase.DeferredLighting)
+    
+    if not hasShaders then
+        Forward.render state buffer
+    else
+        Shared.resetFrameState state
 
-    // Acquire scene target if needed for post-processing
-    let sceneTarget =
-        match state.Config.PostProcess with
-        | ValueSome _ when not (isNull (box state.RtPool)) ->
-            let spec = { 
-                Width = state.Device.PresentationParameters.BackBufferWidth
-                Height = state.Device.PresentationParameters.BackBufferHeight
-                Format = SurfaceFormat.Color
-                DepthFormat = DepthFormat.Depth24 
+        // Acquire scene target if needed for post-processing
+        let sceneTarget =
+          match state.Config.PostProcess with
+          | ValueSome _ when not(isNull(box state.RtPool)) ->
+            let spec = {
+              Width = state.Device.PresentationParameters.BackBufferWidth
+              Height = state.Device.PresentationParameters.BackBufferHeight
+              Format = SurfaceFormat.Color
+              DepthFormat = DepthFormat.Depth24
             }
+
             let rt = state.RtPool.Acquire spec
-            state.Device.SetRenderTarget(rt)
+            Shared.setTarget state.Device rt
             state.MainSceneTarget <- ValueSome rt
             ValueSome rt
-        | _ -> ValueNone
+          | _ -> ValueNone
 
-    for i in 0 .. buffer.Count - 1 do
-      let struct (_, cmd) = buffer.[i]
-      processCommand state cmd
+        for i in 0 .. buffer.Count - 1 do
+          let struct (_, cmd) = buffer.[i]
+          processCommand state cmd
 
-    flushDrawBatch state
+        flushDrawBatch state
 
-    // Post-process
-    sceneTarget |> ValueOption.iter (fun rt -> Shared.renderPostProcess state rt)
+        // Post-process
+        sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
 
-    if not(isNull(box state.RtPool)) then
-      state.RtPool.ReleaseAll()
+        if not(isNull(box state.RtPool)) then
+          state.RtPool.ReleaseAll()
 
 
 // ============================================================================
@@ -977,3 +1139,4 @@ module RenderPipeline =
         member _.Initialize(gd) = Orchestrate.initialize state game gd
         member _.Render(_, buffer) = Orchestrate.render state buffer
     }
+

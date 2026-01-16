@@ -6,12 +6,6 @@ open Microsoft.Xna.Framework.Graphics
 // Pipeline Configuration
 // ============================================================================
 
-/// Pipeline rendering mode
-type PipelineMode =
-  | Forward
-  | ForwardPlus
-  | Deferred
-
 /// Soft shadow configuration
 [<Struct>]
 type SoftShadowConfig = { Penumbra: float32 }
@@ -113,16 +107,6 @@ module PostProcessConfig =
     pp with
         ToneMapping = tm
   }
-
-/// Shader base types for override mapping
-type ShaderBase =
-  | ShadowCaster
-  | GBufferFill
-  | PBRForward
-  | DeferredLighting
-  | Unlit
-  | Bloom
-  | PostProcess
 
 /// Main pipeline configuration
 [<Struct>]

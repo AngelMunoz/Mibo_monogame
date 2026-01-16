@@ -251,11 +251,21 @@ type RenderBuilder(_buffer: RenderBuffer<unit, RenderCommand>) =
   member inline this.WithViewport(_, viewport: Viewport) =
     this.buffer.Add((), SetViewport viewport)
 
+  // === Mode ===
+
+  [<CustomOperation("withMode")>]
+  member inline this.WithMode(_, mode: PipelineMode) =
+    this.buffer.Add((), SetMode mode)
+
   // === Clear ===
 
   [<CustomOperation("clear")>]
   member inline this.Clear(_, color: Color) =
     this.buffer.Add((), ClearTarget(ValueSome color, true))
+
+  [<CustomOperation("clearTarget")>]
+  member inline this.ClearTarget(_, color: Color, clearDepth: bool) =
+    this.buffer.Add((), ClearTarget(ValueSome color, clearDepth))
 
   [<CustomOperation("clearDepth")>]
   member inline this.ClearDepth(_) =

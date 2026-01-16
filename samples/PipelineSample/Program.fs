@@ -156,6 +156,7 @@ module PipelineSampleGame =
 
     // Setup rendering environment using DSL
     render buffer {
+      withMode state.PipelineMode
       withCamera camera
       withLighting Lighting.defaultSunlight
       clear Color.CornflowerBlue
@@ -164,12 +165,12 @@ module PipelineSampleGame =
 
     // Render Platforms using loop outside CE
     for plat in state.Platforms do
-        View.render buffer {
-            draw {
-                mesh state.Assets.PlatformMesh
-                at plat.Position
-            }
+      View.render buffer {
+        draw {
+          mesh state.Assets.PlatformMesh
+          at plat.Position
         }
+      }
 
     // Grid
     Grid.draw
@@ -218,10 +219,8 @@ module PipelineSampleGame =
       |> Program.withAssets
       |> Program.withTick Tick
       |> Program.withSubscription subscribe
-      // The pipeline mode is currently static in this helper.
-      // To support runtime toggle, one would need to recreate or use a dynamic config.
-      // For this sample, we'll initialize with Forward.
-      |> Program.withPipeline PipelineConfig.forward view
+      // The pipeline mode is now switchable at runtime via withMode DSL.
+      |> Program.withPipeline PipelineConfig.deferred view
 
     use game = new ElmishGame<State, Msg>(program)
     game.Run()
