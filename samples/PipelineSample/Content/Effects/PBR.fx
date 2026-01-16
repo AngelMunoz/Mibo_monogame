@@ -29,6 +29,21 @@ float3 AmbientColor;
 float3 LightDirections[3];
 float3 LightColors[3];
 
+// Shadow Mapping
+texture ShadowMap;
+sampler ShadowSampler = sampler_state
+{
+    Texture = <ShadowMap>;
+    AddressU = Clamp;
+    AddressV = Clamp;
+    MinFilter = Linear;
+    MagFilter = Linear;
+    MipFilter = None;
+};
+
+matrix LightView;
+matrix LightProjection;
+
 struct VertexShaderInput
 {
 	float4 Position : POSITION0;
@@ -41,6 +56,7 @@ struct VertexShaderOutput
 	float4 Position : SV_POSITION;
 	float2 TexCoord : TEXCOORD0;
 	float3 Normal : TEXCOORD1;
+    float4 ShadowCoord : TEXCOORD3;
 };
 
 VertexShaderOutput MainVS(in VertexShaderInput input)
@@ -53,7 +69,31 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
 	output.TexCoord = input.TexCoord;
     output.Normal = mul(input.Normal, (float3x3)World);
 
+    // Shadow coordinates
+    float4 shadowPos = mul(worldPosition, LightView);
+    shadowPos = mul(shadowPos, LightProjection);
+    output.ShadowCoord = shadowPos;
+
 	return output;
+}
+
+float CalculateShadow(float4 shadowCoord)
+{
+    // Perspective divide
+    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
+    
+    // Transform to [0,1] range
+    float2 shadowTexCoord = float2(0.5 * projCoords.x + 0.5, -0.5 * projCoords.y + 0.5);
+    float currentDepth = projCoords.z;
+
+    // Check if outside shadow map
+    if (shadowTexCoord.x < 0 || shadowTexCoord.x > 1 || shadowTexCoord.y < 0 || shadowTexCoord.y > 1)
+        return 1.0;
+
+    float shadowMapDepth = tex2D(ShadowSampler, shadowTexCoord).r;
+    
+    float bias = 0.001;
+    return (currentDepth - bias > shadowMapDepth) ? 0.5 : 1.0;
 }
 
 float4 MainPS(VertexShaderOutput input) : COLOR0
@@ -64,13 +104,15 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 		: AlbedoColor;
 
     float3 normal = normalize(input.Normal);
+    float shadow = CalculateShadow(input.ShadowCoord);
 
     float3 diffuse = AmbientColor;
 
     for(int i = 0; i < 3; i++)
     {
         float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);
-        diffuse += ndotl * LightColors[i];
+        float atten = (i == 0) ? shadow : 1.0; // Apply shadow only to first light for now
+        diffuse += ndotl * LightColors[i] * atten;
     }
 
 	return float4(albedo.rgb * diffuse, albedo.a);

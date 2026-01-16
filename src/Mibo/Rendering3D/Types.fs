@@ -100,20 +100,38 @@ type Mesh = {
 }
 
 module Mesh =
-  /// Create a Mesh from a ModelMesh (uses ModelMesh.BoundingSphere for correct culling)
-  let fromModelMesh(modelMesh: ModelMesh) : Mesh seq =
-    modelMesh.MeshParts
-    |> Seq.map(fun part ->
-      let bounds = modelMesh.BoundingSphere
+  /// Compute bounding box from a ModelMesh by scanning vertex data
+  let private computeBox(modelMesh: ModelMesh) : BoundingBox =
+    let mutable min = Vector3(infinityf, infinityf, infinityf)
+    let mutable max = Vector3(-infinityf, -infinityf, -infinityf)
 
-      {
-        VertexBuffer = part.VertexBuffer
-        IndexBuffer = part.IndexBuffer
-        IndexCount = part.PrimitiveCount * 3
-        BoundingBox = BoundingBox.CreateFromSphere(bounds)
-        BoundingSphere = bounds
-        Effect = part.Effect
-      })
+    for part in modelMesh.MeshParts do
+      let vertexSize = part.VertexBuffer.VertexDeclaration.VertexStride / 4
+      let data = Array.zeroCreate<float32>(part.NumVertices * vertexSize)
+      part.VertexBuffer.GetData(data)
+
+      for i in 0 .. part.NumVertices - 1 do
+        let idx = i * vertexSize
+        let pos = Vector3(data.[idx], data.[idx + 1], data.[idx + 2])
+        min <- Vector3.Min(min, pos)
+        max <- Vector3.Max(max, pos)
+
+    BoundingBox(min, max)
+
+  /// Create a Mesh from a ModelMesh
+  let fromModelMesh(modelMesh: ModelMesh) : Mesh seq =
+    let box = computeBox modelMesh
+    let sphere = modelMesh.BoundingSphere
+
+    modelMesh.MeshParts
+    |> Seq.map(fun part -> {
+      VertexBuffer = part.VertexBuffer
+      IndexBuffer = part.IndexBuffer
+      IndexCount = part.PrimitiveCount * 3
+      BoundingBox = box
+      BoundingSphere = sphere
+      Effect = part.Effect
+    })
 
   /// Create all meshes from a Model
   let fromModel(model: Model) : Mesh seq =

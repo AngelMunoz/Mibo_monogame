@@ -25,6 +25,8 @@ type internal PipelineState = {
   mutable SpriteBatch: SpriteBatch
   CustomShaders: Dictionary<ShaderBase, Effect>
   ShadowMaps: ResizeArray<RenderTarget2D>
+  ShadowViewMatrices: ResizeArray<Matrix>
+  ShadowProjectionMatrices: ResizeArray<Matrix>
   mutable MainSceneTarget: RenderTarget2D voption
   mutable CurrentCamera: Mibo.Rendering.Graphics3D.Camera
   mutable CurrentLighting: LightingState
@@ -48,6 +50,8 @@ module internal Shared =
     SpriteBatch = Unchecked.defaultof<_>
     CustomShaders = Dictionary<ShaderBase, Effect>()
     ShadowMaps = ResizeArray<RenderTarget2D>()
+    ShadowViewMatrices = ResizeArray<Matrix>()
+    ShadowProjectionMatrices = ResizeArray<Matrix>()
     MainSceneTarget = ValueNone
     CurrentCamera = Camera.identity
     CurrentLighting = Lighting.ambient
@@ -65,6 +69,8 @@ module internal Shared =
     state.CameraWasSet <- false
     state.OpaqueDrawables.Clear()
     state.TransparentDrawables.Clear()
+    state.ShadowViewMatrices.Clear()
+    state.ShadowProjectionMatrices.Clear()
     state.MainSceneTarget <- ValueNone
 
   let isVisible
@@ -186,6 +192,23 @@ module internal Shared =
 
       if not(isNull pCols) then
         pCols.SetValue(colors)
+
+    // Shadow Mapping
+    if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
+      let pShadowMap = effect.Parameters.["ShadowMap"]
+
+      if not(isNull pShadowMap) then
+        pShadowMap.SetValue(state.ShadowMaps.[0])
+
+      let pLightView = effect.Parameters.["LightView"]
+
+      if not(isNull pLightView) then
+        pLightView.SetValue(state.ShadowViewMatrices.[0])
+
+      let pLightProj = effect.Parameters.["LightProjection"]
+
+      if not(isNull pLightProj) then
+        pLightProj.SetValue(state.ShadowProjectionMatrices.[0])
 
     // Try to get color/texture from Material, fallback to mesh's BasicEffect
     let albedoColor, hasTexture, albedoTex =
@@ -350,9 +373,20 @@ module internal Shared =
             0
           )
 
-          // Compute Light View fitting the camera frustum
-          let lightView =
-            Matrix.CreateLookAt(Vector3.Zero, dl.Direction, Vector3.Up)
+          // Compute frustum center and sphere
+          let mutable center = Vector3.Zero
+          for i in 0 .. corners.Length - 1 do
+            center <- center + corners.[i]
+          center <- center / float32 corners.Length
+
+          let mutable radius = 0f
+          for i in 0 .. corners.Length - 1 do
+            radius <- max radius (Vector3.Distance(center, corners.[i]))
+
+          // Compute Light View looking at frustum center
+          // Move light position back along direction to ensure it covers everything
+          let lightPos = center - dl.Direction * (radius + 100f)
+          let lightView = Matrix.CreateLookAt(lightPos, center, Vector3.Up)
 
           // Transform frustum corners to light space to find bounds
           let mutable minX, minY, minZ = infinityf, infinityf, infinityf
@@ -367,15 +401,16 @@ module internal Shared =
             maxY <- max maxY lp.Y
             maxZ <- max maxZ lp.Z
 
-          // Add some padding and depth room
+          // Use the frustum bounds in light space for the projection
+          // Distances are -Z in right-handed view space
           let lightProj =
             Matrix.CreateOrthographicOffCenter(
               minX,
               maxX,
               minY,
               maxY,
-              minZ - 50.0f,
-              maxZ
+              -maxZ - 10f, // near distance
+              -minZ + 10f  // far distance
             )
 
           for i in 0 .. state.OpaqueDrawables.Count - 1 do
@@ -388,6 +423,9 @@ module internal Shared =
                 shadowEffect
                 lightView
                 lightProj
+
+          state.ShadowViewMatrices.Add(lightView)
+          state.ShadowProjectionMatrices.Add(lightProj)
 
           shadowMapIndex <- shadowMapIndex + 1
         | _ -> ()

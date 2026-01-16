@@ -75,7 +75,7 @@ module Lighting =
     AmbientIntensity = 1f
     Lights = [|
       Light.Directional {
-        Direction = Vector3.Normalize(Vector3(-0.5f, -1f, -0.5f))
+        Direction = Vector3.Normalize(Vector3(-0.2f, -1f, -0.2f))
         Color = Color.White
         Intensity = 0.8f
         Shadow = ValueSome ShadowSettings.defaults

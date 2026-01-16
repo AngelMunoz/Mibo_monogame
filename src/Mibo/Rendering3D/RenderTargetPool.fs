@@ -47,7 +47,9 @@ module RenderTargetPool =
           spec.Height,
           false,
           spec.Format,
-          spec.DepthFormat
+          spec.DepthFormat,
+          0,
+          RenderTargetUsage.PreserveContents
         )
 
       state.InUse.Add(struct (rt, spec))
