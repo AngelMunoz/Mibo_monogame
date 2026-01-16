@@ -199,7 +199,8 @@ module internal Shared =
     let pointLightData =
       state.CurrentLighting.Lights
       |> Array.choose (function
-        | Point pl -> Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
+        | Point pl ->
+          Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
         | _ -> None)
 
     let pointLightColors =
@@ -213,16 +214,24 @@ module internal Shared =
       let pCols = pointLightColors |> Array.truncate 32
 
       let pParams = effect.Parameters.["PointLightData"]
-      if not(isNull pParams) then pParams.SetValue(pData)
+
+      if not(isNull pParams) then
+        pParams.SetValue(pData)
 
       let pColors = effect.Parameters.["PointLightColors"]
-      if not(isNull pColors) then pColors.SetValue(pCols)
+
+      if not(isNull pColors) then
+        pColors.SetValue(pCols)
 
       let pCount = effect.Parameters.["PointLightCount"]
-      if not(isNull pCount) then pCount.SetValue(float32 pData.Length)
+
+      if not(isNull pCount) then
+        pCount.SetValue(float32 pData.Length)
     else
       let pCount = effect.Parameters.["PointLightCount"]
-      if not(isNull pCount) then pCount.SetValue(0.0f)
+
+      if not(isNull pCount) then
+        pCount.SetValue(0.0f)
 
     // Shadow Mapping
     if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
@@ -406,11 +415,14 @@ module internal Shared =
 
           // Compute frustum center and sphere
           let mutable center = Vector3.Zero
+
           for i in 0 .. corners.Length - 1 do
             center <- center + corners.[i]
+
           center <- center / float32 corners.Length
 
           let mutable radius = 0f
+
           for i in 0 .. corners.Length - 1 do
             radius <- max radius (Vector3.Distance(center, corners.[i]))
 
@@ -444,6 +456,7 @@ module internal Shared =
           // Since lightPos = center - lightDir * (radius + 100)
           // Near plane can be small, far plane covers the whole radius-based range
           let padding = 10f
+
           let lightProj =
             Matrix.CreateOrthographicOffCenter(
               minX - padding,
@@ -824,7 +837,7 @@ module internal ForwardPlus =
     let tilesX = (viewport.Width + TileSize - 1) / TileSize
     let tilesY = (viewport.Height + TileSize - 1) / TileSize
 
-    let tileMasks = Array.zeroCreate<uint32> (tilesX * tilesY)
+    let tileMasks = Array.zeroCreate<uint32>(tilesX * tilesY)
 
     let lights = state.CurrentLighting.Lights
 
@@ -844,7 +857,8 @@ module internal ForwardPlus =
           if ty >= 0 && ty < tilesY then
             for tx = l / TileSize to r / TileSize do
               if tx >= 0 && tx < tilesX then
-                tileMasks.[ty * tilesX + tx] <- tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
+                tileMasks.[ty * tilesX + tx] <-
+                  tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
       | Spot sl ->
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport sl.Position sl.Range
@@ -853,7 +867,8 @@ module internal ForwardPlus =
           if ty >= 0 && ty < tilesY then
             for tx = l / TileSize to r / TileSize do
               if tx >= 0 && tx < tilesX then
-                tileMasks.[ty * tilesX + tx] <- tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
+                tileMasks.[ty * tilesX + tx] <-
+                  tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
 
     {
       TilesX = tilesX
@@ -886,8 +901,7 @@ module internal ForwardPlus =
 
       let draw(d: Drawable) =
         match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
-        | true, effect ->
-          Shared.renderDrawableWithEffect state d effect
+        | true, effect -> Shared.renderDrawableWithEffect state d effect
         | false, _ -> Shared.renderDrawableFallback state d
 
       for i in 0 .. state.OpaqueDrawables.Count - 1 do
@@ -1038,7 +1052,8 @@ module internal Deferred =
 
       let rtAlbedo = state.RtPool.Acquire albedoSpec
       let rtNormal = state.RtPool.Acquire normalSpec
-      let rtWorldPos = 
+
+      let rtWorldPos =
         state.RtPool.Acquire {
           worldPosSpec with
               DepthFormat = DepthFormat.Depth24
@@ -1049,17 +1064,23 @@ module internal Deferred =
         // Clear targets individually to ensure correct default values
         // Albedo: Transparent + Clear its Depth Buffer (master depth)
         state.Device.SetRenderTarget(rtAlbedo)
-        state.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, Color.Transparent, 1.0f, 0)
-        
+
+        state.Device.Clear(
+          ClearOptions.Target ||| ClearOptions.DepthBuffer,
+          Color.Transparent,
+          1.0f,
+          0
+        )
+
         // Normal: Transparent
         state.Device.SetRenderTarget(rtNormal)
         state.Device.Clear(Color.Transparent)
-        
+
         // WorldPos: Transparent (0,0,0,0)
         state.Device.SetRenderTarget(rtWorldPos)
         state.Device.Clear(Color.Transparent)
 
-        // Bind all for MRT. 
+        // Bind all for MRT.
         // Note: state.Device will use rtAlbedo's depth buffer because it's first.
         state.Device.SetRenderTargets(
           new RenderTargetBinding(rtAlbedo),
@@ -1101,44 +1122,92 @@ module internal Deferred =
       ValueNone
 
   let bindLighting (effect: Effect) (lighting: LightingState) =
-    let setParam (name: string) (value: obj) =
-      let p = effect.Parameters.[name]
+    // Set ambient color
+    let pAmbient = effect.Parameters.["AmbientColor"]
 
-      if not(isNull p) then
-        match value with
-        | :? Vector3 as v -> p.SetValue(v)
-        | :? float32 as f -> p.SetValue(f)
-        | :? (Vector3[]) as va -> p.SetValue(va)
-        | _ -> ()
+    if not(isNull pAmbient) then
+      pAmbient.SetValue(
+        lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity
+      )
 
-    setParam
-      "AmbientColor"
-      (lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity)
-
+    // Extract directional lights (same approach as Shared.renderDrawableWithEffect)
     let lightDirs =
       lighting.Lights
       |> Array.choose (function
         | Directional dl -> Some dl.Direction
-        | _ -> Microsoft.FSharp.Core.Option.None)
+        | _ -> None)
 
     let lightColors =
       lighting.Lights
       |> Array.choose (function
         | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
-        | _ -> Microsoft.FSharp.Core.Option.None)
+        | _ -> None)
 
     if lightDirs.Length > 0 then
-      setParam "LightDirections" lightDirs
-      setParam "LightColors" lightColors
+      // Pad arrays to exactly 3 elements (shader expects float3[3])
+      let dirs =
+        let truncated = lightDirs |> Array.truncate 3
+
+        if truncated.Length < 3 then
+          Array.append
+            truncated
+            (Array.replicate (3 - truncated.Length) Vector3.Zero)
+        else
+          truncated
+
+      let colors =
+        let truncated = lightColors |> Array.truncate 3
+
+        if truncated.Length < 3 then
+          Array.append
+            truncated
+            (Array.replicate (3 - truncated.Length) Vector3.Zero)
+        else
+          truncated
+
+      printfn
+        $"[Deferred.bindLighting] Binding {dirs.Length} directional lights (padded)"
+
+      printfn
+        $"[Deferred.bindLighting] LightDir[0]={dirs.[0]}, LightColor[0]={colors.[0]}"
+
+      let pDirs = effect.Parameters.["LightDirections"]
+
+      if not(isNull pDirs) then
+        pDirs.SetValue(dirs)
+
+        printfn "[Deferred.bindLighting] LightDirections SET"
+      else
+        printfn "[Deferred.bindLighting] LightDirections param is NULL!"
+
+      let pCols = effect.Parameters.["LightColors"]
+
+      if not(isNull pCols) then
+        pCols.SetValue(colors)
+
+        printfn "[Deferred.bindLighting] LightColors SET"
+      else
+        printfn "[Deferred.bindLighting] LightColors param is NULL!"
+    else
+      printfn "[Deferred.bindLighting] No directional lights found!"
 
   let renderLighting
     (state: PipelineState)
     (gBuffer: (RenderTarget2D * RenderTarget2D * RenderTarget2D) voption)
     =
+    printfn $"[Deferred.renderLighting] gBuffer has value: {gBuffer.IsSome}"
+
     match gBuffer with
     | ValueSome(albedo, normal, depth) ->
+      let hasDeferredShader =
+        state.CustomShaders.ContainsKey(ShaderBase.DeferredLighting)
+
+      printfn
+        $"[Deferred.renderLighting] Has DeferredLighting shader: {hasDeferredShader}"
+
       match state.CustomShaders.TryGetValue(ShaderBase.DeferredLighting) with
       | true, effect ->
+        printfn "[Deferred.renderLighting] Entering lighting pass"
         // Bind G-Buffer textures
         if not(isNull effect.Parameters.["AlbedoMap"]) then
           effect.Parameters.["AlbedoMap"].SetValue(albedo)
@@ -1153,13 +1222,17 @@ module internal Deferred =
         let pointLightData =
           state.CurrentLighting.Lights
           |> Array.choose (function
-            | Point pl -> Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
+            | Point pl ->
+              Some(
+                Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range)
+              )
             | _ -> None)
 
         let pointLightColors =
           state.CurrentLighting.Lights
           |> Array.choose (function
-            | Point pl -> Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
+            | Point pl ->
+              Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
             | _ -> None)
 
         if pointLightData.Length > 0 then
@@ -1167,19 +1240,30 @@ module internal Deferred =
           let pCols = pointLightColors |> Array.truncate 32
 
           let pParams = effect.Parameters.["PointLightData"]
-          if not(isNull pParams) then pParams.SetValue(pData)
+
+          if not(isNull pParams) then
+            pParams.SetValue(pData)
 
           let pColors = effect.Parameters.["PointLightColors"]
-          if not(isNull pColors) then pColors.SetValue(pCols)
+
+          if not(isNull pColors) then
+            pColors.SetValue(pCols)
 
           let pCount = effect.Parameters.["PointLightCount"]
-          if not(isNull pCount) then pCount.SetValue(float32 pData.Length)
+
+          if not(isNull pCount) then
+            pCount.SetValue(float32 pData.Length)
         else
           let pCount = effect.Parameters.["PointLightCount"]
-          if not(isNull pCount) then pCount.SetValue(0.0f)
+
+          if not(isNull pCount) then
+            pCount.SetValue(0.0f)
 
         // Bind Shadow Data
         if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
+          printfn
+            $"[Deferred.renderLighting] Binding shadow map. Count={state.ShadowMaps.Count}"
+
           let pShadowMap = effect.Parameters.["ShadowMap"]
 
           if not(isNull pShadowMap) then
@@ -1194,6 +1278,8 @@ module internal Deferred =
 
           if not(isNull pLightProj) then
             pLightProj.SetValue(state.ShadowProjectionMatrices.[0])
+        else
+          printfn "[Deferred.renderLighting] NO shadow maps available!"
 
         bindLighting effect state.CurrentLighting
 

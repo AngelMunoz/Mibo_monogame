@@ -155,34 +155,8 @@ module PipelineSampleGame =
         0.1f
         200f
 
-    // Setup rendering environment using DSL
-    let lights = [|
-        yield Lighting.defaultSunlight.Lights.[0]
-        
-        // Add 16 colorful moving lights
-        for i in 0 .. 15 do
-            let angle = (float32 i / 16.0f) * MathHelper.TwoPi + state.Time
-            let radius = 10.0f
-            let x = cos(angle) * radius
-            let z = sin(angle) * radius
-            let h = (float32 i / 16.0f) // Hue
-            
-            // Convert simple HSV to RGB (rough)
-            let color = 
-                if h < 0.33f then Color.Red
-                elif h < 0.66f then Color.Green
-                else Color.Blue
-
-            yield Light.Point {
-                Position = Vector3(x, 3f, z)
-                Color = color
-                Intensity = 3.0f
-                Range = 8.0f
-                Shadow = ValueNone
-            }
-    |]
-
-    let lighting = { Lighting.defaultSunlight with Lights = lights }
+    // Simplified lighting - just default sunlight for debugging
+    let lighting = Lighting.defaultSunlight
 
     buffer
     |> RenderBuilder.mode state.PipelineMode
@@ -265,8 +239,9 @@ module PipelineSampleGame =
            "Effects/ShadowCaster"
          |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
          |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
-         |> PipelineConfig.withShader ShaderBase.DeferredLighting "Effects/DeferredLighting"
-        )
+         |> PipelineConfig.withShader
+           ShaderBase.DeferredLighting
+           "Effects/DeferredLighting")
         view
 
     use game = new ElmishGame<State, Msg>(program)

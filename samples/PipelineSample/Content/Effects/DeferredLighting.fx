@@ -73,13 +73,13 @@ float CalculateShadow(float4 shadowCoord)
 
     float shadow = 0.0;
     float2 texelSize = float2(1.0 / 2048.0, 1.0 / 2048.0);
-    float bias = 0.002;
+    float bias = 0.005;
 
     for(int x = -1; x <= 1; ++x)
     {
         for(int y = -1; y <= 1; ++y)
         {
-            float pcfDepth = tex2Dlod(ShadowSampler, float4(uv + float2(x, y) * texelSize, 0, 0)).r; 
+            float pcfDepth = tex2Dlod(ShadowSampler, float4(uv + float2(x, y) * texelSize, 0, 0)).r;
             shadow += (z > pcfDepth + bias) ? 0.1 : 1.0;
         }
     }
@@ -90,7 +90,7 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 {
     // 1. Sample G-Buffer
 	float4 albedo = tex2D(AlbedoSampler, input.TexCoord);
-    
+
     // Discard if no geometry (Albedo Alpha will be 0 from clear)
     if (albedo.a < 0.001) discard;
 
@@ -98,19 +98,30 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
     float3 worldPos = tex2D(WorldPosSampler, input.TexCoord).rgb;
 
     // 2. Directional Lighting
-    // Calculate shadow coordinates for the world position
-    float4 shadowPos = mul(float4(worldPos, 1.0), LightView);
+    // Use Normal-Offset Bias to prevent self-shadowing (acne)
+    // We shift the world position slightly along the normal for the shadow lookup
+    float3 biasedWorldPos = worldPos + normal * 0.05;
+
+    // Calculate shadow coordinates for the biased world position
+    float4 shadowPos = mul(float4(biasedWorldPos, 1.0), LightView);
     shadowPos = mul(shadowPos, LightProjection);
     float shadow = CalculateShadow(shadowPos);
 
     float3 diffuse = AmbientColor;
-    
-    for(int i = 0; i < 3; i++)
-    {
-        float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);
-        float atten = (i == 0) ? shadow : 1.0;
-        diffuse += ndotl * LightColors[i] * atten;
-    }
+
+    // DEBUG: Hardcoded directional light to test shader math (bypass LightDirections/LightColors)
+    float3 hardcodedLightDir = normalize(float3(-0.2, -1.0, -0.2)); // Same as defaultSunlight
+    float3 hardcodedLightColor = float3(0.8, 0.8, 0.8);
+    float ndotl = max(dot(normal, -hardcodedLightDir), 0.0);
+    diffuse += ndotl * hardcodedLightColor * shadow;
+
+    // Original loop (commented out for testing)
+    // for(int i = 0; i < 3; i++)
+    // {
+    //     float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);
+    //     float atten = (i == 0) ? shadow : 1.0;
+    //     diffuse += ndotl * LightColors[i] * atten;
+    // }
 
     // 3. Point Lights
     for(int j = 0; j < 32; j++)
@@ -120,7 +131,7 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
         float3 lightDir = PointLightData[j].xyz - worldPos;
         float dist = length(lightDir);
         float range = PointLightData[j].w;
-        
+
         if (dist < range)
         {
             lightDir /= dist;
