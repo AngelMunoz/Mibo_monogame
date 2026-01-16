@@ -49,7 +49,7 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
 	output.TexCoord = input.TexCoord;
 	
     // Transform normal to world space
-    output.Normal = mul(input.Normal, (float3x3)World);
+    output.Normal = normalize(mul(input.Normal, (float3x3)World));
     
     // Pass linear depth (z/w)
     output.LinearDepth = output.Position.zw;
@@ -74,7 +74,7 @@ PixelShaderOutput MainPS(VertexShaderOutput input)
         
 	output.Albedo = texColor * AlbedoColor;
     
-    // Store normal in [0, 1] range
+    // Store normal in [0, 1] range for Color (RGBA8) compatibility
     float3 normal = normalize(input.Normal);
     output.Normal = float4(normal * 0.5 + 0.5, 1.0);
     

@@ -1025,7 +1025,7 @@ module internal Deferred =
       let normalSpec = {
         Width = width
         Height = height
-        Format = SurfaceFormat.Vector4
+        Format = SurfaceFormat.Color
         DepthFormat = DepthFormat.None
       }
 
