@@ -264,8 +264,8 @@ module PipelineSampleGame =
            ShaderBase.ShadowCaster
            "Effects/ShadowCaster"
          |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
-        // |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
-        // |> PipelineConfig.withShader ShaderBase.DeferredLighting "Effects/DeferredLighting"
+         |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
+         |> PipelineConfig.withShader ShaderBase.DeferredLighting "Effects/DeferredLighting"
         )
         view
 

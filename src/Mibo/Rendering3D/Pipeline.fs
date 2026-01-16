@@ -1029,22 +1029,45 @@ module internal Deferred =
         DepthFormat = DepthFormat.None
       }
 
+      let depthSpec = {
+        Width = width
+        Height = height
+        Format = SurfaceFormat.Single
+        DepthFormat = DepthFormat.None
+      }
+
       let rtAlbedo = state.RtPool.Acquire albedoSpec
 
-      let rtNormal =
+      let rtNormal = state.RtPool.Acquire normalSpec
+
+      let rtDepth = 
         state.RtPool.Acquire {
-          normalSpec with
+          depthSpec with
               DepthFormat = DepthFormat.Depth24
         }
 
       match state.CustomShaders.TryGetValue(ShaderBase.GBufferFill) with
       | true, effect ->
+        // Clear targets individually to ensure correct default values
+        // Albedo: Transparent + Clear its Depth Buffer (master depth)
+        state.Device.SetRenderTarget(rtAlbedo)
+        state.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, Color.Transparent, 1.0f, 0)
+        
+        // Normal: Transparent
+        state.Device.SetRenderTarget(rtNormal)
+        state.Device.Clear(Color.Transparent)
+        
+        // Depth: White (1.0)
+        state.Device.SetRenderTarget(rtDepth)
+        state.Device.Clear(Color.White)
+
+        // Bind all for MRT. 
+        // Note: state.Device will use rtAlbedo's depth buffer because it's first.
         state.Device.SetRenderTargets(
           new RenderTargetBinding(rtAlbedo),
-          new RenderTargetBinding(rtNormal)
+          new RenderTargetBinding(rtNormal),
+          new RenderTargetBinding(rtDepth)
         )
-
-        state.Device.Clear(Color.Transparent)
 
         // Render all opaque objects to G-Buffer
         for i in 0 .. state.OpaqueDrawables.Count - 1 do
@@ -1056,7 +1079,7 @@ module internal Deferred =
         | ValueSome rt -> Shared.setTarget state.Device rt
         | ValueNone -> Shared.setTarget state.Device null
 
-        ValueSome(rtAlbedo, rtNormal)
+        ValueSome(rtAlbedo, rtNormal, rtDepth)
       | false, _ ->
         // Fallback: Ensure correct target is set before drawing
         match state.MainSceneTarget with
@@ -1112,10 +1135,10 @@ module internal Deferred =
 
   let renderLighting
     (state: PipelineState)
-    (gBuffer: (RenderTarget2D * RenderTarget2D) voption)
+    (gBuffer: (RenderTarget2D * RenderTarget2D * RenderTarget2D) voption)
     =
     match gBuffer with
-    | ValueSome(albedo, normal) ->
+    | ValueSome(albedo, normal, depth) ->
       match state.CustomShaders.TryGetValue(ShaderBase.DeferredLighting) with
       | true, effect ->
         // Bind G-Buffer textures
@@ -1124,6 +1147,38 @@ module internal Deferred =
 
         if not(isNull effect.Parameters.["NormalMap"]) then
           effect.Parameters.["NormalMap"].SetValue(normal)
+
+        if not(isNull effect.Parameters.["DepthMap"]) then
+          effect.Parameters.["DepthMap"].SetValue(depth)
+
+        // Bind Point Light Data
+        let pointLightData =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Point pl -> Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
+            | _ -> None)
+
+        let pointLightColors =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Point pl -> Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
+            | _ -> None)
+
+        if pointLightData.Length > 0 then
+          let pData = pointLightData |> Array.truncate 32
+          let pCols = pointLightColors |> Array.truncate 32
+
+          let pParams = effect.Parameters.["PointLightData"]
+          if not(isNull pParams) then pParams.SetValue(pData)
+
+          let pColors = effect.Parameters.["PointLightColors"]
+          if not(isNull pColors) then pColors.SetValue(pCols)
+
+          let pCount = effect.Parameters.["PointLightCount"]
+          if not(isNull pCount) then pCount.SetValue(float32 pData.Length)
+        else
+          let pCount = effect.Parameters.["PointLightCount"]
+          if not(isNull pCount) then pCount.SetValue(0.0f)
 
         // Bind Shadow Data
         if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
@@ -1144,7 +1199,15 @@ module internal Deferred =
 
         bindLighting effect state.CurrentLighting
 
+        // Pass camera matrices for depth reconstruction
+        let pInvViewProj = effect.Parameters.["InvertViewProjection"]
+        if not(isNull pInvViewProj) then
+            let vp = state.CurrentCamera.View * state.CurrentCamera.Projection
+            pInvViewProj.SetValue(Matrix.Invert(vp))
+
+        state.Device.DepthStencilState <- DepthStencilState.None
         Shared.renderFullScreenQuad state.Device effect
+        state.Device.DepthStencilState <- DepthStencilState.Default
       | false, _ ->
         // Fallback: blit albedo to current target
         if not(isNull(box state.SpriteBatch)) then
