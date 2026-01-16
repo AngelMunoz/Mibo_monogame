@@ -50,7 +50,8 @@ type State = {
   InputMap: InputMap<GameAction>
   Assets: GameAssets
   Platforms: PlatformData list
-  PipelineMode: PipelineMode // Added for switching
+  PipelineMode: PipelineMode 
+  Time: float32 // Added for light animation
 }
 
 // ─────────────────────────────────────────────────────────────

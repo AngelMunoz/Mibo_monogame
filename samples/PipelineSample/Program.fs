@@ -106,6 +106,7 @@ module PipelineSampleGame =
       Assets = assets
       Platforms = platforms
       PipelineMode = PipelineMode.Forward
+      Time = 0f
     },
     Cmd.none
 
@@ -121,7 +122,7 @@ module PipelineSampleGame =
       let dt = float32 gt.ElapsedGameTime.TotalSeconds
 
       // Composable system pipeline using Mibo.Elmish.System
-      System.start state
+      System.start { state with Time = state.Time + dt }
       |> System.pipe(Movement.update dt)
       |> System.pipe(Physics.update dt)
       |> System.pipe(Rotation.update dt)
@@ -155,10 +156,38 @@ module PipelineSampleGame =
         200f
 
     // Setup rendering environment using DSL
+    let lights = [|
+        yield Lighting.defaultSunlight.Lights.[0]
+        
+        // Add 16 colorful moving lights
+        for i in 0 .. 15 do
+            let angle = (float32 i / 16.0f) * MathHelper.TwoPi + state.Time
+            let radius = 10.0f
+            let x = cos(angle) * radius
+            let z = sin(angle) * radius
+            let h = (float32 i / 16.0f) // Hue
+            
+            // Convert simple HSV to RGB (rough)
+            let color = 
+                if h < 0.33f then Color.Red
+                elif h < 0.66f then Color.Green
+                else Color.Blue
+
+            yield Light.Point {
+                Position = Vector3(x, 3f, z)
+                Color = color
+                Intensity = 3.0f
+                Range = 8.0f
+                Shadow = ValueNone
+            }
+    |]
+
+    let lighting = { Lighting.defaultSunlight with Lights = lights }
+
     buffer
     |> RenderBuilder.mode state.PipelineMode
     |> RenderBuilder.camera camera
-    |> RenderBuilder.lighting Lighting.defaultSunlight
+    |> RenderBuilder.lighting lighting
     |> RenderBuilder.clear Color.CornflowerBlue
     |> RenderBuilder.clearDepth
     |> RenderBuilder.drawMany(

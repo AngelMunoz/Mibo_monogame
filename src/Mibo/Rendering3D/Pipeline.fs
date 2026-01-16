@@ -27,6 +27,7 @@ type internal PipelineState = {
   ShadowMaps: ResizeArray<RenderTarget2D>
   ShadowViewMatrices: ResizeArray<Matrix>
   ShadowProjectionMatrices: ResizeArray<Matrix>
+  mutable LightGridTexture: Texture2D voption
   mutable MainSceneTarget: RenderTarget2D voption
   mutable CurrentCamera: Mibo.Rendering.Graphics3D.Camera
   mutable CurrentLighting: LightingState
@@ -52,6 +53,7 @@ module internal Shared =
     ShadowMaps = ResizeArray<RenderTarget2D>()
     ShadowViewMatrices = ResizeArray<Matrix>()
     ShadowProjectionMatrices = ResizeArray<Matrix>()
+    LightGridTexture = ValueNone
     MainSceneTarget = ValueNone
     CurrentCamera = Camera.identity
     CurrentLighting = Lighting.ambient
@@ -192,6 +194,35 @@ module internal Shared =
 
       if not(isNull pCols) then
         pCols.SetValue(colors)
+
+    // Point Lights
+    let pointLightData =
+      state.CurrentLighting.Lights
+      |> Array.choose (function
+        | Point pl -> Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
+        | _ -> None)
+
+    let pointLightColors =
+      state.CurrentLighting.Lights
+      |> Array.choose (function
+        | Point pl -> Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
+        | _ -> None)
+
+    if pointLightData.Length > 0 then
+      let pData = pointLightData |> Array.truncate 32
+      let pCols = pointLightColors |> Array.truncate 32
+
+      let pParams = effect.Parameters.["PointLightData"]
+      if not(isNull pParams) then pParams.SetValue(pData)
+
+      let pColors = effect.Parameters.["PointLightColors"]
+      if not(isNull pColors) then pColors.SetValue(pCols)
+
+      let pCount = effect.Parameters.["PointLightCount"]
+      if not(isNull pCount) then pCount.SetValue(float32 pData.Length)
+    else
+      let pCount = effect.Parameters.["PointLightCount"]
+      if not(isNull pCount) then pCount.SetValue(0.0f)
 
     // Shadow Mapping
     if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
@@ -783,7 +814,7 @@ module internal ForwardPlus =
 
     struct (left, top, right, bottom)
 
-  let cullLights(state: PipelineState) : LightGrid =
+  let cullLights(state: PipelineState) : LightGrid * uint32[] =
     let viewport =
       if isNull(box state.Device) then
         Viewport(0, 0, 1280, 720)
@@ -793,16 +824,18 @@ module internal ForwardPlus =
     let tilesX = (viewport.Width + TileSize - 1) / TileSize
     let tilesY = (viewport.Height + TileSize - 1) / TileSize
 
-    let tileData = Array.init (tilesX * tilesY) (fun _ -> ResizeArray<int>())
+    let tileMasks = Array.zeroCreate<uint32> (tilesX * tilesY)
 
     let lights = state.CurrentLighting.Lights
 
-    for i = 0 to lights.Length - 1 do
+    // Only cull point/spot lights (Directional lights affect all tiles)
+    // We only support up to 32 lights in the bitmask
+    for i = 0 to min 31 (lights.Length - 1) do
       match lights.[i] with
       | Directional _ ->
         // Directional lights affect all tiles
-        for j = 0 to tileData.Length - 1 do
-          tileData.[j].Add(i)
+        for j = 0 to tileMasks.Length - 1 do
+          tileMasks.[j] <- tileMasks.[j] ||| (1u <<< i)
       | Point pl ->
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport pl.Position pl.Range
@@ -811,7 +844,7 @@ module internal ForwardPlus =
           if ty >= 0 && ty < tilesY then
             for tx = l / TileSize to r / TileSize do
               if tx >= 0 && tx < tilesX then
-                tileData.[ty * tilesX + tx].Add(i)
+                tileMasks.[ty * tilesX + tx] <- tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
       | Spot sl ->
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport sl.Position sl.Range
@@ -820,13 +853,14 @@ module internal ForwardPlus =
           if ty >= 0 && ty < tilesY then
             for tx = l / TileSize to r / TileSize do
               if tx >= 0 && tx < tilesX then
-                tileData.[ty * tilesX + tx].Add(i)
+                tileMasks.[ty * tilesX + tx] <- tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
 
     {
       TilesX = tilesX
       TilesY = tilesY
-      TileData = tileData |> Array.map(fun x -> x.ToArray())
-    }
+      TileData = [||] // No longer used, using bitmasks instead
+    },
+    tileMasks
 
   let flushDrawBatch(state: PipelineState) =
     if
@@ -845,7 +879,7 @@ module internal ForwardPlus =
       Shared.renderShadowPass state
 
       // 2. Light Culling
-      let _lightGrid = cullLights state
+      let _lightGrid, _tileMasks = cullLights state
 
       // 3. Render Opaque
       state.Device.DepthStencilState <- DepthStencilState.Default
@@ -853,14 +887,6 @@ module internal ForwardPlus =
       let draw(d: Drawable) =
         match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
         | true, effect ->
-          // Bind tile data
-          if not(isNull effect.Parameters.["TilesX"]) then
-            effect.Parameters.["TilesX"].SetValue(_lightGrid.TilesX)
-
-          if not(isNull effect.Parameters.["TilesY"]) then
-            effect.Parameters.["TilesY"].SetValue(_lightGrid.TilesY)
-          // Note: TileData binding would typically involve a Texture2D or StructuredBuffer in HLSL
-
           Shared.renderDrawableWithEffect state d effect
         | false, _ -> Shared.renderDrawableFallback state d
 
@@ -1274,19 +1300,80 @@ module internal Deferred =
 
 
 // ============================================================================
-// Orchestrate - Dispatches to the correct render mode
+// Render Pipeline - Unified Orchestration
 // ============================================================================
 
 module internal Orchestrate =
 
-  let inline render
+  /// Dispatches a command to the appropriate mode-specific handler
+  let processCommand (state: PipelineState) (cmd: RenderCommand) =
+    match state.Config.Mode with
+    | PipelineMode.Forward -> Forward.processCommand state cmd
+    | PipelineMode.ForwardPlus -> ForwardPlus.processCommand state cmd
+    | PipelineMode.Deferred -> Deferred.processCommand state cmd
+
+  /// Flushes any pending draws for the current mode
+  let flushDrawBatch(state: PipelineState) =
+    match state.Config.Mode with
+    | PipelineMode.Forward -> Forward.flushDrawBatch state
+    | PipelineMode.ForwardPlus -> ForwardPlus.flushDrawBatch state
+    | PipelineMode.Deferred -> Deferred.flushDrawBatch state
+
+  /// Main entry point for the rendering pipeline
+  let render
     (state: PipelineState)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
-    match state.Config.Mode with
-    | PipelineMode.Forward -> Forward.render state buffer
-    | PipelineMode.ForwardPlus -> ForwardPlus.render state buffer
-    | PipelineMode.Deferred -> Deferred.render state buffer
+    Shared.resetFrameState state
+
+    // 1. Determine if we need an intermediate scene target
+    let needsTarget =
+      state.Config.PostProcess.IsSome
+      || state.Config.Shadows.IsSome
+      || state.Config.Mode <> PipelineMode.Forward
+
+    let sceneTarget =
+      if needsTarget && not(isNull(box state.RtPool)) then
+        let spec = {
+          Width = state.Device.PresentationParameters.BackBufferWidth
+          Height = state.Device.PresentationParameters.BackBufferHeight
+          Format = SurfaceFormat.Color
+          DepthFormat = DepthFormat.Depth24
+        }
+
+        let rt = state.RtPool.Acquire spec
+        Shared.setTarget state.Device rt
+        state.MainSceneTarget <- ValueSome rt
+        ValueSome rt
+      else
+        ValueNone
+
+    // 2. Process all commands in the buffer
+    for i in 0 .. buffer.Count - 1 do
+      let struct (_, cmd) = buffer.[i]
+      processCommand state cmd
+
+    // 3. Final flush for any remaining drawables
+    flushDrawBatch state
+
+    // 4. Post-processing (handles final blit to backbuffer if present)
+    sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+
+    // 5. Final Blit to backbuffer if we used an intermediate target but didn't post-process
+    match sceneTarget with
+    | ValueSome rt when state.Config.PostProcess.IsNone ->
+      Shared.setTarget state.Device null
+
+      if not(isNull(box state.SpriteBatch)) then
+        state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+        state.Device.SamplerStates.[0] <- SamplerState.PointClamp
+        state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
+        state.SpriteBatch.End()
+    | _ -> ()
+
+    // 6. Cleanup
+    if not(isNull(box state.RtPool)) then
+      state.RtPool.ReleaseAll()
 
   let inline initialize
     (state: PipelineState)

@@ -29,6 +29,11 @@ float3 AmbientColor;
 float3 LightDirections[3];
 float3 LightColors[3];
 
+// Point Lights
+float4 PointLightData[32];   // xyz = position, w = range
+float4 PointLightColors[32]; // rgb = color * intensity
+float PointLightCount = 0;
+
 // Shadow Mapping
 texture ShadowMap;
 sampler ShadowSampler = sampler_state
@@ -57,6 +62,7 @@ struct VertexShaderOutput
 	float2 TexCoord : TEXCOORD0;
 	float3 Normal : TEXCOORD1;
     float4 ShadowCoord : TEXCOORD3;
+    float3 WorldPos : TEXCOORD4;
 };
 
 VertexShaderOutput MainVS(in VertexShaderInput input)
@@ -69,6 +75,7 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
 	output.TexCoord = input.TexCoord;
     float3 normal = normalize(mul(input.Normal, (float3x3)World));
     output.Normal = normal;
+    output.WorldPos = worldPosition.xyz;
 
     // Shadow coordinates
     float4 shadowPos = mul(worldPosition, LightView);
@@ -100,7 +107,7 @@ float CalculateShadow(float4 shadowCoord)
     {
         for(int y = -1; y <= 1; ++y)
         {
-            float pcfDepth = tex2D(ShadowSampler, uv + float2(x, y) * texelSize).r; 
+            float pcfDepth = tex2Dlod(ShadowSampler, float4(uv + float2(x, y) * texelSize, 0, 0)).r; 
             shadow += (z > pcfDepth + bias) ? 0.1 : 1.0;
         }
     }
@@ -119,11 +126,33 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 
     float3 diffuse = AmbientColor;
 
+    // Directional Lights
     for(int i = 0; i < 3; i++)
     {
         float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);
-        float atten = (i == 0) ? shadow : 1.0; // Apply shadow only to first light for now
+        float atten = (i == 0) ? shadow : 1.0; 
         diffuse += ndotl * LightColors[i] * atten;
+    }
+
+    // Point Lights (Standard Loop)
+    for(int j = 0; j < 32; j++)
+    {
+        if (j >= (int)PointLightCount) break;
+
+        float3 lightDir = PointLightData[j].xyz - input.WorldPos;
+        float dist = length(lightDir);
+        float range = PointLightData[j].w;
+        
+        if (dist < range)
+        {
+            lightDir /= dist;
+            float ndotl = max(dot(normal, lightDir), 0.0);
+            
+            // Simpler attenuation
+            float atten = pow(max(1.0 - (dist / range), 0.0), 2.0);
+            
+            diffuse += ndotl * PointLightColors[j].rgb * atten;
+        }
     }
 
 	return float4(albedo.rgb * diffuse, albedo.a);
