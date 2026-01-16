@@ -146,6 +146,7 @@ module internal Shared =
         | :? Vector3 as v -> p.SetValue(v)
         | :? Vector4 as v -> p.SetValue(v)
         | :? float32 as f -> p.SetValue(f)
+        | :? bool as b -> p.SetValue(b)
         | :? Texture2D as t -> p.SetValue(t)
         | :? Color as c -> p.SetValue(c.ToVector4())
         | _ -> ()
@@ -186,13 +187,32 @@ module internal Shared =
       if not(isNull pCols) then
         pCols.SetValue(colors)
 
-    setParam "AlbedoColor" drawable.Material.PBR.AlbedoColor
+    // Try to get color/texture from Material, fallback to mesh's BasicEffect
+    let albedoColor, hasTexture, albedoTex =
+      match drawable.Material.PBR.AlbedoMap with
+      | ValueSome tex -> drawable.Material.PBR.AlbedoColor, true, tex
+      | ValueNone ->
+        // Fallback: try to extract from mesh's embedded BasicEffect
+        match mesh.Effect with
+        | :? BasicEffect as be ->
+          let color =
+            Color(be.DiffuseColor.X, be.DiffuseColor.Y, be.DiffuseColor.Z)
+
+          if not(isNull be.Texture) then
+            color, true, be.Texture
+          else
+            color, false, Unchecked.defaultof<_>
+        | _ -> drawable.Material.PBR.AlbedoColor, false, Unchecked.defaultof<_>
+
+    setParam "AlbedoColor" albedoColor
     setParam "Metallic" drawable.Material.PBR.Metallic
     setParam "Roughness" drawable.Material.PBR.Roughness
 
-    match drawable.Material.PBR.AlbedoMap with
-    | ValueSome tex -> setParam "AlbedoMap" tex
-    | ValueNone -> ()
+    if hasTexture then
+      setParam "HasAlbedoMap" 1.0f
+      setParam "AlbedoMap" albedoTex
+    else
+      setParam "HasAlbedoMap" 0.0f
 
     match drawable.Material.PBR.NormalMap with
     | ValueSome tex -> setParam "NormalMap" tex

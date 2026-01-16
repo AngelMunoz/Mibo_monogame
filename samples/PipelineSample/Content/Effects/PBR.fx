@@ -12,6 +12,7 @@ matrix View;
 matrix Projection;
 
 float4 AlbedoColor = float4(1, 1, 1, 1);
+float HasAlbedoMap = 0.0; // 0 = no texture, 1 = has texture
 texture AlbedoMap;
 sampler AlbedoSampler = sampler_state
 {
@@ -57,11 +58,15 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
 
 float4 MainPS(VertexShaderOutput input) : COLOR0
 {
-	float4 albedo = tex2D(AlbedoSampler, input.TexCoord) * AlbedoColor;
+	// Use texture if available, otherwise just use AlbedoColor
+	float4 albedo = (HasAlbedoMap > 0.5)
+		? tex2D(AlbedoSampler, input.TexCoord) * AlbedoColor
+		: AlbedoColor;
+
     float3 normal = normalize(input.Normal);
-    
+
     float3 diffuse = AmbientColor;
-    
+
     for(int i = 0; i < 3; i++)
     {
         float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);

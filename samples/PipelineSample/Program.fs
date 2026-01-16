@@ -222,9 +222,15 @@ module PipelineSampleGame =
       // The pipeline mode is now switchable at runtime via withMode DSL.
       |> Program.withPipeline
         (PipelineConfig.forward
-        // |> PipelineConfig.withShadows (ShadowConfig.defaults |> ShadowConfig.withResolution 2048 |> ShadowConfig.withCascades 3)
-        // |> PipelineConfig.withShader ShaderBase.ShadowCaster "Effects/ShadowCaster"
-        // |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
+         //  |> PipelineConfig.withShadows(
+         //    ShadowConfig.defaults
+         //    |> ShadowConfig.withResolution 2048
+         //    |> ShadowConfig.withCascades 3
+         //  )
+         //  |> PipelineConfig.withShader
+         //    ShaderBase.ShadowCaster
+         //    "Effects/ShadowCaster"
+         |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
         // |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
         // |> PipelineConfig.withShader ShaderBase.DeferredLighting "Effects/DeferredLighting"
         )
