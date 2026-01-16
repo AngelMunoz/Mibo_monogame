@@ -72,7 +72,7 @@ module BloomConfig =
 
 /// Tone mapping options
 type ToneMappingConfig =
-  | None
+  | NoToneMapping
   | Reinhard
   | ACES
   | Filmic

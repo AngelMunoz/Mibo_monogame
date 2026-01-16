@@ -220,7 +220,15 @@ module PipelineSampleGame =
       |> Program.withTick Tick
       |> Program.withSubscription subscribe
       // The pipeline mode is now switchable at runtime via withMode DSL.
-      |> Program.withPipeline PipelineConfig.deferred view
+      |> Program.withPipeline
+        (PipelineConfig.forward
+        // |> PipelineConfig.withShadows (ShadowConfig.defaults |> ShadowConfig.withResolution 2048 |> ShadowConfig.withCascades 3)
+        // |> PipelineConfig.withShader ShaderBase.ShadowCaster "Effects/ShadowCaster"
+        // |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
+        // |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
+        // |> PipelineConfig.withShader ShaderBase.DeferredLighting "Effects/DeferredLighting"
+        )
+        view
 
     use game = new ElmishGame<State, Msg>(program)
     game.Run()

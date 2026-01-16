@@ -456,3 +456,27 @@
 /processorParam:TextureFormat=Compressed
 /build:Models/Platform/platform_4x4x4_blue.obj
 
+#begin Effects/ShadowCaster.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/ShadowCaster.fx
+
+#begin Effects/GBuffer.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/GBuffer.fx
+
+#begin Effects/DeferredLighting.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/DeferredLighting.fx
+
+#begin Effects/PBR.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/PBR.fx
+

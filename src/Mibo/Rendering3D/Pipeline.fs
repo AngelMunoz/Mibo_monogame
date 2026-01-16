@@ -154,6 +154,38 @@ module internal Shared =
     setParam "View" state.CurrentCamera.View
     setParam "Projection" state.CurrentCamera.Projection
 
+    // Lighting
+    setParam
+      "AmbientColor"
+      (state.CurrentLighting.AmbientColor.ToVector3()
+       * state.CurrentLighting.AmbientIntensity)
+
+    let lightDirs =
+      state.CurrentLighting.Lights
+      |> Array.choose (function
+        | Directional dl -> Some dl.Direction
+        | _ -> None)
+
+    let lightColors =
+      state.CurrentLighting.Lights
+      |> Array.choose (function
+        | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
+        | _ -> None)
+
+    if lightDirs.Length > 0 then
+      let dirs = lightDirs |> Array.truncate 3
+      let colors = lightColors |> Array.truncate 3
+
+      let pDirs = effect.Parameters.["LightDirections"]
+
+      if not(isNull pDirs) then
+        pDirs.SetValue(dirs)
+
+      let pCols = effect.Parameters.["LightColors"]
+
+      if not(isNull pCols) then
+        pCols.SetValue(colors)
+
     setParam "AlbedoColor" drawable.Material.PBR.AlbedoColor
     setParam "Metallic" drawable.Material.PBR.Metallic
     setParam "Roughness" drawable.Material.PBR.Roughness
@@ -377,7 +409,7 @@ module internal Shared =
       // 2. Final Post-Process (ToneMapping, Gamma, SSAO composite)
       let tmMode =
         match pp.ToneMapping with
-        | ToneMappingConfig.None -> 0
+        | ToneMappingConfig.NoToneMapping -> 0
         | Reinhard -> 1
         | ACES -> 2
         | Filmic -> 3
@@ -551,10 +583,14 @@ module internal Forward =
     =
     Shared.resetFrameState state
 
-    // Acquire scene target if needed for post-processing
+    // Acquire scene target if needed (for post-processing, shadows, or advanced modes)
+    let needsTarget =
+      state.Config.PostProcess.IsSome
+      || state.Config.Shadows.IsSome
+      || state.Config.Mode <> PipelineMode.Forward
+
     let sceneTarget =
-      match state.Config.PostProcess with
-      | ValueSome _ when not(isNull(box state.RtPool)) ->
+      if needsTarget && not(isNull(box state.RtPool)) then
         let spec = {
           Width = state.Device.PresentationParameters.BackBufferWidth
           Height = state.Device.PresentationParameters.BackBufferHeight
@@ -566,9 +602,8 @@ module internal Forward =
         Shared.setTarget state.Device rt
         state.MainSceneTarget <- ValueSome rt
         ValueSome rt
-
-
-      | _ -> ValueNone
+      else
+        ValueNone
 
     // Process all commands
     for i in 0 .. buffer.Count - 1 do
@@ -581,9 +616,20 @@ module internal Forward =
     // Post-process
     sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
 
+    // Final Blit to backbuffer if we used an intermediate target and didn't post-process (which blits to null)
+    match sceneTarget with
+    | ValueSome rt when state.Config.PostProcess.IsNone ->
+      Shared.setTarget state.Device null
+
+      if not(isNull(box state.SpriteBatch)) then
+        state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+        state.Device.SamplerStates.[0] <- SamplerState.PointClamp
+        state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
+        state.SpriteBatch.End()
+    | _ -> ()
+
     if not(isNull(box state.RtPool)) then
       state.RtPool.ReleaseAll()
-
 // ============================================================================
 // ForwardPlus - Forward+ rendering
 // ============================================================================
@@ -1042,10 +1088,9 @@ module internal Deferred =
     else
       Shared.resetFrameState state
 
-      // Acquire scene target if needed for post-processing
+      // Acquire scene target if needed (always for Deferred to composite correctly)
       let sceneTarget =
-        match state.Config.PostProcess with
-        | ValueSome _ when not(isNull(box state.RtPool)) ->
+        if not(isNull(box state.RtPool)) then
           let spec = {
             Width = state.Device.PresentationParameters.BackBufferWidth
             Height = state.Device.PresentationParameters.BackBufferHeight
@@ -1057,7 +1102,8 @@ module internal Deferred =
           Shared.setTarget state.Device rt
           state.MainSceneTarget <- ValueSome rt
           ValueSome rt
-        | _ -> ValueNone
+        else
+          ValueNone
 
       for i in 0 .. buffer.Count - 1 do
         let struct (_, cmd) = buffer.[i]
@@ -1068,6 +1114,18 @@ module internal Deferred =
       // Post-process
       sceneTarget
       |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+
+      // Final Blit if no post-processing
+      match sceneTarget with
+      | ValueSome rt when state.Config.PostProcess.IsNone ->
+        Shared.setTarget state.Device null
+
+        if not(isNull(box state.SpriteBatch)) then
+          state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
+          state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
+          state.SpriteBatch.End()
+      | _ -> ()
 
       if not(isNull(box state.RtPool)) then
         state.RtPool.ReleaseAll()
