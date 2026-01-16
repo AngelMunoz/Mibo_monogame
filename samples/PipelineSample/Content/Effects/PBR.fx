@@ -36,8 +36,8 @@ sampler ShadowSampler = sampler_state
     Texture = <ShadowMap>;
     AddressU = Clamp;
     AddressV = Clamp;
-    MinFilter = Linear;
-    MagFilter = Linear;
+    MinFilter = Point;
+    MagFilter = Point;
     MipFilter = None;
 };
 
@@ -67,7 +67,8 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
 	float4 viewPosition = mul(worldPosition, View);
 	output.Position = mul(viewPosition, Projection);
 	output.TexCoord = input.TexCoord;
-    output.Normal = mul(input.Normal, (float3x3)World);
+    float3 normal = normalize(mul(input.Normal, (float3x3)World));
+    output.Normal = normal;
 
     // Shadow coordinates
     float4 shadowPos = mul(worldPosition, LightView);
@@ -83,17 +84,27 @@ float CalculateShadow(float4 shadowCoord)
     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
     
     // Transform to [0,1] range
-    float2 shadowTexCoord = float2(0.5 * projCoords.x + 0.5, -0.5 * projCoords.y + 0.5);
-    float currentDepth = projCoords.z;
+    float2 uv = float2(0.5 * projCoords.x + 0.5, -0.5 * projCoords.y + 0.5);
+    float z = projCoords.z;
 
-    // Check if outside shadow map
-    if (shadowTexCoord.x < 0 || shadowTexCoord.x > 1 || shadowTexCoord.y < 0 || shadowTexCoord.y > 1)
+    // Check if outside shadow map range [0, 1]
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || z < 0.0 || z > 1.0)
         return 1.0;
 
-    float shadowMapDepth = tex2D(ShadowSampler, shadowTexCoord).r;
-    
-    float bias = 0.001;
-    return (currentDepth - bias > shadowMapDepth) ? 0.5 : 1.0;
+    // PCF 3x3
+    float shadow = 0.0;
+    float2 texelSize = float2(1.0 / 2048.0, 1.0 / 2048.0);
+    float bias = 0.002;
+
+    for(int x = -1; x <= 1; ++x)
+    {
+        for(int y = -1; y <= 1; ++y)
+        {
+            float pcfDepth = tex2D(ShadowSampler, uv + float2(x, y) * texelSize).r; 
+            shadow += (z > pcfDepth + bias) ? 0.1 : 1.0;
+        }
+    }
+    return shadow / 9.0;
 }
 
 float4 MainPS(VertexShaderOutput input) : COLOR0

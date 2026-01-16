@@ -389,29 +389,44 @@ module internal Shared =
           let lightView = Matrix.CreateLookAt(lightPos, center, Vector3.Up)
 
           // Transform frustum corners to light space to find bounds
-          let mutable minX, minY, minZ = infinityf, infinityf, infinityf
-          let mutable maxX, maxY, maxZ = -infinityf, -infinityf, -infinityf
+          let mutable minX, minY = infinityf, infinityf
+          let mutable maxX, maxY = -infinityf, -infinityf
 
           for i in 0 .. corners.Length - 1 do
             let lp = Vector3.Transform(corners.[i], lightView)
             minX <- min minX lp.X
-            minY <- min minY lp.Y
-            minZ <- min minZ lp.Z
             maxX <- max maxX lp.X
+            minY <- min minY lp.Y
             maxY <- max maxY lp.Y
-            maxZ <- max maxZ lp.Z
 
-          // Use the frustum bounds in light space for the projection
-          // Distances are -Z in right-handed view space
+          // Include the actual objects to be shadowed to tighten the frustum
+          for i in 0 .. state.OpaqueDrawables.Count - 1 do
+            let struct (_, d) = state.OpaqueDrawables.[i]
+            let lp = Vector3.Transform(d.BoundingSphere.Center, lightView)
+            let r = d.BoundingSphere.Radius
+            minX <- min minX (lp.X - r)
+            maxX <- max maxX (lp.X + r)
+            minY <- min minY (lp.Y - r)
+            maxY <- max maxY (lp.Y + r)
+
+          // Set safe Z range relative to light source
+          // Since lightPos = center - lightDir * (radius + 100)
+          // Near plane can be small, far plane covers the whole radius-based range
+          let padding = 10f
           let lightProj =
             Matrix.CreateOrthographicOffCenter(
-              minX,
-              maxX,
-              minY,
-              maxY,
-              -maxZ - 10f, // near distance
-              -minZ + 10f  // far distance
+              minX - padding,
+              maxX + padding,
+              minY - padding,
+              maxY + padding,
+              0.1f,
+              (radius + 100f) * 2f
             )
+
+          // Set state for shadow rendering
+          state.Device.DepthStencilState <- DepthStencilState.Default
+          state.Device.RasterizerState <- RasterizerState.CullNone
+          state.Device.BlendState <- BlendState.Opaque
 
           for i in 0 .. state.OpaqueDrawables.Count - 1 do
             let struct (_, drawable) = state.OpaqueDrawables.[i]
@@ -423,6 +438,9 @@ module internal Shared =
                 shadowEffect
                 lightView
                 lightProj
+
+          // Reset rasterizer state for main pass
+          state.Device.RasterizerState <- RasterizerState.CullCounterClockwise
 
           state.ShadowViewMatrices.Add(lightView)
           state.ShadowProjectionMatrices.Add(lightProj)
@@ -912,10 +930,14 @@ module internal ForwardPlus =
     else
       Shared.resetFrameState state
 
-      // Acquire scene target if needed for post-processing
+      // Acquire scene target if needed (for post-processing, shadows, or advanced modes)
+      let needsTarget =
+        state.Config.PostProcess.IsSome
+        || state.Config.Shadows.IsSome
+        || state.Config.Mode <> PipelineMode.Forward
+
       let sceneTarget =
-        match state.Config.PostProcess with
-        | ValueSome _ when not(isNull(box state.RtPool)) ->
+        if needsTarget && not(isNull(box state.RtPool)) then
           let spec = {
             Width = state.Device.PresentationParameters.BackBufferWidth
             Height = state.Device.PresentationParameters.BackBufferHeight
@@ -927,7 +949,8 @@ module internal ForwardPlus =
           Shared.setTarget state.Device rt
           state.MainSceneTarget <- ValueSome rt
           ValueSome rt
-        | _ -> ValueNone
+        else
+          ValueNone
 
       for i in 0 .. buffer.Count - 1 do
         let struct (_, cmd) = buffer.[i]
@@ -938,6 +961,18 @@ module internal ForwardPlus =
       // Post-process
       sceneTarget
       |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+
+      // Final Blit to backbuffer
+      match sceneTarget with
+      | ValueSome rt when state.Config.PostProcess.IsNone ->
+        Shared.setTarget state.Device null
+
+        if not(isNull(box state.SpriteBatch)) then
+          state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
+          state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
+          state.SpriteBatch.End()
+      | _ -> ()
 
       if not(isNull(box state.RtPool)) then
         state.RtPool.ReleaseAll()
@@ -1064,6 +1099,23 @@ module internal Deferred =
         if not(isNull effect.Parameters.["NormalMap"]) then
           effect.Parameters.["NormalMap"].SetValue(normal)
 
+        // Bind Shadow Data
+        if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
+          let pShadowMap = effect.Parameters.["ShadowMap"]
+
+          if not(isNull pShadowMap) then
+            pShadowMap.SetValue(state.ShadowMaps.[0])
+
+          let pLightView = effect.Parameters.["LightView"]
+
+          if not(isNull pLightView) then
+            pLightView.SetValue(state.ShadowViewMatrices.[0])
+
+          let pLightProj = effect.Parameters.["LightProjection"]
+
+          if not(isNull pLightProj) then
+            pLightProj.SetValue(state.ShadowProjectionMatrices.[0])
+
         bindLighting effect state.CurrentLighting
 
         Shared.renderFullScreenQuad state.Device effect
@@ -1173,9 +1225,14 @@ module internal Deferred =
     else
       Shared.resetFrameState state
 
-      // Acquire scene target if needed (always for Deferred to composite correctly)
+      // Acquire scene target if needed (for post-processing, shadows, or advanced modes)
+      let needsTarget =
+        state.Config.PostProcess.IsSome
+        || state.Config.Shadows.IsSome
+        || state.Config.Mode <> PipelineMode.Forward
+
       let sceneTarget =
-        if not(isNull(box state.RtPool)) then
+        if needsTarget && not(isNull(box state.RtPool)) then
           let spec = {
             Width = state.Device.PresentationParameters.BackBufferWidth
             Height = state.Device.PresentationParameters.BackBufferHeight
@@ -1200,7 +1257,7 @@ module internal Deferred =
       sceneTarget
       |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
 
-      // Final Blit if no post-processing
+      // Final Blit to backbuffer
       match sceneTarget with
       | ValueSome rt when state.Config.PostProcess.IsNone ->
         Shared.setTarget state.Device null

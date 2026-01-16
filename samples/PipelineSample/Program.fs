@@ -152,7 +152,7 @@ module PipelineSampleGame =
         (MathHelper.ToRadians 45f)
         (1280f / 720f)
         0.1f
-        1000f
+        200f
 
     // Setup rendering environment using DSL
     buffer
