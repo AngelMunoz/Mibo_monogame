@@ -1288,14 +1288,17 @@ module internal Deferred =
       state.Device.Viewport <- viewport
     | ClearTarget(colorOpt, clearDepth) ->
       flushDrawBatch state
+
+      let flags =
+        match colorOpt, clearDepth with
+        | ValueSome _, true -> ClearOptions.Target ||| ClearOptions.DepthBuffer
+        | ValueSome _, false -> ClearOptions.Target
+        | ValueNone, true -> ClearOptions.DepthBuffer
+        | ValueNone, false -> ClearOptions.Target
+
       let color = colorOpt |> ValueOption.defaultValue Color.Black
 
-      state.Device.Clear(
-        ClearOptions.Target ||| ClearOptions.DepthBuffer,
-        color,
-        1f,
-        0
-      )
+      state.Device.Clear(flags, color, 1f, 0)
     | Draw drawable -> Shared.batchDrawable state drawable
     | DrawCustom drawFn ->
       flushDrawBatch state

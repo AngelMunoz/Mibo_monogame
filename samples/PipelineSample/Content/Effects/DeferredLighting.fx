@@ -91,13 +91,13 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 {
     // 1. Sample G-Buffer
 	float4 albedo = tex2D(AlbedoSampler, input.TexCoord);
-    if (albedo.a <= 0.0) discard;
+    if (albedo.a < 0.001) discard;
 
 	float3 normal = normalize(tex2D(NormalSampler, input.TexCoord).rgb * 2.0 - 1.0);
     float depth = tex2D(DepthSampler, input.TexCoord).r;
     
-    // Discard background pixels
-    if (depth >= 0.999) discard;
+    // Discard background pixels (cleared to 1.0)
+    if (depth > 0.999) discard;
 
     // 2. Reconstruct World Position from NDC
     float4 clipPos;
