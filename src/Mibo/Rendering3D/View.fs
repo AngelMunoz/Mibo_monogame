@@ -17,6 +17,7 @@ type DrawState = {
   mutable LocalScale: Vector3
   mutable Material: Material
   mutable Parent: Matrix voption
+  mutable EffectOverride: Effect voption
 }
 
 module DrawState =
@@ -27,6 +28,7 @@ module DrawState =
     LocalScale = Vector3.One
     Material = Material.defaultOpaque
     Parent = ValueNone
+    EffectOverride = ValueNone
   }
 
   /// Compute final world transform from local components + parent
@@ -51,6 +53,7 @@ module DrawState =
         Transform = transform
         Material = state.Material
         BoundingSphere = mesh.BoundingSphere.Transform(transform)
+        EffectOverride = state.EffectOverride
       }
     | ValueNone -> ValueNone
 
@@ -123,20 +126,24 @@ type DrawableBuilder() =
 
   [<CustomOperation("lookAt")>]
   member inline _.LookAt(state: DrawState, target: Vector3) =
-    let forward = Vector3.Normalize(target - state.LocalPosition)
+    // Guard against zero-distance to prevent NaN from Normalize
+    if Vector3.DistanceSquared(target, state.LocalPosition) < 0.0001f then
+      state
+    else
+      let forward = Vector3.Normalize(target - state.LocalPosition)
 
-    let up =
-      if abs(Vector3.Dot(forward, Vector3.Up)) > 0.999f then
-        Vector3.Forward
-      else
-        Vector3.Up
+      let up =
+        if abs(Vector3.Dot(forward, Vector3.Up)) > 0.999f then
+          Vector3.Forward
+        else
+          Vector3.Up
 
-    let rot =
-      Quaternion.CreateFromRotationMatrix(
-        Matrix.CreateWorld(Vector3.Zero, forward, up)
-      )
+      let rot =
+        Quaternion.CreateFromRotationMatrix(
+          Matrix.CreateWorld(Vector3.Zero, forward, up)
+        )
 
-    { state with LocalRotation = rot }
+      { state with LocalRotation = rot }
 
   // === Scale ===
 
@@ -199,6 +206,14 @@ type DrawableBuilder() =
   member inline _.WithFlags(state: DrawState, flags: MaterialFlags) = {
     state with
         Material = state.Material |> Material.withFlags flags
+  }
+
+  // === Effect Override (Escape Hatch) ===
+
+  [<CustomOperation("withEffect")>]
+  member inline _.WithEffect(state: DrawState, effect: Effect) = {
+    state with
+        EffectOverride = ValueSome effect
   }
 
 // ============================================================================

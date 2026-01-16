@@ -189,7 +189,11 @@ module internal Shared =
 
   let renderDrawableFallback (state: PipelineState) (drawable: Drawable) =
     let mesh = drawable.Mesh
-    let effect = mesh.Effect
+    // Use per-drawable effect override if present, otherwise fall back to mesh effect
+    let effect =
+      match drawable.EffectOverride with
+      | ValueSome e -> e
+      | ValueNone -> mesh.Effect
 
     state.Device.SetVertexBuffer(mesh.VertexBuffer)
     state.Device.Indices <- mesh.IndexBuffer
@@ -295,9 +299,6 @@ module internal Shared =
           )
 
           // Compute Light View fitting the camera frustum
-          let lightRotation =
-            Matrix.CreateLookAt(Vector3.Zero, dl.Direction, Vector3.Up)
-
           let lightView =
             Matrix.CreateLookAt(Vector3.Zero, dl.Direction, Vector3.Up)
 
@@ -534,7 +535,7 @@ module internal Forward =
     | SetCamera camera -> processSetCamera state camera
     | SetLighting lighting -> processSetLighting state lighting
     | SetViewport viewport -> processSetViewport state viewport
-    | SetMode mode -> 
+    | SetMode mode ->
       flushDrawBatch state
       state.Config <- { state.Config with Mode = mode }
     | ClearTarget(colorOpt, clearDepth) ->
@@ -566,7 +567,7 @@ module internal Forward =
         state.MainSceneTarget <- ValueSome rt
         ValueSome rt
 
-        
+
       | _ -> ValueNone
 
     // Process all commands
@@ -621,8 +622,8 @@ module internal ForwardPlus =
       let ndc = Vector2(clip.X / clip.W, clip.Y / clip.W)
       minX <- min minX ndc.X
       minY <- min minY ndc.Y
-      maxX <- max ndc.X ndc.X
-      maxY <- max ndc.Y ndc.Y
+      maxX <- max maxX ndc.X
+      maxY <- max maxY ndc.Y
 
     // NDC [-1, 1] to Viewport [0, Size]
     let toScreen x size = (x + 1f) * 0.5f * float32 size
@@ -775,39 +776,40 @@ module internal ForwardPlus =
     (state: PipelineState)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
-    if not (state.CustomShaders.ContainsKey(ShaderBase.PBRForward)) then
-        Forward.render state buffer
+    if not(state.CustomShaders.ContainsKey(ShaderBase.PBRForward)) then
+      Forward.render state buffer
     else
-        Shared.resetFrameState state
+      Shared.resetFrameState state
 
-        // Acquire scene target if needed for post-processing
-        let sceneTarget =
-          match state.Config.PostProcess with
-          | ValueSome _ when not(isNull(box state.RtPool)) ->
-            let spec = {
-              Width = state.Device.PresentationParameters.BackBufferWidth
-              Height = state.Device.PresentationParameters.BackBufferHeight
-              Format = SurfaceFormat.Color
-              DepthFormat = DepthFormat.Depth24
-            }
+      // Acquire scene target if needed for post-processing
+      let sceneTarget =
+        match state.Config.PostProcess with
+        | ValueSome _ when not(isNull(box state.RtPool)) ->
+          let spec = {
+            Width = state.Device.PresentationParameters.BackBufferWidth
+            Height = state.Device.PresentationParameters.BackBufferHeight
+            Format = SurfaceFormat.Color
+            DepthFormat = DepthFormat.Depth24
+          }
 
-            let rt = state.RtPool.Acquire spec
-            Shared.setTarget state.Device rt
-            state.MainSceneTarget <- ValueSome rt
-            ValueSome rt
-          | _ -> ValueNone
+          let rt = state.RtPool.Acquire spec
+          Shared.setTarget state.Device rt
+          state.MainSceneTarget <- ValueSome rt
+          ValueSome rt
+        | _ -> ValueNone
 
-        for i in 0 .. buffer.Count - 1 do
-          let struct (_, cmd) = buffer.[i]
-          processCommand state cmd
+      for i in 0 .. buffer.Count - 1 do
+        let struct (_, cmd) = buffer.[i]
+        processCommand state cmd
 
-        flushDrawBatch state
+      flushDrawBatch state
 
-        // Post-process
-        sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+      // Post-process
+      sceneTarget
+      |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
 
-        if not(isNull(box state.RtPool)) then
-          state.RtPool.ReleaseAll()
+      if not(isNull(box state.RtPool)) then
+        state.RtPool.ReleaseAll()
 
 // ============================================================================
 // Deferred - Deferred rendering implementation
@@ -1031,43 +1033,44 @@ module internal Deferred =
     (state: PipelineState)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
-    let hasShaders = 
-        state.CustomShaders.ContainsKey(ShaderBase.GBufferFill) && 
-        state.CustomShaders.ContainsKey(ShaderBase.DeferredLighting)
-    
+    let hasShaders =
+      state.CustomShaders.ContainsKey(ShaderBase.GBufferFill)
+      && state.CustomShaders.ContainsKey(ShaderBase.DeferredLighting)
+
     if not hasShaders then
-        Forward.render state buffer
+      Forward.render state buffer
     else
-        Shared.resetFrameState state
+      Shared.resetFrameState state
 
-        // Acquire scene target if needed for post-processing
-        let sceneTarget =
-          match state.Config.PostProcess with
-          | ValueSome _ when not(isNull(box state.RtPool)) ->
-            let spec = {
-              Width = state.Device.PresentationParameters.BackBufferWidth
-              Height = state.Device.PresentationParameters.BackBufferHeight
-              Format = SurfaceFormat.Color
-              DepthFormat = DepthFormat.Depth24
-            }
+      // Acquire scene target if needed for post-processing
+      let sceneTarget =
+        match state.Config.PostProcess with
+        | ValueSome _ when not(isNull(box state.RtPool)) ->
+          let spec = {
+            Width = state.Device.PresentationParameters.BackBufferWidth
+            Height = state.Device.PresentationParameters.BackBufferHeight
+            Format = SurfaceFormat.Color
+            DepthFormat = DepthFormat.Depth24
+          }
 
-            let rt = state.RtPool.Acquire spec
-            Shared.setTarget state.Device rt
-            state.MainSceneTarget <- ValueSome rt
-            ValueSome rt
-          | _ -> ValueNone
+          let rt = state.RtPool.Acquire spec
+          Shared.setTarget state.Device rt
+          state.MainSceneTarget <- ValueSome rt
+          ValueSome rt
+        | _ -> ValueNone
 
-        for i in 0 .. buffer.Count - 1 do
-          let struct (_, cmd) = buffer.[i]
-          processCommand state cmd
+      for i in 0 .. buffer.Count - 1 do
+        let struct (_, cmd) = buffer.[i]
+        processCommand state cmd
 
-        flushDrawBatch state
+      flushDrawBatch state
 
-        // Post-process
-        sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+      // Post-process
+      sceneTarget
+      |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
 
-        if not(isNull(box state.RtPool)) then
-          state.RtPool.ReleaseAll()
+      if not(isNull(box state.RtPool)) then
+        state.RtPool.ReleaseAll()
 
 
 // ============================================================================
@@ -1139,4 +1142,3 @@ module RenderPipeline =
         member _.Initialize(gd) = Orchestrate.initialize state game gd
         member _.Render(_, buffer) = Orchestrate.render state buffer
     }
-

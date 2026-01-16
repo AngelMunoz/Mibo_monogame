@@ -265,6 +265,7 @@ type Drawable = {
   Transform: Matrix
   Material: Material
   BoundingSphere: BoundingSphere
+  EffectOverride: Effect voption
 }
 
 module Drawable =
@@ -274,6 +275,7 @@ module Drawable =
     Transform = transform
     Material = material
     BoundingSphere = mesh.BoundingSphere.Transform(transform)
+    EffectOverride = ValueNone
   }
 
 // ============================================================================
