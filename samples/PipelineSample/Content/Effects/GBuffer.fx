@@ -36,7 +36,7 @@ struct VertexShaderOutput
 	float4 Position : SV_POSITION;
 	float2 TexCoord : TEXCOORD0;
 	float3 Normal : TEXCOORD1;
-    float2 LinearDepth : TEXCOORD3;
+    float3 WorldPos : TEXCOORD3;
 };
 
 VertexShaderOutput MainVS(in VertexShaderInput input)
@@ -51,8 +51,8 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
     // Transform normal to world space
     output.Normal = normalize(mul(input.Normal, (float3x3)World));
     
-    // Pass linear depth (z/w)
-    output.LinearDepth = output.Position.zw;
+    // Pass world position
+    output.WorldPos = worldPosition.xyz;
 
 	return output;
 }
@@ -61,7 +61,7 @@ struct PixelShaderOutput
 {
 	float4 Albedo : COLOR0;
 	float4 Normal : COLOR1;
-    float4 Depth : COLOR2;
+    float4 WorldPos : COLOR2;
 };
 
 PixelShaderOutput MainPS(VertexShaderOutput input)
@@ -74,13 +74,11 @@ PixelShaderOutput MainPS(VertexShaderOutput input)
         
 	output.Albedo = texColor * AlbedoColor;
     
-    // Store normal in [0, 1] range for Color (RGBA8) compatibility
-    float3 normal = normalize(input.Normal);
-    output.Normal = float4(normal * 0.5 + 0.5, 1.0);
+    // Store raw normal
+    output.Normal = float4(normalize(input.Normal), 1.0);
     
-    // Store linear depth
-    float depth = input.LinearDepth.x / input.LinearDepth.y;
-    output.Depth = float4(depth, depth, depth, 1.0);
+    // Store world position
+    output.WorldPos = float4(input.WorldPos, 1.0);
 
 	return output;
 }

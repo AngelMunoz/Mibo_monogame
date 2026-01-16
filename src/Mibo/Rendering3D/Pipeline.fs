@@ -1025,24 +1025,22 @@ module internal Deferred =
       let normalSpec = {
         Width = width
         Height = height
-        Format = SurfaceFormat.Color
+        Format = SurfaceFormat.Vector4
         DepthFormat = DepthFormat.None
       }
 
-      let depthSpec = {
+      let worldPosSpec = {
         Width = width
         Height = height
-        Format = SurfaceFormat.Single
+        Format = SurfaceFormat.Vector4
         DepthFormat = DepthFormat.None
       }
 
       let rtAlbedo = state.RtPool.Acquire albedoSpec
-
       let rtNormal = state.RtPool.Acquire normalSpec
-
-      let rtDepth = 
+      let rtWorldPos = 
         state.RtPool.Acquire {
-          depthSpec with
+          worldPosSpec with
               DepthFormat = DepthFormat.Depth24
         }
 
@@ -1057,16 +1055,16 @@ module internal Deferred =
         state.Device.SetRenderTarget(rtNormal)
         state.Device.Clear(Color.Transparent)
         
-        // Depth: White (1.0)
-        state.Device.SetRenderTarget(rtDepth)
-        state.Device.Clear(Color.White)
+        // WorldPos: Transparent (0,0,0,0)
+        state.Device.SetRenderTarget(rtWorldPos)
+        state.Device.Clear(Color.Transparent)
 
         // Bind all for MRT. 
         // Note: state.Device will use rtAlbedo's depth buffer because it's first.
         state.Device.SetRenderTargets(
           new RenderTargetBinding(rtAlbedo),
           new RenderTargetBinding(rtNormal),
-          new RenderTargetBinding(rtDepth)
+          new RenderTargetBinding(rtWorldPos)
         )
 
         // Render all opaque objects to G-Buffer
@@ -1079,7 +1077,7 @@ module internal Deferred =
         | ValueSome rt -> Shared.setTarget state.Device rt
         | ValueNone -> Shared.setTarget state.Device null
 
-        ValueSome(rtAlbedo, rtNormal, rtDepth)
+        ValueSome(rtAlbedo, rtNormal, rtWorldPos)
       | false, _ ->
         // Fallback: Ensure correct target is set before drawing
         match state.MainSceneTarget with
@@ -1148,8 +1146,8 @@ module internal Deferred =
         if not(isNull effect.Parameters.["NormalMap"]) then
           effect.Parameters.["NormalMap"].SetValue(normal)
 
-        if not(isNull effect.Parameters.["DepthMap"]) then
-          effect.Parameters.["DepthMap"].SetValue(depth)
+        if not(isNull effect.Parameters.["WorldPosMap"]) then
+          effect.Parameters.["WorldPosMap"].SetValue(depth)
 
         // Bind Point Light Data
         let pointLightData =
@@ -1198,12 +1196,6 @@ module internal Deferred =
             pLightProj.SetValue(state.ShadowProjectionMatrices.[0])
 
         bindLighting effect state.CurrentLighting
-
-        // Pass camera matrices for depth reconstruction
-        let pInvViewProj = effect.Parameters.["InvertViewProjection"]
-        if not(isNull pInvViewProj) then
-            let vp = state.CurrentCamera.View * state.CurrentCamera.Projection
-            pInvViewProj.SetValue(Matrix.Invert(vp))
 
         state.Device.DepthStencilState <- DepthStencilState.None
         Shared.renderFullScreenQuad state.Device effect

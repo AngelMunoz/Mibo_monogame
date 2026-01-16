@@ -14,8 +14,8 @@ sampler AlbedoSampler = sampler_state { Texture = <AlbedoMap>; MagFilter = Point
 texture NormalMap;
 sampler NormalSampler = sampler_state { Texture = <NormalMap>; MagFilter = Point; MinFilter = Point; AddressU = Clamp; AddressV = Clamp; };
 
-texture DepthMap;
-sampler DepthSampler = sampler_state { Texture = <DepthMap>; MagFilter = Point; MinFilter = Point; AddressU = Clamp; AddressV = Clamp; };
+texture WorldPosMap;
+sampler WorldPosSampler = sampler_state { Texture = <WorldPosMap>; MagFilter = Point; MinFilter = Point; AddressU = Clamp; AddressV = Clamp; };
 
 // Lighting
 float3 AmbientColor;
@@ -41,7 +41,6 @@ sampler ShadowSampler = sampler_state
 
 matrix LightView;
 matrix LightProjection;
-matrix InvertViewProjection;
 
 struct VertexShaderInput
 {
@@ -91,27 +90,16 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 {
     // 1. Sample G-Buffer
 	float4 albedo = tex2D(AlbedoSampler, input.TexCoord);
+    
+    // Discard if no geometry (Albedo Alpha will be 0 from clear)
     if (albedo.a < 0.001) discard;
 
-	float3 normal = normalize(tex2D(NormalSampler, input.TexCoord).rgb * 2.0 - 1.0);
-    float depth = tex2D(DepthSampler, input.TexCoord).r;
-    
-    // Discard background pixels (cleared to 1.0)
-    if (depth > 0.999) discard;
+	float3 normal = normalize(tex2D(NormalSampler, input.TexCoord).rgb);
+    float3 worldPos = tex2D(WorldPosSampler, input.TexCoord).rgb;
 
-    // 2. Reconstruct World Position from NDC
-    float4 clipPos;
-    clipPos.x = input.TexCoord.x * 2.0 - 1.0;
-    clipPos.y = (1.0 - input.TexCoord.y) * 2.0 - 1.0;
-    clipPos.z = depth;
-    clipPos.w = 1.0;
-
-    float4 worldPos = mul(clipPos, InvertViewProjection);
-    worldPos /= worldPos.w;
-
-    // 3. Directional Lighting
-    // Calculate shadow coordinates for the reconstructed world position
-    float4 shadowPos = mul(worldPos, LightView);
+    // 2. Directional Lighting
+    // Calculate shadow coordinates for the world position
+    float4 shadowPos = mul(float4(worldPos, 1.0), LightView);
     shadowPos = mul(shadowPos, LightProjection);
     float shadow = CalculateShadow(shadowPos);
 
@@ -124,12 +112,12 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
         diffuse += ndotl * LightColors[i] * atten;
     }
 
-    // 4. Point Lights (Standard Loop)
+    // 3. Point Lights
     for(int j = 0; j < 32; j++)
     {
         if (j >= (int)PointLightCount) break;
 
-        float3 lightDir = PointLightData[j].xyz - worldPos.xyz;
+        float3 lightDir = PointLightData[j].xyz - worldPos;
         float dist = length(lightDir);
         float range = PointLightData[j].w;
         
@@ -137,10 +125,7 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
         {
             lightDir /= dist;
             float ndotl = max(dot(normal, lightDir), 0.0);
-            
-            // Attenuation matching Forward mode: (1 - dist/range)^2
             float atten = pow(max(1.0 - (dist / range), 0.0), 2.0);
-            
             diffuse += ndotl * PointLightColors[j].rgb * atten;
         }
     }
