@@ -77,7 +77,7 @@ module Lighting =
       Light.Directional {
         Direction = Vector3.Normalize(Vector3(-0.5f, -1f, -0.5f))
         Color = Color.White
-        Intensity = 1.5f
+        Intensity = 0.8f
         Shadow = ValueSome ShadowSettings.defaults
         CascadeCount = 3
         CascadeSplits = [| 0.1f; 0.3f; 1f |]

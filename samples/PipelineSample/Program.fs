@@ -17,6 +17,8 @@ module PipelineSampleGame =
   type Msg =
     | InputMapped of ActionState<GameAction>
     | Tick of GameTime
+    | SetPipelineMode of PipelineMode
+    | Noop
 
   // Shared ref for input map (allows dynamic remapping)
   let private inputMapRef: InputMap<GameAction> ref = ref InputMap.empty
@@ -65,7 +67,6 @@ module PipelineSampleGame =
 
     // Load models and convert to Mesh
     let playerModel = Assets.model "Models/Platform/ball_blue" ctx
-    // Assuming simple models with 1 mesh part for the sample
     let playerMesh = Mesh.fromModel playerModel |> Seq.head
     let playerBounds = Platform.computeBounds playerMesh
 
@@ -80,10 +81,15 @@ module PipelineSampleGame =
     let gridVerts, gridLineCount = Grid.create platforms 3.0f Color.White
     let gridEffect = Assets.effect "Effects/Grid" ctx
 
+    // Load texture
+    let platformTexture =
+      Assets.texture "Models/Platform/platformer_texture_0" ctx
+
     let assets = {
       PlayerMesh = playerMesh
       PlayerBounds = playerBounds
       PlatformMesh = platformMesh
+      PlatformTexture = platformTexture
       PlatformBounds = platformBounds
       PlatformGrid = gridVerts
       PlatformGridLineCount = gridLineCount
@@ -122,6 +128,9 @@ module PipelineSampleGame =
       |> System.pipe Player.checkRespawn
       |> System.finish id
 
+    | SetPipelineMode mode -> { state with PipelineMode = mode }, Cmd.none
+    | Noop -> state, Cmd.none
+
   // ─────────────────────────────────────────────────────────────
   // View: Render the 3D scene
   // ─────────────────────────────────────────────────────────────
@@ -145,25 +154,24 @@ module PipelineSampleGame =
         0.1f
         1000f
 
-    // Use Render DSL
-    // View.render buffer { ... } commented out to debug
+    // Setup rendering environment using DSL
+    render buffer {
+      withCamera camera
+      withLighting Lighting.defaultSunlight
+      clear Color.CornflowerBlue
+      clearDepth
+    }
 
-    // Manual fallback
-    buffer.Add((), SetCamera camera)
-    buffer.Add((), ClearTarget(ValueSome Color.CornflowerBlue, true))
-
+    // Render Platforms using loop outside CE
     for plat in state.Platforms do
-      let d =
-        View.draw.Run {
-          DrawState.empty with
-              Mesh = ValueSome state.Assets.PlatformMesh
-              LocalPosition = plat.Position
-              Material =
-                Material.defaultOpaque |> Material.withAlbedo Color.White
+        View.render buffer {
+            draw {
+                mesh state.Assets.PlatformMesh
+                at plat.Position
+            }
         }
 
-      d |> ValueOption.iter(fun drawable -> buffer.Add((), Draw drawable))
-
+    // Grid
     Grid.draw
       state.PlayerPosition
       7.0f
@@ -172,16 +180,24 @@ module PipelineSampleGame =
       state.Assets.PlatformGridLineCount
       buffer
 
+    // Player
     Player.view ctx state buffer
-
 
   // ─────────────────────────────────────────────────────────────
   // Subscribe
   // ─────────────────────────────────────────────────────────────
 
-  let subscribe (ctx: GameContext) (_state: State) =
+  let subscribe (ctx: GameContext) (state: State) =
     Sub.batch [
       InputMapper.subscribe (fun () -> inputMapRef.Value) InputMapped ctx
+      Keyboard.onPressed
+        (fun key ->
+          match key with
+          | Keys.D1 -> SetPipelineMode Forward
+          | Keys.D2 -> SetPipelineMode ForwardPlus
+          | Keys.D3 -> SetPipelineMode Deferred
+          | _ -> Noop)
+        ctx
     ]
 
   // ─────────────────────────────────────────────────────────────
@@ -191,18 +207,20 @@ module PipelineSampleGame =
   [<EntryPoint>]
   let main _ =
     let program =
-      Mibo.Elmish.Program.mkProgram init update
-      |> Mibo.Elmish.Program.withConfig(fun (game, graphics) ->
+      Program.mkProgram init update
+      |> Program.withConfig(fun (game, graphics) ->
         game.Content.RootDirectory <- "Content"
         game.Window.Title <- "Mibo Render Pipeline Sample"
         graphics.PreferredBackBufferWidth <- 1280
         graphics.PreferredBackBufferHeight <- 720
         game.IsMouseVisible <- true)
-      |> Mibo.Elmish.Program.withInput
-      |> Mibo.Elmish.Program.withAssets
-      |> Mibo.Elmish.Program.withTick Tick
-      |> Mibo.Elmish.Program.withSubscription subscribe
-      // Use the new Pipeline Renderer
+      |> Program.withInput
+      |> Program.withAssets
+      |> Program.withTick Tick
+      |> Program.withSubscription subscribe
+      // The pipeline mode is currently static in this helper.
+      // To support runtime toggle, one would need to recreate or use a dynamic config.
+      // For this sample, we'll initialize with Forward.
       |> Program.withPipeline PipelineConfig.forward view
 
     use game = new ElmishGame<State, Msg>(program)

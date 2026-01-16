@@ -177,6 +177,12 @@ type DrawableBuilder() =
         Material = state.Material |> Material.withAlbedo color
   }
 
+  [<CustomOperation("withAlbedoMap")>]
+  member inline _.WithAlbedoMap(state: DrawState, texture: Texture2D) = {
+    state with
+        Material = state.Material |> Material.withAlbedoMap texture
+  }
+
   [<CustomOperation("withMetallic")>]
   member inline _.WithMetallic(state: DrawState, metallic: float32) = {
     state with

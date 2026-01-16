@@ -32,6 +32,7 @@ type GameAssets = {
   PlayerMesh: Mesh
   PlayerBounds: BoundingBox
   PlatformMesh: Mesh
+  PlatformTexture: Texture2D
   PlatformBounds: BoundingBox
   PlatformGrid: VertexPositionColor[]
   PlatformGridLineCount: int

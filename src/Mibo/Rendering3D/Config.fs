@@ -121,6 +121,8 @@ type ShaderBase =
   | PBRForward
   | DeferredLighting
   | Unlit
+  | Bloom
+  | PostProcess
 
 /// Main pipeline configuration
 [<Struct>]
@@ -140,6 +142,8 @@ module PipelineConfig =
     DefaultLighting = ValueNone
     ShaderOverrides = Map.empty
   }
+
+  let forwardPlus: PipelineConfig = { forward with Mode = ForwardPlus }
 
   let deferred: PipelineConfig = { forward with Mode = Deferred }
 

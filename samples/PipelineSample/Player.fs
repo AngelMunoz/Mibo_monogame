@@ -36,7 +36,5 @@ let view
           mesh state.Assets.PlayerMesh
           at state.PlayerPosition
           rotatedBy state.Rotation
-          // Optional: Add material if needed, otherwise uses default
-          withAlbedo Color.White
       }
   }

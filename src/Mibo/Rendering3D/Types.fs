@@ -80,6 +80,7 @@ type Mesh = {
   IndexCount: int
   BoundingBox: BoundingBox
   BoundingSphere: BoundingSphere
+  Effect: Effect
 }
 
 module Mesh =
@@ -95,6 +96,7 @@ module Mesh =
         IndexCount = part.PrimitiveCount * 3
         BoundingBox = BoundingBox.CreateFromSphere(bounds)
         BoundingSphere = bounds
+        Effect = part.Effect
       })
 
   /// Create all meshes from a Model
@@ -107,6 +109,7 @@ module Mesh =
     (ib: IndexBuffer)
     (indexCount: int)
     (bounds: BoundingBox)
+    (effect: Effect)
     : Mesh =
     {
       VertexBuffer = vb
@@ -114,6 +117,7 @@ module Mesh =
       IndexCount = indexCount
       BoundingBox = bounds
       BoundingSphere = BoundingSphere.CreateFromBoundingBox(bounds)
+      Effect = effect
     }
 
 // ============================================================================
