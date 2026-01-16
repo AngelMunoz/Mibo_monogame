@@ -232,70 +232,153 @@ type RenderBuilder(_buffer: RenderBuffer<unit, RenderCommand>) =
 
   member inline _.Zero() = ()
   member inline _.Delay([<InlineIfLambda>] f: unit -> unit) = f
-  member inline _.Run([<InlineIfLambda>] f: unit -> unit) = f()
-
-  /// Combine for unit (custom operations return unit)
-  member inline _.Combine(_, [<InlineIfLambda>] f: unit -> unit) = f()
-
-  /// Combine for Drawable voption - handles `draw { }` expressions
-  member inline this.Combine
-    (drawable: Drawable voption, [<InlineIfLambda>] f: unit -> unit)
-    =
-    drawable |> ValueOption.iter(fun d -> this.buffer.Add((), Draw d))
-    f()
+  member inline _.Run(_) = ()
 
   member inline _.For(source: 'T seq, [<InlineIfLambda>] body: 'T -> unit) =
     for item in source do
       body item
 
+  member inline this.For
+    (source: 'T seq, [<InlineIfLambda>] body: 'T -> Drawable voption)
+    =
+    for item in source do
+      body item |> ValueOption.iter(fun d -> this.buffer.Add((), Draw d))
+
+  member inline this.Combine(state, draw: Drawable voption) =
+    draw |> ValueOption.iter(fun d -> this.buffer.Add((), Draw d))
+
+  member inline this.Combine(state, draw: unit -> unit) = draw()
+
   // === Camera ===
 
   [<CustomOperation("withCamera")>]
-  member inline this.WithCamera(_, camera: Mibo.Rendering.Graphics3D.Camera) =
+  member inline this.WithCamera
+    (state, camera: Mibo.Rendering.Graphics3D.Camera)
+    =
     this.buffer.Add((), SetCamera camera)
+    state
 
   // === Lighting ===
 
   [<CustomOperation("withLighting")>]
-  member inline this.WithLighting(_, lighting: LightingState) =
+  member inline this.WithLighting(state, lighting: LightingState) =
     this.buffer.Add((), SetLighting lighting)
+    state
 
   // === Viewport ===
 
   [<CustomOperation("withViewport")>]
-  member inline this.WithViewport(_, viewport: Viewport) =
+  member inline this.WithViewport(state, viewport: Viewport) =
     this.buffer.Add((), SetViewport viewport)
+    state
 
   // === Mode ===
 
   [<CustomOperation("withMode")>]
-  member inline this.WithMode(_, mode: PipelineMode) =
+  member inline this.WithMode(state, mode: PipelineMode) =
     this.buffer.Add((), SetMode mode)
+    state
 
   // === Clear ===
 
   [<CustomOperation("clear")>]
-  member inline this.Clear(_, color: Color) =
+  member inline this.Clear(state, color: Color) =
     this.buffer.Add((), ClearTarget(ValueSome color, true))
+    state
 
   [<CustomOperation("clearTarget")>]
-  member inline this.ClearTarget(_, color: Color, clearDepth: bool) =
+  member inline this.ClearTarget(state, color: Color, clearDepth: bool) =
     this.buffer.Add((), ClearTarget(ValueSome color, clearDepth))
+    state
 
   [<CustomOperation("clearDepth")>]
-  member inline this.ClearDepth(_) =
+  member inline this.ClearDepth(state) =
     this.buffer.Add((), ClearTarget(ValueNone, true))
+    state
 
   // === Custom ===
 
   [<CustomOperation("custom")>]
   member inline this.Custom
     (
-      _,
+      state,
       [<InlineIfLambda>] drawFn:
         GraphicsDevice -> Mibo.Rendering.Graphics3D.Camera -> unit
     ) =
     this.buffer.Add((), DrawCustom drawFn)
+    state
+
+module RenderBuilder =
+
+  let inline camera
+    (camera: Mibo.Rendering.Graphics3D.Camera)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), SetCamera camera)
+    buffer
+
+  let inline lighting
+    (lighting: LightingState)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), SetLighting lighting)
+    buffer
+
+  let inline viewport
+    (viewport: Viewport)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), SetViewport viewport)
+    buffer
+
+  let inline mode
+    (mode: PipelineMode)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), SetMode mode)
+    buffer
+
+  let inline clear (color: Color) (buffer: RenderBuffer<unit, RenderCommand>) =
+    buffer.Add((), ClearTarget(ValueSome color, true))
+    buffer
+
+  let inline clearTarget
+    (color: Color)
+    (clearDepth: bool)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), ClearTarget(ValueSome color, clearDepth))
+    buffer
+
+  let inline clearDepth(buffer: RenderBuffer<unit, RenderCommand>) =
+    buffer.Add((), ClearTarget(ValueNone, true))
+    buffer
+
+  let inline custom
+    ([<InlineIfLambda>] drawFn:
+      GraphicsDevice -> Mibo.Rendering.Graphics3D.Camera -> unit)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), DrawCustom drawFn)
+    buffer
+
+  let inline draw
+    (drawable: Drawable voption)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    drawable |> ValueOption.iter(fun d -> buffer.Add((), Draw d))
+    buffer
+
+  let inline drawMany
+    (drawables: seq<Drawable voption>)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    for drawable in drawables do
+      drawable |> ValueOption.iter(fun d -> buffer.Add((), Draw d))
+
+    buffer
+
+  let inline submit(buffer: RenderBuffer<unit, RenderCommand>) = ()
 
 // ============================================================================
 // Module API

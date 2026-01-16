@@ -50,30 +50,37 @@ let draw
   (effect: Effect)
   (vertices: VertexPositionColor[])
   (lineCount: int)
-  (buffer: RenderBuffer<unit, RenderCommand>)
   =
 
   if lineCount > 0 then
     // Use DrawCustom for immediate mode drawing within the pipeline
     // The pipeline handles flushing before calling this
     let drawFn (device: GraphicsDevice) (camera: Camera) =
-        // Setup effect parameters
-        effect.Parameters.["World"].SetValue(Matrix.Identity)
-        effect.Parameters.["View"].SetValue(camera.View)
-        effect.Parameters.["Projection"].SetValue(camera.Projection)
-        effect.Parameters.["PlayerPosition"].SetValue(playerPos)
-        effect.Parameters.["MaxDistance"].SetValue(maxDist)
+      // Setup effect parameters
+      effect.Parameters.["World"].SetValue(Matrix.Identity)
+      effect.Parameters.["View"].SetValue(camera.View)
+      effect.Parameters.["Projection"].SetValue(camera.Projection)
+      effect.Parameters.["PlayerPosition"].SetValue(playerPos)
+      effect.Parameters.["MaxDistance"].SetValue(maxDist)
 
-        device.BlendState <- BlendState.AlphaBlend
-        device.DepthStencilState <- DepthStencilState.DepthRead
+      device.BlendState <- BlendState.AlphaBlend
+      device.DepthStencilState <- DepthStencilState.DepthRead
 
-        for pass in effect.CurrentTechnique.Passes do
-            pass.Apply()
-            device.DrawUserPrimitives(PrimitiveType.LineList, vertices, 0, lineCount)
-        
-        // Restore defaults if needed (Pipeline usually handles this but good practice)
-        device.BlendState <- BlendState.Opaque
-        device.DepthStencilState <- DepthStencilState.Default
+      for pass in effect.CurrentTechnique.Passes do
+        pass.Apply()
+
+        device.DrawUserPrimitives(
+          PrimitiveType.LineList,
+          vertices,
+          0,
+          lineCount
+        )
+
+      // Restore defaults if needed (Pipeline usually handles this but good practice)
+      device.BlendState <- BlendState.Opaque
+      device.DepthStencilState <- DepthStencilState.Default
 
     // Add command to buffer
-    buffer.Add((), DrawCustom drawFn)
+    drawFn
+  else
+    fun _ _ -> ()

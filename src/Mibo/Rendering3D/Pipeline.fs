@@ -393,9 +393,22 @@ module internal Shared =
         | _ -> ()
 
       match state.MainSceneTarget with
-      | ValueSome rt -> setTarget state.Device rt
-      | ValueNone -> setTarget state.Device null
-    | false, _ -> ()
+      | ValueSome rt ->
+        System.Diagnostics.Debug.WriteLine(
+          $"[ShadowPass] Restoring MainSceneTarget {rt.Width}x{rt.Height}"
+        )
+
+        setTarget state.Device rt
+      | ValueNone ->
+        System.Diagnostics.Debug.WriteLine(
+          "[ShadowPass] Restoring to backbuffer (null)"
+        )
+
+        setTarget state.Device null
+    | false, _ ->
+      System.Diagnostics.Debug.WriteLine(
+        "[ShadowPass] No ShadowCaster shader - skipped"
+      )
 
   let renderFullScreenQuad (device: GraphicsDevice) (effect: Effect) =
     let vertices = [|
@@ -639,6 +652,10 @@ module internal Forward =
     // Final Blit to backbuffer if we used an intermediate target and didn't post-process (which blits to null)
     match sceneTarget with
     | ValueSome rt when state.Config.PostProcess.IsNone ->
+      System.Diagnostics.Debug.WriteLine(
+        $"[Pipeline] Blitting RT to backbuffer. RT size: {rt.Width}x{rt.Height}"
+      )
+
       Shared.setTarget state.Device null
 
       if not(isNull(box state.SpriteBatch)) then
@@ -646,7 +663,17 @@ module internal Forward =
         state.Device.SamplerStates.[0] <- SamplerState.PointClamp
         state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
         state.SpriteBatch.End()
-    | _ -> ()
+        System.Diagnostics.Debug.WriteLine("[Pipeline] Blit complete")
+      else
+        System.Diagnostics.Debug.WriteLine(
+          "[Pipeline] WARNING: SpriteBatch is null!"
+        )
+    | ValueSome _ ->
+      System.Diagnostics.Debug.WriteLine("[Pipeline] PostProcess handles blit")
+    | ValueNone ->
+      System.Diagnostics.Debug.WriteLine(
+        "[Pipeline] No RT - rendering directly to backbuffer"
+      )
 
     if not(isNull(box state.RtPool)) then
       state.RtPool.ReleaseAll()

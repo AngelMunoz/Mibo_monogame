@@ -155,34 +155,38 @@ module PipelineSampleGame =
         1000f
 
     // Setup rendering environment using DSL
-    render buffer {
-      withMode state.PipelineMode
-      withCamera camera
-      withLighting Lighting.defaultSunlight
-      clear Color.CornflowerBlue
-      clearDepth
-    }
-
-    // Render Platforms using loop outside CE
-    for plat in state.Platforms do
-      View.render buffer {
-        draw {
-          mesh state.Assets.PlatformMesh
-          at plat.Position
-        }
+    buffer
+    |> RenderBuilder.mode state.PipelineMode
+    |> RenderBuilder.camera camera
+    |> RenderBuilder.lighting Lighting.defaultSunlight
+    |> RenderBuilder.clear Color.CornflowerBlue
+    |> RenderBuilder.clearDepth
+    |> RenderBuilder.drawMany(
+      [|
+        for plat in state.Platforms do
+          draw {
+            mesh state.Assets.PlatformMesh
+            at plat.Position
+          }
+      |]
+    )
+    |> RenderBuilder.draw(
+      draw {
+        mesh state.Assets.PlayerMesh
+        at state.PlayerPosition
+        rotatedBy state.Rotation
       }
+    )
+    |> RenderBuilder.custom(
+      Grid.draw
+        state.PlayerPosition
+        7.0f
+        state.Assets.GridEffect
+        state.Assets.PlatformGrid
+        state.Assets.PlatformGridLineCount
+    )
+    |> RenderBuilder.submit
 
-    // Grid
-    Grid.draw
-      state.PlayerPosition
-      7.0f
-      state.Assets.GridEffect
-      state.Assets.PlatformGrid
-      state.Assets.PlatformGridLineCount
-      buffer
-
-    // Player
-    Player.view ctx state buffer
 
   // ─────────────────────────────────────────────────────────────
   // Subscribe
@@ -222,14 +226,14 @@ module PipelineSampleGame =
       // The pipeline mode is now switchable at runtime via withMode DSL.
       |> Program.withPipeline
         (PipelineConfig.forward
-         //  |> PipelineConfig.withShadows(
-         //    ShadowConfig.defaults
-         //    |> ShadowConfig.withResolution 2048
-         //    |> ShadowConfig.withCascades 3
-         //  )
-         //  |> PipelineConfig.withShader
-         //    ShaderBase.ShadowCaster
-         //    "Effects/ShadowCaster"
+         |> PipelineConfig.withShadows(
+           ShadowConfig.defaults
+           |> ShadowConfig.withResolution 2048
+           |> ShadowConfig.withCascades 3
+         )
+         |> PipelineConfig.withShader
+           ShaderBase.ShadowCaster
+           "Effects/ShadowCaster"
          |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
         // |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
         // |> PipelineConfig.withShader ShaderBase.DeferredLighting "Effects/DeferredLighting"

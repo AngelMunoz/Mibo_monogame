@@ -29,12 +29,12 @@ let view
   (state: State)
   (buffer: RenderBuffer<unit, RenderCommand>)
   : unit =
-  
+
   // Using the new Render DSL
-  View.render buffer {
-      View.draw {
-          mesh state.Assets.PlayerMesh
-          at state.PlayerPosition
-          rotatedBy state.Rotation
-      }
+  render buffer {
+    draw {
+      mesh state.Assets.PlayerMesh
+      at state.PlayerPosition
+      rotatedBy state.Rotation
+    }
   }
