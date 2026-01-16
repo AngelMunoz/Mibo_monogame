@@ -32,8 +32,8 @@
     <Compile Include="Rendering3D/Config.fs" />
     <Compile Include="Rendering3D/RenderTargetPool.fs" />
     <Compile Include="Rendering3D/Pipeline.fs" />
-    <Compile Include="Rendering3D/View.fs" />
-    <Compile Include="Rendering3D/Program.fs" />
+    <Compile Include="Rendering3D/View.fs" /><Compile Include="Rendering3D/Program.fs" />
+    
     <Compile Include="Graphics3D.fs" />
     <Compile Include="System.fs" />
     <Compile Include="Program.fs" />

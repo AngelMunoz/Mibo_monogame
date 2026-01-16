@@ -400,5 +400,4 @@ let withPipeline
   : Program<'Model, 'Msg> =
   program
   |> withRenderer(fun game ->
-    let pipeline = RenderPipeline.forward config game
-    PipelineRenderer.create pipeline view game)
+    RenderPipeline.create config game |> PipelineRenderer.create game view)

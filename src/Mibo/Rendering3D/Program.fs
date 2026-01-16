@@ -26,9 +26,9 @@ type internal PipelineRenderer<'Model>
 
 module PipelineRenderer =
   let create
-    (pipeline: IRenderPipeline)
-    (view: GameContext -> 'Model -> RenderBuffer<unit, RenderCommand> -> unit)
     (game: Game)
+    (view: GameContext -> 'Model -> RenderBuffer<unit, RenderCommand> -> unit)
+    (pipeline: IRenderPipeline)
     : IRenderer<'Model> =
     pipeline.Initialize(game.GraphicsDevice)
     PipelineRenderer(pipeline, view)

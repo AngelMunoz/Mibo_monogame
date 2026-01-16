@@ -486,84 +486,177 @@ let cameraTests =
   ]
 
 // ============================================================================
-// Sorting Tests (Logic only - no GPU)
+// Pipeline Logic Tests
 // ============================================================================
 
 [<Tests>]
-let sortingTests =
-  testList "Sorting Logic" [
-    testCase "Shared.isTransparent detects transparent flag"
+let pipelineLogicTests =
+  testList "Pipeline Logic" [
+    testCase "isTransparent correctly identifies transparency"
     <| fun _ ->
-      let opaque = TestHelpers.drawableAt Vector3.Zero false
-      let transparent = TestHelpers.drawableAt Vector3.Zero true
+      // Case 1: Flag
+      let matFlag = TestHelpers.materialWithFlags MaterialFlags.Transparent
 
-      // We can't directly test Shared.isTransparent as it's private,
-      // but we can verify the material flags are set correctly
-      Expect.isFalse
-        (opaque.Material.Flags.HasFlag(MaterialFlags.Transparent))
-        "Opaque should not have transparent flag"
+      let drawFlag = {
+        TestHelpers.drawableAt Vector3.Zero false with
+            Material = matFlag
+      }
 
       Expect.isTrue
-        (transparent.Material.Flags.HasFlag(MaterialFlags.Transparent))
-        "Transparent should have transparent flag"
+        (Shared.isTransparent drawFlag)
+        "Should be transparent due to flag"
 
-    testCase "Shared.distanceToCamera calculates squared distance"
+      // Case 2: Alpha
+      let matAlpha =
+        TestHelpers.materialWithFlags MaterialFlags.None
+        |> Material.withAlbedo(Color(255, 255, 255, 100))
+
+      let drawAlpha = {
+        TestHelpers.drawableAt Vector3.Zero false with
+            Material = matAlpha
+      }
+
+      Expect.isTrue
+        (Shared.isTransparent drawAlpha)
+        "Should be transparent due to alpha < 255"
+
+      // Case 3: Opaque
+      let matOpaque = TestHelpers.materialWithFlags MaterialFlags.None
+
+      let drawOpaque = {
+        TestHelpers.drawableAt Vector3.Zero false with
+            Material = matOpaque
+      }
+
+      Expect.isFalse (Shared.isTransparent drawOpaque) "Should be opaque"
+
+    testCase "batchDrawable culls objects outside frustum"
     <| fun _ ->
+      let config = PipelineConfig.forward
+      let state = Shared.createState config
+      // Camera at (0,0,10) looking at (0,0,0)
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
-      let drawable = TestHelpers.drawableAt Vector3.Zero false
+      state.CurrentCamera <- cam
+      state.CameraWasSet <- true
 
-      let distSq =
-        Vector3.DistanceSquared(cam.Position, drawable.BoundingSphere.Center)
+      // 1. Visible object at origin
+      let visible = TestHelpers.drawableAt Vector3.Zero false
+      Shared.batchDrawable state visible
 
-      Expect.floatClose
-        Accuracy.medium
-        (float distSq)
-        100.0
-        "Distance squared should be 100"
+      Expect.equal state.OpaqueDrawables.Count 1 "Should have 1 opaque drawable"
+
+      // 2. Invisible object behind camera
+      let invisible = TestHelpers.drawableAt (Vector3(0f, 0f, 100f)) false
+      Shared.batchDrawable state invisible
+
+      Expect.equal
+        state.OpaqueDrawables.Count
+        1
+        "Count should not increase for culled object"
+
+    testCase "batchDrawable separates opaque and transparent"
+    <| fun _ ->
+      let config = PipelineConfig.forward
+      let state = Shared.createState config
+      let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
+      state.CurrentCamera <- cam
+      state.CameraWasSet <- true
+
+      let opaque = TestHelpers.drawableAt Vector3.Zero false
+      let transparent = TestHelpers.drawableAt (Vector3(1f, 0f, 0f)) true
+
+      Shared.batchDrawable state opaque
+      Shared.batchDrawable state transparent
+
+      Expect.equal state.OpaqueDrawables.Count 1 "Should have 1 opaque"
+
+      Expect.equal
+        state.TransparentDrawables.Count
+        1
+        "Should have 1 transparent"
+
+    testCase "Sorting logic: Opaque is Front-to-Back"
+    <| fun _ ->
+      // Simulate the list
+      let drawables = ResizeArray<struct (float32 * int)>() // (distance, id)
+      drawables.Add(struct (100.0f, 1)) // Far
+      drawables.Add(struct (10.0f, 2)) // Near
+      drawables.Add(struct (50.0f, 3)) // Mid
+
+      // Sort ascending (distance)
+      drawables.Sort(fun struct (d1, _) struct (d2, _) -> d1.CompareTo(d2))
+
+      let struct (d1, id1) = drawables.[0]
+      let struct (d2, id2) = drawables.[1]
+      let struct (d3, id3) = drawables.[2]
+
+      Expect.equal id1 2 "Nearest (id 2) should be first"
+      Expect.equal id2 3 "Mid (id 3) should be second"
+      Expect.equal id3 1 "Farthest (id 1) should be last"
+
+    testCase "Sorting logic: Transparent is Back-to-Front"
+    <| fun _ ->
+      // Simulate the list
+      let drawables = ResizeArray<struct (float32 * int)>()
+      drawables.Add(struct (100.0f, 1)) // Far
+      drawables.Add(struct (10.0f, 2)) // Near
+      drawables.Add(struct (50.0f, 3)) // Mid
+
+      // Sort descending (distance)
+      drawables.Sort(fun struct (d1, _) struct (d2, _) -> d2.CompareTo(d1))
+
+      let struct (d1, id1) = drawables.[0]
+      let struct (d2, id2) = drawables.[1]
+      let struct (d3, id3) = drawables.[2]
+
+      Expect.equal id1 1 "Farthest (id 1) should be first"
+      Expect.equal id2 3 "Mid (id 3) should be second"
+      Expect.equal id3 2 "Nearest (id 2) should be last"
   ]
 
 // ============================================================================
-// Culling Tests
+// Pipeline Orchestration Tests
 // ============================================================================
 
 [<Tests>]
-let cullingTests =
-  testList "Frustum Culling" [
-    testCase "Object at origin is visible from camera at (0,0,10)"
+let pipelineOrchestrationTests =
+  testList "Pipeline Orchestration" [
+    testCase "RenderPipeline.create initializes correct mode"
     <| fun _ ->
-      let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
-      let drawable = TestHelpers.drawableAt Vector3.Zero false
+      let configs = [
+        PipelineConfig.forward
+        {
+          PipelineConfig.forward with
+              Mode = PipelineMode.ForwardPlus
+        }
+        PipelineConfig.deferred
+      ]
 
-      let frustum = BoundingFrustum(cam.View * cam.Projection)
+      for config in configs do
+        let state = Shared.createState config
+        Expect.equal state.Config.Mode config.Mode "Mode should match config"
 
-      let visible =
-        frustum.Contains(drawable.BoundingSphere) <> ContainmentType.Disjoint
-
-      Expect.isTrue visible "Object at origin should be visible"
-
-    testCase "Object far behind camera is not visible"
+    testCase "ForwardPlus and Deferred renderers don't crash on empty buffer"
     <| fun _ ->
-      let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
-      let drawable = TestHelpers.drawableAt (Vector3(0f, 0f, 100f)) false // Behind camera
+      let buffer = RenderBuffer<unit, RenderCommand>()
 
-      let frustum = BoundingFrustum(cam.View * cam.Projection)
+      let forwardPlusState =
+        Shared.createState {
+          PipelineConfig.forward with
+              Mode = PipelineMode.ForwardPlus
+        }
 
-      let visible =
-        frustum.Contains(drawable.BoundingSphere) <> ContainmentType.Disjoint
+      ForwardPlus.render forwardPlusState buffer
 
-      Expect.isFalse visible "Object behind camera should not be visible"
+      let deferredState =
+        Shared.createState {
+          PipelineConfig.forward with
+              Mode = PipelineMode.Deferred
+        }
 
-    testCase "Object far to the side is not visible"
-    <| fun _ ->
-      let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
-      let drawable = TestHelpers.drawableAt (Vector3(1000f, 0f, 0f)) false // Way off to the side
+      Deferred.render deferredState buffer
 
-      let frustum = BoundingFrustum(cam.View * cam.Projection)
-
-      let visible =
-        frustum.Contains(drawable.BoundingSphere) <> ContainmentType.Disjoint
-
-      Expect.isFalse visible "Object far to the side should not be visible"
+      Expect.isTrue true "Should not crash on empty buffer"
   ]
 
 // ============================================================================

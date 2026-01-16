@@ -3,4 +3,5 @@
     <Project Path="2DSample/MiboSample.fsproj" />
   </Folder>
   <Project Path="3DSample/3DSample.fsproj" />
+  <Project Path="PipelineSample/PipelineSample.fsproj" />
 </Solution>
