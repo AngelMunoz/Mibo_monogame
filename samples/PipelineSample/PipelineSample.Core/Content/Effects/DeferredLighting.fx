@@ -165,11 +165,11 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
             {
                 float ndotl = max(dot(normal, L), 0.0);
                 float distAtten = pow(max(1.0 - (dist / range), 0.0), 2.0);
-                
+
                 // Cone falloff
                 float epsilon = cosInner - cosOuter;
                 float coneAtten = clamp((theta - cosOuter) / epsilon, 0.0, 1.0);
-                
+
                 diffuse += ndotl * SpotLightColors[k].rgb * distAtten * coneAtten;
             }
         }
