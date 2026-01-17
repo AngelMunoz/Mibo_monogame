@@ -1,10 +1,10 @@
-#if OPENGL
+ #if OPENGL
 	#define SV_POSITION POSITION
 	#define VS_SHADERMODEL vs_3_0
 	#define PS_SHADERMODEL ps_3_0
 #else
-	#define VS_SHADERMODEL vs_4_0_level_9_1
-	#define PS_SHADERMODEL ps_4_0_level_9_1
+	#define VS_SHADERMODEL vs_5_0
+	#define PS_SHADERMODEL ps_5_0
 #endif
 
 matrix World;
@@ -29,7 +29,7 @@ float3 AmbientColor;
 float3 LightDirections[3];
 float3 LightColors[3];
 
-// Point Lights
+ // Point Lights
 float4 PointLightData[32];   // xyz = position, w = range
 float4 PointLightColors[32]; // rgb = color * intensity
 float PointLightCount = 0;
@@ -85,34 +85,34 @@ VertexShaderOutput MainVS(in VertexShaderInput input)
 	return output;
 }
 
-float CalculateShadow(float4 shadowCoord)
-{
-    // Perspective divide
-    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
-    
-    // Transform to [0,1] range
-    float2 uv = float2(0.5 * projCoords.x + 0.5, -0.5 * projCoords.y + 0.5);
-    float z = projCoords.z;
+ float CalculateShadow(float4 shadowCoord)
+ {
+     // Perspective divide
+     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
+     
+     // Transform to [0,1] range
+     float2 uv = float2(0.5 * projCoords.x + 0.5, -0.5 * projCoords.y + 0.5);
+     float z = projCoords.z;
 
-    // Check if outside shadow map range [0, 1]
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || z < 0.0 || z > 1.0)
-        return 1.0;
+     // Check if outside shadow map range [0, 1]
+     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || z < 0.0 || z > 1.0)
+         return 1.0;
 
-    // PCF 3x3
-    float shadow = 0.0;
-    float2 texelSize = float2(1.0 / 2048.0, 1.0 / 2048.0);
-    float bias = 0.002;
+     // PCF 3x3
+     float shadow = 0.0;
+     float2 texelSize = float2(1.0 / 2048.0, 1.0 / 2048.0);
+     float bias = 0.002;
 
-    for(int x = -1; x <= 1; ++x)
-    {
-        for(int y = -1; y <= 1; ++y)
-        {
-            float pcfDepth = tex2Dlod(ShadowSampler, float4(uv + float2(x, y) * texelSize, 0, 0)).r; 
-            shadow += (z > pcfDepth + bias) ? 0.1 : 1.0;
-        }
-    }
-    return shadow / 9.0;
-}
+     for(int x = -1; x <= 1; ++x)
+     {
+         for(int y = -1; y <= 1; ++y)
+         {
+             float pcfDepth = tex2Dlod(ShadowSampler, float4(uv + float2(x, y) * texelSize, 0.0, 0.0)).r; 
+             shadow += (z > pcfDepth + bias) ? 0.1 : 1.0;
+         }
+     }
+     return shadow / 9.0;
+ }
 
 float4 MainPS(VertexShaderOutput input) : COLOR0
 {
@@ -134,7 +134,7 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
         diffuse += ndotl * LightColors[i] * atten;
     }
 
-    // Point Lights (Standard Loop)
+     // Point Lights (Standard Loop)
     for(int j = 0; j < 32; j++)
     {
         if (j >= (int)PointLightCount) break;

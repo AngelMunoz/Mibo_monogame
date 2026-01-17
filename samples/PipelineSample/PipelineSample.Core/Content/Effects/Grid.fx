@@ -1,6 +1,15 @@
-// -----------------------------------------------------------------------------
+ // -----------------------------------------------------------------------------
 // Grid.fx - Path: samples/3DSample/Content/Effects/Grid.fx
 // -----------------------------------------------------------------------------
+
+#if OPENGL
+	#define SV_POSITION POSITION
+	#define VS_SHADERMODEL vs_3_0
+	#define PS_SHADERMODEL ps_3_0
+#else
+	#define VS_SHADERMODEL vs_5_0
+	#define PS_SHADERMODEL ps_5_0
+#endif
 
 matrix World;
 matrix View;
@@ -47,7 +56,7 @@ technique Fade
 {
     pass P0
     {
-        VertexShader = compile vs_3_0 MainVS();
-        PixelShader = compile ps_3_0 MainPS();
+        VertexShader = compile VS_SHADERMODEL MainVS();
+        PixelShader = compile PS_SHADERMODEL MainPS();
     }
 }

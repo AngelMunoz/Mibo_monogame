@@ -1,10 +1,10 @@
-module PipelineSample.Player
+module PipelineSample.Core.Player
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
 open Mibo.Rendering.Graphics3D
-open PipelineSample
+open PipelineSample.Core
 
 // ─────────────────────────────────────────────────────────────
 // Player System: Respawn and rendering
@@ -22,19 +22,3 @@ let checkRespawn<'Msg>(state: State) : struct (State * Cmd<'Msg>) =
     Cmd.none
   else
     state, Cmd.none
-
-/// Render the player ball with rotation
-let view
-  (_ctx: GameContext)
-  (state: State)
-  (buffer: RenderBuffer<unit, RenderCommand>)
-  : unit =
-
-  // Using the new Render DSL
-  render buffer {
-    draw {
-      mesh state.Assets.PlayerMesh
-      at state.PlayerPosition
-      rotatedBy state.Rotation
-    }
-  }

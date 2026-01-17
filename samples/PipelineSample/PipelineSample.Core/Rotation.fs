@@ -1,8 +1,8 @@
-module PipelineSample.Rotation
+module PipelineSample.Core.Rotation
 
 open Microsoft.Xna.Framework
 open Mibo.Elmish
-open PipelineSample
+open PipelineSample.Core
 
 // ─────────────────────────────────────────────────────────────
 // Rotation System: Ball rolling based on velocity

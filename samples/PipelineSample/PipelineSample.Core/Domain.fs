@@ -1,4 +1,4 @@
-namespace PipelineSample
+namespace PipelineSample.Core
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
@@ -51,7 +51,7 @@ type State = {
   Assets: GameAssets
   Platforms: PlatformData list
   PipelineMode: PipelineMode 
-  Time: float32 // Added for light animation
+  Time: float32
 }
 
 // ─────────────────────────────────────────────────────────────

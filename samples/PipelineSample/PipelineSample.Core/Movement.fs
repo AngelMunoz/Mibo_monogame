@@ -1,9 +1,9 @@
-module PipelineSample.Movement
+module PipelineSample.Core.Movement
 
 open Microsoft.Xna.Framework
 open Mibo.Elmish
 open Mibo.Input
-open PipelineSample
+open PipelineSample.Core
 
 // ─────────────────────────────────────────────────────────────
 // Movement System: Input → velocity with acceleration/friction

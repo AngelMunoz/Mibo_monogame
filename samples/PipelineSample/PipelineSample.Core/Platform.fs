@@ -1,8 +1,9 @@
-module PipelineSample.Platform
+module PipelineSample.Core.Platform
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Rendering.Graphics3D
+open PipelineSample.Core
 
 // ─────────────────────────────────────────────────────────────
 // Platform System: Bounds computation and collision detection

@@ -1,4 +1,4 @@
-namespace PipelineSample
+namespace PipelineSample.Core
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
@@ -8,7 +8,7 @@ open Mibo.Elmish
 open Mibo.Rendering.Graphics3D
 open Mibo.Input
 
-module PipelineSampleGame =
+module Game =
 
   // ─────────────────────────────────────────────────────────────
   // Messages
@@ -239,41 +239,36 @@ module PipelineSampleGame =
     ]
 
   // ─────────────────────────────────────────────────────────────
-  // Entry Point
+  // Program Factory
   // ─────────────────────────────────────────────────────────────
 
-  [<EntryPoint>]
-  let main _ =
-    let program =
-      Program.mkProgram init update
-      |> Program.withConfig(fun (game, graphics) ->
-        game.Content.RootDirectory <- "Content"
-        game.Window.Title <- "Mibo Render Pipeline Sample"
-        graphics.PreferredBackBufferWidth <- 1280
-        graphics.PreferredBackBufferHeight <- 720
-        game.IsMouseVisible <- true)
-      |> Program.withInput
-      |> Program.withAssets
-      |> Program.withTick Tick
-      |> Program.withSubscription subscribe
-      // The pipeline mode is now switchable at runtime via withMode DSL.
-      |> Program.withPipeline
-        (PipelineConfig.forward
-         |> PipelineConfig.withShadows(
-           ShadowConfig.defaults
-           |> ShadowConfig.withResolution 2048
-           |> ShadowConfig.withCascades 3
-         )
-         |> PipelineConfig.withShader
-           ShaderBase.ShadowCaster
-           "Effects/ShadowCaster"
-         |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
-         |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
-         |> PipelineConfig.withShader
-           ShaderBase.DeferredLighting
-           "Effects/DeferredLighting")
-        view
-
-    use game = new ElmishGame<State, Msg>(program)
-    game.Run()
-    0
+  /// Creates the program for the platform-specific game to use
+  let create() =
+    Program.mkProgram init update
+    |> Program.withConfig(fun (game, graphics) ->
+      game.Content.RootDirectory <- "Content"
+      game.Window.Title <- "Mibo Render Pipeline Sample"
+      graphics.PreferredBackBufferWidth <- 1280
+      graphics.PreferredBackBufferHeight <- 720
+      graphics.GraphicsProfile <- GraphicsProfile.HiDef
+      game.IsMouseVisible <- true)
+    |> Program.withInput
+    |> Program.withAssets
+    |> Program.withTick Tick
+    |> Program.withSubscription subscribe
+    |> Program.withPipeline
+      (PipelineConfig.forward
+       |> PipelineConfig.withShadows(
+         ShadowConfig.defaults
+         |> ShadowConfig.withResolution 2048
+         |> ShadowConfig.withCascades 3
+       )
+       |> PipelineConfig.withShader
+         ShaderBase.ShadowCaster
+         "Effects/ShadowCaster"
+       |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
+       |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
+       |> PipelineConfig.withShader
+         ShaderBase.DeferredLighting
+         "Effects/DeferredLighting")
+      view

@@ -1,10 +1,10 @@
-module PipelineSample.Grid
+module PipelineSample.Core.Grid
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
 open Mibo.Rendering.Graphics3D
-open PipelineSample
+open PipelineSample.Core
 
 /// <summary>
 /// Pre-calculates grid vertices for a set of platform bounds.

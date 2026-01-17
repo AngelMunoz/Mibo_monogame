@@ -1,9 +1,9 @@
-module PipelineSample.Physics
+module PipelineSample.Core.Physics
 
 open Microsoft.Xna.Framework
 open Mibo.Elmish
 open Mibo.Input
-open PipelineSample
+open PipelineSample.Core
 
 // ─────────────────────────────────────────────────────────────
 // Physics System: Gravity, jump, position updates, collisions
