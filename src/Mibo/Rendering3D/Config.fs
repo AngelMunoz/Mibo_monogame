@@ -111,7 +111,7 @@ module PostProcessConfig =
 /// Main pipeline configuration
 [<Struct>]
 type PipelineConfig = {
-  Mode: PipelineMode
+  ShadowPath: ShadowPath
   Shadows: ShadowConfig voption
   PostProcess: PostProcessConfig voption
   DefaultLighting: LightingState voption
@@ -119,17 +119,18 @@ type PipelineConfig = {
 }
 
 module PipelineConfig =
-  let forward: PipelineConfig = {
-    Mode = Forward
+  let defaults: PipelineConfig = {
+    ShadowPath = Auto
     Shadows = ValueNone
     PostProcess = ValueNone
     DefaultLighting = ValueNone
     ShaderOverrides = Map.empty
   }
 
-  let forwardPlus: PipelineConfig = { forward with Mode = ForwardPlus }
-
-  let deferred: PipelineConfig = { forward with Mode = Deferred }
+  let withShadowPath (path: ShadowPath) (pc: PipelineConfig) = {
+    pc with
+        ShadowPath = path
+  }
 
   let withShadows (cfg: ShadowConfig) (pc: PipelineConfig) = {
     pc with

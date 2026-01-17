@@ -17,7 +17,6 @@ module Game =
   type Msg =
     | InputMapped of ActionState<GameAction>
     | Tick of GameTime
-    | SetPipelineMode of PipelineMode
     | Noop
 
   // Shared ref for input map (allows dynamic remapping)
@@ -105,7 +104,6 @@ module Game =
       InputMap = inputMap
       Assets = assets
       Platforms = platforms
-      PipelineMode = PipelineMode.Forward
       Time = 0f
     },
     Cmd.none
@@ -129,7 +127,6 @@ module Game =
       |> System.pipe Player.checkRespawn
       |> System.finish id
 
-    | SetPipelineMode mode -> { state with PipelineMode = mode }, Cmd.none
     | Noop -> state, Cmd.none
 
   // ─────────────────────────────────────────────────────────────
@@ -209,7 +206,6 @@ module Game =
     }
 
     buffer
-    |> RenderBuilder.mode state.PipelineMode
     |> RenderBuilder.camera camera
     |> RenderBuilder.lighting lighting
     |> RenderBuilder.clear Color.CornflowerBlue
@@ -251,9 +247,6 @@ module Game =
       Keyboard.onPressed
         (fun key ->
           match key with
-          | Keys.D1 -> SetPipelineMode Forward
-          | Keys.D2 -> SetPipelineMode ForwardPlus
-          | Keys.D3 -> SetPipelineMode Deferred
           | _ -> Noop)
         ctx
     ]
@@ -277,7 +270,7 @@ module Game =
     |> Program.withTick Tick
     |> Program.withSubscription subscribe
     |> Program.withPipeline
-      (PipelineConfig.forward
+      (PipelineConfig.defaults
        |> PipelineConfig.withShadows(
          ShadowConfig.defaults
          |> ShadowConfig.withResolution 2048
@@ -286,9 +279,5 @@ module Game =
        |> PipelineConfig.withShader
          ShaderBase.ShadowCaster
          "Effects/ShadowCaster"
-       |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
-       |> PipelineConfig.withShader ShaderBase.GBufferFill "Effects/GBuffer"
-       |> PipelineConfig.withShader
-         ShaderBase.DeferredLighting
-         "Effects/DeferredLighting")
+       |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR")
       view

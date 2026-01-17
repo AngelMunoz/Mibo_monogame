@@ -8,18 +8,16 @@ open Microsoft.Xna.Framework.Graphics
 // Core Types for the Rendering Pipeline
 // ============================================================================
 
-/// Pipeline rendering mode
-type PipelineMode =
-  | Forward
-  | ForwardPlus
-  | Deferred
+/// Shadow rendering path
+type ShadowPath =
+  | Auto
+  | ForceDiscrete
+  | ForceArray
 
 /// Shader base types for override mapping
 type ShaderBase =
   | ShadowCaster
-  | GBufferFill
   | PBRForward
-  | DeferredLighting
   | Unlit
   | Bloom
   | PostProcess
@@ -308,8 +306,6 @@ type RenderCommand =
   | SetLighting of lighting: LightingState
   /// Sets the rendering viewport
   | SetViewport of Viewport
-  /// Switches the rendering mode at runtime
-  | SetMode of PipelineMode
   /// Standard clear target command
   | ClearTarget of color: Color voption * clearDepth: bool
   /// Draw a single drawable

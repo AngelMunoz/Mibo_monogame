@@ -50,7 +50,6 @@ type State = {
   InputMap: InputMap<GameAction>
   Assets: GameAssets
   Platforms: PlatformData list
-  PipelineMode: PipelineMode 
   Time: float32
 }
 

@@ -232,7 +232,7 @@ type RenderBuilder(_buffer: RenderBuffer<unit, RenderCommand>) =
 
   member inline _.Zero() = ()
   member inline _.Delay([<InlineIfLambda>] f: unit -> unit) = f
-  member inline _.Run(_) = ()
+  member inline _.Run(f: unit -> unit) = f()
 
   member inline _.For(source: 'T seq, [<InlineIfLambda>] body: 'T -> unit) =
     for item in source do
@@ -270,13 +270,6 @@ type RenderBuilder(_buffer: RenderBuffer<unit, RenderCommand>) =
   [<CustomOperation("withViewport")>]
   member inline this.WithViewport(state, viewport: Viewport) =
     this.buffer.Add((), SetViewport viewport)
-    state
-
-  // === Mode ===
-
-  [<CustomOperation("withMode")>]
-  member inline this.WithMode(state, mode: PipelineMode) =
-    this.buffer.Add((), SetMode mode)
     state
 
   // === Clear ===
@@ -329,13 +322,6 @@ module RenderBuilder =
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
     buffer.Add((), SetViewport viewport)
-    buffer
-
-  let inline mode
-    (mode: PipelineMode)
-    (buffer: RenderBuffer<unit, RenderCommand>)
-    =
-    buffer.Add((), SetMode mode)
     buffer
 
   let inline clear (color: Color) (buffer: RenderBuffer<unit, RenderCommand>) =

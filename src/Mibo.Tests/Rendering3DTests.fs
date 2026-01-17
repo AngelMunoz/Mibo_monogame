@@ -534,7 +534,7 @@ let pipelineLogicTests =
 
     testCase "batchDrawable culls objects outside frustum"
     <| fun _ ->
-      let config = PipelineConfig.forward
+      let config = PipelineConfig.defaults
       let state = Shared.createState config
       // Camera at (0,0,10) looking at (0,0,0)
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
@@ -558,7 +558,7 @@ let pipelineLogicTests =
 
     testCase "batchDrawable separates opaque and transparent"
     <| fun _ ->
-      let config = PipelineConfig.forward
+      let config = PipelineConfig.defaults
       let state = Shared.createState config
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
       state.CurrentCamera <- cam
@@ -623,32 +623,17 @@ let pipelineLogicTests =
 [<Tests>]
 let pipelineOrchestrationTests =
   testList "Pipeline Orchestration" [
-    testCase "ForwardPlus and Deferred renderers don't crash on empty buffer"
+    testCase "TiledForward renderer doesn't crash on empty buffer"
     <| fun _ ->
       let buffer = RenderBuffer<unit, RenderCommand>()
 
-      let forwardPlusState =
-        Shared.createState {
-          PipelineConfig.forward with
-              Mode = PipelineMode.ForwardPlus
-        }
+      let state = Shared.createState PipelineConfig.defaults
 
-      ForwardPlus.render forwardPlusState buffer
+      TiledForward.render state buffer
 
-      let deferredState =
-        Shared.createState {
-          PipelineConfig.forward with
-              Mode = PipelineMode.Deferred
-        }
-
-      Deferred.render deferredState buffer
-
-    testCase "ForwardPlus.cullLights excludes lights outside frustum"
+    testCase "TiledForward.cullLights excludes lights outside frustum"
     <| fun _ ->
-      let config = {
-        PipelineConfig.forward with
-            Mode = PipelineMode.ForwardPlus
-      }
+      let config = PipelineConfig.defaults
 
       let state = Shared.createState config
 
@@ -693,47 +678,22 @@ let pipelineOrchestrationTests =
         Lights = [| dirLight; pointInside; pointOutside |]
       }
 
-      let grid = ForwardPlus.cullLights state
+      let _grid, tileMasks = TiledForward.cullLights state
 
-      // Count unique lights across all tiles
-      let uniqueLights = grid.TileData |> Array.collect id |> Set.ofArray
+      // Union of all bitmasks
+      let allLightsMask = tileMasks |> Array.fold (|||) 0u
 
-      Expect.equal
-        uniqueLights.Count
-        2
-        "Should have 2 unique lights (directional + point inside)"
-
-      let hasDir =
-        uniqueLights
-        |> Set.exists(fun i ->
-          match state.CurrentLighting.Lights.[i] with
-          | Directional _ -> true
-          | _ -> false)
-
-      let hasInside =
-        uniqueLights
-        |> Set.exists(fun i ->
-          match state.CurrentLighting.Lights.[i] with
-          | Point p when p.Position = Vector3.Zero -> true
-          | _ -> false)
-
-      let hasOutside =
-        uniqueLights
-        |> Set.exists(fun i ->
-          match state.CurrentLighting.Lights.[i] with
-          | Point p when p.Position = Vector3(100f, 100f, 100f) -> true
-          | _ -> false)
+      let hasDir = (allLightsMask &&& (1u <<< 0)) <> 0u
+      let hasInside = (allLightsMask &&& (1u <<< 1)) <> 0u
+      let hasOutside = (allLightsMask &&& (1u <<< 2)) <> 0u
 
       Expect.isTrue hasDir "Directional light should be present"
       Expect.isTrue hasInside "Inside point light should be present"
       Expect.isFalse hasOutside "Outside point light should be culled"
 
-    testCase "ForwardPlus.cullLights assigns point light to correct tiles"
+    testCase "TiledForward.cullLights assigns point light to correct tiles"
     <| fun _ ->
-      let config = {
-        PipelineConfig.forward with
-            Mode = PipelineMode.ForwardPlus
-      }
+      let config = PipelineConfig.defaults
 
       let state = Shared.createState config
 
@@ -755,12 +715,12 @@ let pipelineOrchestrationTests =
         Lights = [| pointLight |]
       }
 
-      let grid = ForwardPlus.cullLights state
+      let grid, tileMasks = TiledForward.cullLights state
 
       let occupiedTiles =
-        grid.TileData
+        tileMasks
         |> Array.indexed
-        |> Array.filter(fun (_, lights) -> lights.Length > 0)
+        |> Array.filter(fun (_, mask) -> mask <> 0u)
         |> Array.map fst
 
       Expect.isTrue
@@ -768,7 +728,7 @@ let pipelineOrchestrationTests =
         "At least one tile should have the light"
 
       Expect.isTrue
-        (occupiedTiles.Length < grid.TileData.Length)
+        (occupiedTiles.Length < tileMasks.Length)
         "Not all tiles should have the light"
 
       // Center tile index

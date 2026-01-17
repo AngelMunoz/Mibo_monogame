@@ -659,191 +659,10 @@ module internal Shared =
         state.OpaqueDrawables.Add(struct (distance, drawable))
 
 // ============================================================================
-// Forward - Forward rendering implementation
+// TiledForward - Unified Tiled Forward rendering
 // ============================================================================
 
-module internal Forward =
-
-  // --- Core batch operations (no external dependencies) ---
-
-  let flushDrawBatch(state: PipelineState) =
-    if
-      state.OpaqueDrawables.Count = 0 && state.TransparentDrawables.Count = 0
-    then
-      () // Nothing to flush
-    else
-      // Sort opaque: front-to-back (ascending distance = less overdraw)
-      state.OpaqueDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
-        d1.CompareTo(d2))
-
-      // Sort transparent: back-to-front (descending distance = correct blending)
-      state.TransparentDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
-        d2.CompareTo(d1))
-
-      // Render Shadows
-      Shared.renderShadowPass state
-
-      // Render opaque first (with depth write)
-      state.Device.DepthStencilState <- DepthStencilState.Default
-
-      let draw(d: Drawable) =
-        match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
-        | true, effect -> Shared.renderDrawableWithEffect state d effect
-        | false, _ -> Shared.renderDrawableFallback state d
-
-      for i in 0 .. state.OpaqueDrawables.Count - 1 do
-        let struct (_, drawable) = state.OpaqueDrawables.[i]
-        draw drawable
-
-      // Render transparent (with alpha blending, depth read but no write)
-      if state.TransparentDrawables.Count > 0 then
-        state.Device.BlendState <- BlendState.AlphaBlend
-        state.Device.DepthStencilState <- DepthStencilState.DepthRead
-
-        for i in 0 .. state.TransparentDrawables.Count - 1 do
-          let struct (_, drawable) = state.TransparentDrawables.[i]
-          draw drawable
-        // Restore defaults
-        state.Device.BlendState <- BlendState.Opaque
-        state.Device.DepthStencilState <- DepthStencilState.Default
-
-      // Clear batches for next camera pass
-      state.OpaqueDrawables.Clear()
-      state.TransparentDrawables.Clear()
-
-  // --- State commands (call flushDrawBatch before changing state) ---
-
-  let processSetCamera
-    (state: PipelineState)
-    (camera: Mibo.Rendering.Graphics3D.Camera)
-    =
-    flushDrawBatch state
-    state.CurrentCamera <- camera
-    state.CameraWasSet <- true
-    Shared.configureBasicEffectCamera state.BasicEffect camera
-    Shared.configureBasicEffectLighting state.BasicEffect state.CurrentLighting
-
-  let processSetLighting (state: PipelineState) (lighting: LightingState) =
-    state.CurrentLighting <- lighting
-    Shared.configureBasicEffectLighting state.BasicEffect lighting
-
-  let processSetViewport (state: PipelineState) (viewport: Viewport) =
-    flushDrawBatch state
-    state.Device.Viewport <- viewport
-
-  let processClearTarget
-    (state: PipelineState)
-    (colorOpt: Color voption)
-    (clearDepth: bool)
-    =
-    flushDrawBatch state
-
-    let flags =
-      match colorOpt, clearDepth with
-      | ValueSome _, true -> ClearOptions.Target ||| ClearOptions.DepthBuffer
-      | ValueSome _, false -> ClearOptions.Target
-      | ValueNone, true -> ClearOptions.DepthBuffer
-      | ValueNone, false -> ClearOptions.Target
-
-    let color = colorOpt |> ValueOption.defaultValue Color.Black
-    state.Device.Clear(flags, color, 1f, 0)
-
-  let processCustomDraw
-    (state: PipelineState)
-    (drawFn: GraphicsDevice -> Mibo.Rendering.Graphics3D.Camera -> unit)
-    =
-    flushDrawBatch state
-    drawFn state.Device state.CurrentCamera
-
-  // --- Command dispatch ---
-
-  let processCommand (state: PipelineState) (cmd: RenderCommand) =
-    match cmd with
-    | SetCamera camera -> processSetCamera state camera
-    | SetLighting lighting -> processSetLighting state lighting
-    | SetViewport viewport -> processSetViewport state viewport
-    | SetMode mode ->
-      flushDrawBatch state
-      state.Config <- { state.Config with Mode = mode }
-    | ClearTarget(colorOpt, clearDepth) ->
-      processClearTarget state colorOpt clearDepth
-    | Draw drawable -> Shared.batchDrawable state drawable
-    | DrawCustom drawFn -> processCustomDraw state drawFn
-
-  // --- Main render entry point ---
-
-  let render
-    (state: PipelineState)
-    (buffer: RenderBuffer<unit, RenderCommand>)
-    =
-    Shared.resetFrameState state
-
-    // Acquire scene target if needed (for post-processing, shadows, or advanced modes)
-    let needsTarget =
-      state.Config.PostProcess.IsSome
-      || state.Config.Shadows.IsSome
-      || state.Config.Mode <> PipelineMode.Forward
-
-    let sceneTarget =
-      if needsTarget && not(isNull(box state.RtPool)) then
-        let spec = {
-          Width = state.Device.PresentationParameters.BackBufferWidth
-          Height = state.Device.PresentationParameters.BackBufferHeight
-          Format = SurfaceFormat.Color
-          DepthFormat = DepthFormat.Depth24
-        }
-
-        let rt = state.RtPool.Acquire spec
-        Shared.setTarget state.Device rt
-        state.MainSceneTarget <- ValueSome rt
-        ValueSome rt
-      else
-        ValueNone
-
-    // Process all commands
-    for i in 0 .. buffer.Count - 1 do
-      let struct (_, cmd) = buffer.[i]
-      processCommand state cmd
-
-    // Flush any remaining draws
-    flushDrawBatch state
-
-    // Post-process
-    sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
-
-    // Final Blit to backbuffer if we used an intermediate target and didn't post-process (which blits to null)
-    match sceneTarget with
-    | ValueSome rt when state.Config.PostProcess.IsNone ->
-      System.Diagnostics.Debug.WriteLine(
-        $"[Pipeline] Blitting RT to backbuffer. RT size: {rt.Width}x{rt.Height}"
-      )
-
-      Shared.setTarget state.Device null
-
-      if not(isNull(box state.SpriteBatch)) then
-        state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
-        state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-        state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
-        state.SpriteBatch.End()
-        System.Diagnostics.Debug.WriteLine("[Pipeline] Blit complete")
-      else
-        System.Diagnostics.Debug.WriteLine(
-          "[Pipeline] WARNING: SpriteBatch is null!"
-        )
-    | ValueSome _ ->
-      System.Diagnostics.Debug.WriteLine("[Pipeline] PostProcess handles blit")
-    | ValueNone ->
-      System.Diagnostics.Debug.WriteLine(
-        "[Pipeline] No RT - rendering directly to backbuffer"
-      )
-
-    if not(isNull(box state.RtPool)) then
-      state.RtPool.ReleaseAll()
-// ============================================================================
-// ForwardPlus - Forward+ rendering
-// ============================================================================
-
-module internal ForwardPlus =
+module internal TiledForward =
   // Forward+ handles many lights via tile-based light culling.
   let TileSize = 16
 
@@ -987,7 +806,6 @@ module internal ForwardPlus =
       state.TransparentDrawables.Clear()
 
   let processCommand (state: PipelineState) (cmd: RenderCommand) =
-    // Reusing Forward's logic for command processing, but calling our flush
     match cmd with
     | SetCamera camera ->
       flushDrawBatch state
@@ -1001,9 +819,6 @@ module internal ForwardPlus =
     | SetLighting lighting ->
       state.CurrentLighting <- lighting
       Shared.configureBasicEffectLighting state.BasicEffect lighting
-    | SetMode mode ->
-      flushDrawBatch state
-      state.Config <- { state.Config with Mode = mode }
     | SetViewport viewport ->
       flushDrawBatch state
       state.Device.Viewport <- viewport
@@ -1028,566 +843,12 @@ module internal ForwardPlus =
     (state: PipelineState)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
-    if not(state.CustomShaders.ContainsKey(ShaderBase.PBRForward)) then
-      Forward.render state buffer
-    else
-      Shared.resetFrameState state
-
-      // Acquire scene target if needed (for post-processing, shadows, or advanced modes)
-      let needsTarget =
-        state.Config.PostProcess.IsSome
-        || state.Config.Shadows.IsSome
-        || state.Config.Mode <> PipelineMode.Forward
-
-      let sceneTarget =
-        if needsTarget && not(isNull(box state.RtPool)) then
-          let spec = {
-            Width = state.Device.PresentationParameters.BackBufferWidth
-            Height = state.Device.PresentationParameters.BackBufferHeight
-            Format = SurfaceFormat.Color
-            DepthFormat = DepthFormat.Depth24
-          }
-
-          let rt = state.RtPool.Acquire spec
-          Shared.setTarget state.Device rt
-          state.MainSceneTarget <- ValueSome rt
-          ValueSome rt
-        else
-          ValueNone
-
-      for i in 0 .. buffer.Count - 1 do
-        let struct (_, cmd) = buffer.[i]
-        processCommand state cmd
-
-      flushDrawBatch state
-
-      // Post-process
-      sceneTarget
-      |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
-
-      // Final Blit to backbuffer
-      match sceneTarget with
-      | ValueSome rt when state.Config.PostProcess.IsNone ->
-        Shared.setTarget state.Device null
-
-        if not(isNull(box state.SpriteBatch)) then
-          state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
-          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-          state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
-          state.SpriteBatch.End()
-      | _ -> ()
-
-      if not(isNull(box state.RtPool)) then
-        state.RtPool.ReleaseAll()
-
-// ============================================================================
-// Deferred - Deferred rendering implementation
-// ============================================================================
-
-module internal Deferred =
-
-  let renderGBuffer(state: PipelineState) =
-    // Setup G-Buffer RenderTargets
-    if not(isNull(box state.RtPool)) then
-      let width = state.Device.PresentationParameters.BackBufferWidth
-      let height = state.Device.PresentationParameters.BackBufferHeight
-
-      let albedoSpec = {
-        Width = width
-        Height = height
-        Format = SurfaceFormat.Color
-        DepthFormat = DepthFormat.Depth24
-      }
-
-      let normalSpec = {
-        Width = width
-        Height = height
-        Format = SurfaceFormat.Vector4
-        DepthFormat = DepthFormat.None
-      }
-
-      let worldPosSpec = {
-        Width = width
-        Height = height
-        Format = SurfaceFormat.Vector4
-        DepthFormat = DepthFormat.None
-      }
-
-      let rtAlbedo = state.RtPool.Acquire albedoSpec
-      let rtNormal = state.RtPool.Acquire normalSpec
-
-      let rtWorldPos =
-        state.RtPool.Acquire {
-          worldPosSpec with
-              DepthFormat = DepthFormat.Depth24
-        }
-
-      match state.CustomShaders.TryGetValue(ShaderBase.GBufferFill) with
-      | true, effect ->
-        // Clear targets individually to ensure correct default values
-        // Albedo: Transparent + Clear its Depth Buffer (master depth)
-        state.Device.SetRenderTarget(rtAlbedo)
-
-        state.Device.Clear(
-          ClearOptions.Target ||| ClearOptions.DepthBuffer,
-          Color.Transparent,
-          1.0f,
-          0
-        )
-
-        // Normal: Transparent
-        state.Device.SetRenderTarget(rtNormal)
-        state.Device.Clear(Color.Transparent)
-
-        // WorldPos: Transparent (0,0,0,0)
-        state.Device.SetRenderTarget(rtWorldPos)
-        state.Device.Clear(Color.Transparent)
-
-        // Bind all for MRT.
-        // Note: state.Device will use rtAlbedo's depth buffer because it's first.
-        state.Device.SetRenderTargets(
-          new RenderTargetBinding(rtAlbedo),
-          new RenderTargetBinding(rtNormal),
-          new RenderTargetBinding(rtWorldPos)
-        )
-
-        // Render all opaque objects to G-Buffer
-        for i in 0 .. state.OpaqueDrawables.Count - 1 do
-          let struct (_, drawable) = state.OpaqueDrawables.[i]
-          Shared.renderDrawableWithEffect state drawable effect
-
-        // Restore scene target or backbuffer for lighting pass
-        match state.MainSceneTarget with
-        | ValueSome rt -> Shared.setTarget state.Device rt
-        | ValueNone -> Shared.setTarget state.Device null
-
-        ValueSome(rtAlbedo, rtNormal, rtWorldPos)
-      | false, _ ->
-        // Fallback: Ensure correct target is set before drawing
-        match state.MainSceneTarget with
-        | ValueSome rt -> Shared.setTarget state.Device rt
-        | ValueNone -> Shared.setTarget state.Device null
-
-        for i in 0 .. state.OpaqueDrawables.Count - 1 do
-          let struct (_, drawable) = state.OpaqueDrawables.[i]
-          Shared.renderDrawableFallback state drawable
-
-        ValueNone
-    else
-      match state.MainSceneTarget with
-      | ValueSome rt -> Shared.setTarget state.Device rt
-      | ValueNone -> Shared.setTarget state.Device null
-
-      for i in 0 .. state.OpaqueDrawables.Count - 1 do
-        let struct (_, drawable) = state.OpaqueDrawables.[i]
-        Shared.renderDrawableFallback state drawable
-
-      ValueNone
-
-  let bindLighting (effect: Effect) (lighting: LightingState) =
-    // Set ambient color
-    let pAmbient = effect.Parameters.["AmbientColor"]
-
-    if not(isNull pAmbient) then
-      pAmbient.SetValue(
-        lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity
-      )
-
-    // Bind Directional Lights
-    let lightDirs =
-      lighting.Lights
-      |> Array.choose (function
-        | Directional dl -> Some dl.Direction
-        | _ -> None)
-
-    let lightColors =
-      lighting.Lights
-      |> Array.choose (function
-        | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
-        | _ -> None)
-
-    let pDirs = effect.Parameters.["LightDirections"]
-    if not(isNull pDirs) then
-      pDirs.SetValue(lightDirs)
-    else
-      // Fallback: Try binding single directional light
-      let pDir = effect.Parameters.["LightDirection"]
-      if not(isNull pDir) && lightDirs.Length > 0 then
-        pDir.SetValue(lightDirs.[0])
-
-    let pCols = effect.Parameters.["LightColors"]
-    if not(isNull pCols) then
-      pCols.SetValue(lightColors)
-    else
-      // Fallback: Try binding single directional light color
-      let pCol = effect.Parameters.["LightColor"]
-      if not(isNull pCol) && lightColors.Length > 0 then
-        pCol.SetValue(lightColors.[0])
-
-    let pDirCount = effect.Parameters.["DirectionalLightCount"]
-    if not(isNull pDirCount) then
-      pDirCount.SetValue(float32 lightDirs.Length)
-
-    // Bind Point Lights
-    let pointLightData =
-      lighting.Lights
-      |> Array.choose (function
-        | Point pl ->
-          Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
-        | _ -> None)
-
-    let pointLightColors =
-      lighting.Lights
-      |> Array.choose (function
-        | Point pl ->
-          Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
-        | _ -> None)
-
-    if pointLightData.Length > 0 then
-      let pData = effect.Parameters.["PointLightData"]
-      if not(isNull pData) then pData.SetValue(pointLightData)
-
-      let pColors = effect.Parameters.["PointLightColors"]
-      if not(isNull pColors) then pColors.SetValue(pointLightColors)
-
-      let pCount = effect.Parameters.["PointLightCount"]
-      if not(isNull pCount) then pCount.SetValue(float32 pointLightData.Length)
-    else
-      let pCount = effect.Parameters.["PointLightCount"]
-      if not(isNull pCount) then pCount.SetValue(0.0f)
-
-    // Bind Spot Lights
-    let spotLightData =
-      lighting.Lights
-      |> Array.choose (function
-        | Spot sl ->
-          Some(Vector4(sl.Position.X, sl.Position.Y, sl.Position.Z, sl.Range))
-        | _ -> None)
-
-    let spotLightArgs =
-      lighting.Lights
-      |> Array.choose (function
-        | Spot sl ->
-          Some(
-            Vector4(
-              sl.Direction.X,
-              sl.Direction.Y,
-              sl.Direction.Z,
-              float32(System.Math.Cos(float sl.OuterConeAngle))
-            )
-          )
-        | _ -> None)
-
-    let spotLightColors =
-      lighting.Lights
-      |> Array.choose (function
-        | Spot sl ->
-          Some(
-            Vector4(
-              sl.Color.ToVector3() * sl.Intensity,
-              float32(System.Math.Cos(float sl.InnerConeAngle))
-            )
-          )
-        | _ -> None)
-
-    if spotLightData.Length > 0 then
-      let pData = effect.Parameters.["SpotLightData"]
-      if not(isNull pData) then pData.SetValue(spotLightData)
-
-      let pArgs = effect.Parameters.["SpotLightArgs"]
-      if not(isNull pArgs) then pArgs.SetValue(spotLightArgs)
-
-      let pCols = effect.Parameters.["SpotLightColors"]
-      if not(isNull pCols) then pCols.SetValue(spotLightColors)
-
-      let pCount = effect.Parameters.["SpotLightCount"]
-      if not(isNull pCount) then pCount.SetValue(float32 spotLightData.Length)
-    else
-      let pCount = effect.Parameters.["SpotLightCount"]
-      if not(isNull pCount) then pCount.SetValue(0.0f)
-
-  let renderLighting
-    (state: PipelineState)
-    (gBuffer: (RenderTarget2D * RenderTarget2D * RenderTarget2D) voption)
-    =
-
-
-    match gBuffer with
-    | ValueSome(albedo, normal, depth) ->
-      let hasDeferredShader =
-        state.CustomShaders.ContainsKey(ShaderBase.DeferredLighting)
-
-
-
-      match state.CustomShaders.TryGetValue(ShaderBase.DeferredLighting) with
-      | true, effect ->
-
-        // Bind G-Buffer textures
-        if not(isNull effect.Parameters.["AlbedoMap"]) then
-          effect.Parameters.["AlbedoMap"].SetValue(albedo)
-
-        if not(isNull effect.Parameters.["NormalMap"]) then
-          effect.Parameters.["NormalMap"].SetValue(normal)
-
-        if not(isNull effect.Parameters.["WorldPosMap"]) then
-          effect.Parameters.["WorldPosMap"].SetValue(depth)
-
-        // Bind Point Light Data
-        let pointLightData =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Point pl ->
-              Some(
-                Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range)
-              )
-            | _ -> None)
-
-        let pointLightColors =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Point pl ->
-              Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
-            | _ -> None)
-
-        if pointLightData.Length > 0 then
-          let pData = pointLightData |> Array.truncate 32
-          let pCols = pointLightColors |> Array.truncate 32
-
-          let pParams = effect.Parameters.["PointLightData"]
-
-          if not(isNull pParams) then
-            pParams.SetValue(pData)
-
-          let pColors = effect.Parameters.["PointLightColors"]
-
-          if not(isNull pColors) then
-            pColors.SetValue(pCols)
-
-          let pCount = effect.Parameters.["PointLightCount"]
-
-          if not(isNull pCount) then
-            pCount.SetValue(float32 pData.Length)
-        else
-          let pCount = effect.Parameters.["PointLightCount"]
-
-          if not(isNull pCount) then
-            pCount.SetValue(0.0f)
-
-        // Bind Shadow Data
-        if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
-
-
-          let pShadowMap = effect.Parameters.["ShadowMap"]
-
-          if not(isNull pShadowMap) then
-            pShadowMap.SetValue(state.ShadowMaps.[0])
-
-          let pLightView = effect.Parameters.["LightView"]
-
-          if not(isNull pLightView) then
-            pLightView.SetValue(state.ShadowViewMatrices.[0])
-
-          let pLightProj = effect.Parameters.["LightProjection"]
-
-          if not(isNull pLightProj) then
-            pLightProj.SetValue(state.ShadowProjectionMatrices.[0])
-        else
-          printfn "[Deferred.renderLighting] NO shadow maps available!"
-
-        bindLighting effect state.CurrentLighting
-
-        state.Device.DepthStencilState <- DepthStencilState.None
-        Shared.renderFullScreenQuad state.Device effect
-        state.Device.DepthStencilState <- DepthStencilState.Default
-      | false, _ ->
-        // Fallback: blit albedo to current target
-        if not(isNull(box state.SpriteBatch)) then
-          // Use AlphaBlend if we want to respect existing background,
-          // but Opaque is faster if we assume GBuffer is full screen.
-          state.SpriteBatch.Begin(
-            SpriteSortMode.Immediate,
-            BlendState.AlphaBlend
-          )
-
-          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-
-          state.SpriteBatch.Draw(
-            albedo,
-            state.Device.Viewport.Bounds,
-            Color.White
-          )
-
-          state.SpriteBatch.End()
-    | ValueNone -> ()
-
-  let flushDrawBatch(state: PipelineState) =
-    if
-      state.OpaqueDrawables.Count = 0 && state.TransparentDrawables.Count = 0
-    then
-      ()
-    else
-      // Sort
-      state.OpaqueDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
-        d1.CompareTo(d2))
-
-      state.TransparentDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
-        d2.CompareTo(d1))
-
-      // Render Shadows
-      Shared.renderShadowPass state
-
-      // Set Opaque state
-      state.Device.DepthStencilState <- DepthStencilState.Default
-
-      // Pass 1: G-Buffer (Opaque)
-      let gBuffer = renderGBuffer state
-
-      // Pass 2: Lighting (Opaque)
-      renderLighting state gBuffer
-
-      // Pass 3: Transparent (Forward)
-      if state.TransparentDrawables.Count > 0 then
-        state.Device.BlendState <- BlendState.AlphaBlend
-
-        let draw(d: Drawable) =
-          match state.CustomShaders.TryGetValue(ShaderBase.PBRForward) with
-          | true, effect -> Shared.renderDrawableWithEffect state d effect
-          | false, _ -> Shared.renderDrawableFallback state d
-
-        for i in 0 .. state.TransparentDrawables.Count - 1 do
-          let struct (_, drawable) = state.TransparentDrawables.[i]
-          draw drawable
-
-        state.Device.BlendState <- BlendState.Opaque
-
-      state.OpaqueDrawables.Clear()
-      state.TransparentDrawables.Clear()
-
-  let processCommand (state: PipelineState) (cmd: RenderCommand) =
-    match cmd with
-    | SetCamera camera ->
-      flushDrawBatch state
-      state.CurrentCamera <- camera
-      state.CameraWasSet <- true
-      Shared.configureBasicEffectCamera state.BasicEffect camera
-    | SetLighting lighting -> state.CurrentLighting <- lighting
-    | SetMode mode ->
-      flushDrawBatch state
-      state.Config <- { state.Config with Mode = mode }
-    | SetViewport viewport ->
-      flushDrawBatch state
-      state.Device.Viewport <- viewport
-    | ClearTarget(colorOpt, clearDepth) ->
-      flushDrawBatch state
-
-      let flags =
-        match colorOpt, clearDepth with
-        | ValueSome _, true -> ClearOptions.Target ||| ClearOptions.DepthBuffer
-        | ValueSome _, false -> ClearOptions.Target
-        | ValueNone, true -> ClearOptions.DepthBuffer
-        | ValueNone, false -> ClearOptions.Target
-
-      let color = colorOpt |> ValueOption.defaultValue Color.Black
-
-      state.Device.Clear(flags, color, 1f, 0)
-    | Draw drawable -> Shared.batchDrawable state drawable
-    | DrawCustom drawFn ->
-      flushDrawBatch state
-      drawFn state.Device state.CurrentCamera
-
-  let render
-    (state: PipelineState)
-    (buffer: RenderBuffer<unit, RenderCommand>)
-    =
-    let hasShaders =
-      state.CustomShaders.ContainsKey(ShaderBase.GBufferFill)
-      && state.CustomShaders.ContainsKey(ShaderBase.DeferredLighting)
-
-    if not hasShaders then
-      Forward.render state buffer
-    else
-      Shared.resetFrameState state
-
-      // Acquire scene target if needed (for post-processing, shadows, or advanced modes)
-      let needsTarget =
-        state.Config.PostProcess.IsSome
-        || state.Config.Shadows.IsSome
-        || state.Config.Mode <> PipelineMode.Forward
-
-      let sceneTarget =
-        if needsTarget && not(isNull(box state.RtPool)) then
-          let spec = {
-            Width = state.Device.PresentationParameters.BackBufferWidth
-            Height = state.Device.PresentationParameters.BackBufferHeight
-            Format = SurfaceFormat.Color
-            DepthFormat = DepthFormat.Depth24
-          }
-
-          let rt = state.RtPool.Acquire spec
-          Shared.setTarget state.Device rt
-          state.MainSceneTarget <- ValueSome rt
-          ValueSome rt
-        else
-          ValueNone
-
-      for i in 0 .. buffer.Count - 1 do
-        let struct (_, cmd) = buffer.[i]
-        processCommand state cmd
-
-      flushDrawBatch state
-
-      // Post-process
-      sceneTarget
-      |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
-
-      // Final Blit to backbuffer
-      match sceneTarget with
-      | ValueSome rt when state.Config.PostProcess.IsNone ->
-        Shared.setTarget state.Device null
-
-        if not(isNull(box state.SpriteBatch)) then
-          state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
-          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-          state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
-          state.SpriteBatch.End()
-      | _ -> ()
-
-      if not(isNull(box state.RtPool)) then
-        state.RtPool.ReleaseAll()
-
-
-// ============================================================================
-// Render Pipeline - Unified Orchestration
-// ============================================================================
-
-module internal Orchestrate =
-
-  /// Dispatches a command to the appropriate mode-specific handler
-  let processCommand (state: PipelineState) (cmd: RenderCommand) =
-    match state.Config.Mode with
-    | PipelineMode.Forward -> Forward.processCommand state cmd
-    | PipelineMode.ForwardPlus -> ForwardPlus.processCommand state cmd
-    | PipelineMode.Deferred -> Deferred.processCommand state cmd
-
-  /// Flushes any pending draws for the current mode
-  let flushDrawBatch(state: PipelineState) =
-    match state.Config.Mode with
-    | PipelineMode.Forward -> Forward.flushDrawBatch state
-    | PipelineMode.ForwardPlus -> ForwardPlus.flushDrawBatch state
-    | PipelineMode.Deferred -> Deferred.flushDrawBatch state
-
-  /// Main entry point for the rendering pipeline
-  let render
-    (state: PipelineState)
-    (buffer: RenderBuffer<unit, RenderCommand>)
-    =
     Shared.resetFrameState state
 
-    // 1. Determine if we need an intermediate scene target
+    // Acquire scene target if needed (for post-processing, shadows)
     let needsTarget =
       state.Config.PostProcess.IsSome
       || state.Config.Shadows.IsSome
-      || state.Config.Mode <> PipelineMode.Forward
 
     let sceneTarget =
       if needsTarget && not(isNull(box state.RtPool)) then
@@ -1605,18 +866,17 @@ module internal Orchestrate =
       else
         ValueNone
 
-    // 2. Process all commands in the buffer
     for i in 0 .. buffer.Count - 1 do
       let struct (_, cmd) = buffer.[i]
       processCommand state cmd
 
-    // 3. Final flush for any remaining drawables
     flushDrawBatch state
 
-    // 4. Post-processing (handles final blit to backbuffer if present)
-    sceneTarget |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
+    // Post-process
+    sceneTarget
+    |> ValueOption.iter(fun rt -> Shared.renderPostProcess state rt)
 
-    // 5. Final Blit to backbuffer if we used an intermediate target but didn't post-process
+    // Final Blit to backbuffer
     match sceneTarget with
     | ValueSome rt when state.Config.PostProcess.IsNone ->
       Shared.setTarget state.Device null
@@ -1628,9 +888,29 @@ module internal Orchestrate =
         state.SpriteBatch.End()
     | _ -> ()
 
-    // 6. Cleanup
     if not(isNull(box state.RtPool)) then
       state.RtPool.ReleaseAll()
+
+// ============================================================================
+// Render Pipeline - Unified Orchestration
+// ============================================================================
+
+module internal Orchestrate =
+
+  /// Dispatches a command to the appropriate handler
+  let processCommand (state: PipelineState) (cmd: RenderCommand) =
+    TiledForward.processCommand state cmd
+
+  /// Flushes any pending draws
+  let flushDrawBatch(state: PipelineState) =
+    TiledForward.flushDrawBatch state
+
+  /// Main entry point for the rendering pipeline
+  let render
+    (state: PipelineState)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    TiledForward.render state buffer
 
   let inline initialize
     (state: PipelineState)
