@@ -505,7 +505,7 @@ let pipelineLogicTests =
       }
 
       Expect.isTrue
-        (Shared.isTransparent drawFlag)
+        (Culling.isTransparent drawFlag)
         "Should be transparent due to flag"
 
       // Case 2: Alpha
@@ -519,7 +519,7 @@ let pipelineLogicTests =
       }
 
       Expect.isTrue
-        (Shared.isTransparent drawAlpha)
+        (Culling.isTransparent drawAlpha)
         "Should be transparent due to alpha < 255"
 
       // Case 3: Opaque
@@ -530,12 +530,12 @@ let pipelineLogicTests =
             Material = matOpaque
       }
 
-      Expect.isFalse (Shared.isTransparent drawOpaque) "Should be opaque"
+      Expect.isFalse (Culling.isTransparent drawOpaque) "Should be opaque"
 
     testCase "batchDrawable culls objects outside frustum"
     <| fun _ ->
       let config = PipelineConfig.defaults
-      let state = Shared.createState config
+      let state = State.create config
       // Camera at (0,0,10) looking at (0,0,0)
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
       state.CurrentCamera <- cam
@@ -543,13 +543,13 @@ let pipelineLogicTests =
 
       // 1. Visible object at origin
       let visible = TestHelpers.drawableAt Vector3.Zero false
-      Shared.batchDrawable state visible
+      Culling.batchDrawable state visible
 
       Expect.equal state.OpaqueDrawables.Count 1 "Should have 1 opaque drawable"
 
       // 2. Invisible object behind camera
       let invisible = TestHelpers.drawableAt (Vector3(0f, 0f, 100f)) false
-      Shared.batchDrawable state invisible
+      Culling.batchDrawable state invisible
 
       Expect.equal
         state.OpaqueDrawables.Count
@@ -559,7 +559,7 @@ let pipelineLogicTests =
     testCase "batchDrawable separates opaque and transparent"
     <| fun _ ->
       let config = PipelineConfig.defaults
-      let state = Shared.createState config
+      let state = State.create config
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
       state.CurrentCamera <- cam
       state.CameraWasSet <- true
@@ -567,8 +567,8 @@ let pipelineLogicTests =
       let opaque = TestHelpers.drawableAt Vector3.Zero false
       let transparent = TestHelpers.drawableAt (Vector3(1f, 0f, 0f)) true
 
-      Shared.batchDrawable state opaque
-      Shared.batchDrawable state transparent
+      Culling.batchDrawable state opaque
+      Culling.batchDrawable state transparent
 
       Expect.equal state.OpaqueDrawables.Count 1 "Should have 1 opaque"
 
@@ -627,15 +627,15 @@ let pipelineOrchestrationTests =
     <| fun _ ->
       let buffer = RenderBuffer<unit, RenderCommand>()
 
-      let state = Shared.createState PipelineConfig.defaults
+      let state = State.create PipelineConfig.defaults
 
-      TiledForward.render state buffer
+      Orchestrate.render state buffer
 
     testCase "TiledForward.cullLights excludes lights outside frustum"
     <| fun _ ->
       let config = PipelineConfig.defaults
 
-      let state = Shared.createState config
+      let state = State.create config
 
       // Camera at (0,0,10) looking at (0,0,0)
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
@@ -678,7 +678,7 @@ let pipelineOrchestrationTests =
         Lights = [| dirLight; pointInside; pointOutside |]
       }
 
-      let _grid, tileMasks = TiledForward.cullLights state
+      let tileMasks = Tiling.cullLights state
 
       // Union of all bitmasks
       let allLightsMask = tileMasks |> Array.fold (|||) 0u
@@ -695,7 +695,7 @@ let pipelineOrchestrationTests =
     <| fun _ ->
       let config = PipelineConfig.defaults
 
-      let state = Shared.createState config
+      let state = State.create config
 
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
       state.CurrentCamera <- cam
@@ -715,7 +715,7 @@ let pipelineOrchestrationTests =
         Lights = [| pointLight |]
       }
 
-      let grid, tileMasks = TiledForward.cullLights state
+      let tileMasks = Tiling.cullLights state
 
       let occupiedTiles =
         tileMasks
@@ -734,7 +734,7 @@ let pipelineOrchestrationTests =
       // Center tile index
       let centerTileX = (1280 / 2) / 16 // TileSize is 16
       let centerTileY = (720 / 2) / 16
-      let centerTileIndex = centerTileY * grid.TilesX + centerTileX
+      let centerTileIndex = centerTileY * (1280 / 16) + centerTileX
 
       Expect.contains
         occupiedTiles
