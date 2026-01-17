@@ -23,7 +23,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <MonoGameContentReference Include="Content/Content.mgcb" />
+    <MonoGameContentReference Include="..\MyGame.Core\Content\Content.mgcb">
+      <Link>Content\Pomo.mgcb</Link>
+    </MonoGameContentReference>
   </ItemGroup>
-
 </Project>
