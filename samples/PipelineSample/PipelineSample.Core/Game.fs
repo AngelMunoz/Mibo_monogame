@@ -271,6 +271,11 @@ module Game =
     |> Program.withSubscription subscribe
     |> Program.withPipeline
       (PipelineConfig.defaults
+#if OPENGL
+       |> PipelineConfig.withShadowPath ForceDiscrete
+#else
+       |> PipelineConfig.withShadowPath ForceArray
+#endif
        |> PipelineConfig.withShadows(
          ShadowConfig.defaults
          |> ShadowConfig.withResolution 2048

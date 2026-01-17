@@ -8,6 +8,7 @@
     <TieredCompilation>false</TieredCompilation>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Icon.ico</ApplicationIcon>
+    <DefineConstants>$(DefineConstants);OPENGL</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

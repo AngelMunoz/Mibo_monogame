@@ -24,7 +24,8 @@ type internal PipelineState = {
   mutable BasicEffect: BasicEffect
   mutable SpriteBatch: SpriteBatch
   CustomShaders: Dictionary<ShaderBase, Effect>
-  ShadowMaps: ResizeArray<RenderTarget2D>
+  DiscreteShadowMaps: ResizeArray<RenderTarget2D>
+  mutable ShadowMapArray: Texture2D voption // Texture2DArray for DX
   ShadowViewMatrices: ResizeArray<Matrix>
   ShadowProjectionMatrices: ResizeArray<Matrix>
   mutable LightGridTexture: Texture2D voption
@@ -50,7 +51,8 @@ module internal State =
     BasicEffect = Unchecked.defaultof<_>
     SpriteBatch = Unchecked.defaultof<_>
     CustomShaders = Dictionary<ShaderBase, Effect>()
-    ShadowMaps = ResizeArray<RenderTarget2D>()
+    DiscreteShadowMaps = ResizeArray<RenderTarget2D>()
+    ShadowMapArray = ValueNone
     ShadowViewMatrices = ResizeArray<Matrix>()
     ShadowProjectionMatrices = ResizeArray<Matrix>()
     LightGridTexture = ValueNone
@@ -103,17 +105,57 @@ module internal State =
     if state.CustomShaders.ContainsKey(ShaderBase.ShadowCaster) then
       state.Config.Shadows
       |> ValueOption.iter(fun cfg ->
-        for _ in 0 .. cfg.CascadeCount - 1 do
-          state.ShadowMaps.Add(
-            new RenderTarget2D(
-              gd,
-              cfg.Resolution,
-              cfg.Resolution,
-              false,
-              SurfaceFormat.Single,
-              DepthFormat.Depth24
-            )
-          ))
+        // Use the user-defined toggle, default to Discrete for Auto
+        let useArray =
+          match state.Config.ShadowPath with
+          | ForceArray -> true
+          | ForceDiscrete
+          | Auto -> false
+
+        if useArray then
+          // Allocation for Texture2DArray/Modern path
+          // Note: In MonoGame, we can use a RenderTarget2D with ArraySize > 1 on supported platforms
+          // For now, we'll keep the discrete collection but flag the intent to use Array binding
+          ()
+
+        // Ensure we have enough discrete maps for the chosen or fallback path
+        let totalNeeded = cfg.CascadeCount + cfg.MaxPointShadows * 6 + 16
+        if state.DiscreteShadowMaps.Count < totalNeeded then
+          for _ in state.DiscreteShadowMaps.Count .. totalNeeded - 1 do
+            state.DiscreteShadowMaps.Add(
+              new RenderTarget2D(
+                gd,
+                cfg.Resolution,
+                cfg.Resolution,
+                false,
+                SurfaceFormat.Single,
+                DepthFormat.Depth24
+              )
+            ))
+
+module internal EffectHelpers =
+  /// Helper to find a parameter by name, avoiding indexer ambiguity in F#
+  let findParam (name: string) (effect: Effect) =
+    effect.Parameters
+    |> Seq.cast<EffectParameter>
+    |> Seq.tryFind (fun p -> p.Name = name)
+
+  let setParam (name: string) (value: obj) (effect: Effect) =
+    match findParam name effect with
+    | Some p ->
+        match value with
+        | :? Matrix as m -> p.SetValue(m)
+        | :? (Matrix[]) as ma -> p.SetValue(ma)
+        | :? Vector3 as v -> p.SetValue(v)
+        | :? (Vector3[]) as va -> p.SetValue(va)
+        | :? Vector4 as v -> p.SetValue(v)
+        | :? (Vector4[]) as va -> p.SetValue(va)
+        | :? float32 as f -> p.SetValue(f)
+        | :? bool as b -> p.SetValue(b)
+        | :? Texture as t -> p.SetValue(t)
+        | :? Color as c -> p.SetValue(c.ToVector4())
+        | _ -> ()
+    | None -> ()
 
 module internal Culling =
 
@@ -183,7 +225,7 @@ module internal Tiling =
     let toScreen x size = (x + 1f) * 0.5f * float32 size
     let left = toScreen minX viewport.Width |> int |> max 0
     let right = toScreen maxX viewport.Width |> int |> min viewport.Width
-    let top = toScreen -maxY viewport.Height |> int |> max 0
+    let top = toScreen -maxY viewport.Height |> int |> max 0 // Flip Y
     let bottom = toScreen -minY viewport.Height |> int |> min viewport.Height
 
     struct (left, top, right, bottom)
@@ -231,6 +273,38 @@ module internal Tiling =
 
 module internal ShadowPass =
 
+  let computeSpotShadowMatrices
+    (sl: SpotLight)
+    : struct (Matrix * Matrix) =
+    let view =
+      Matrix.CreateLookAt(sl.Position, sl.Position + sl.Direction, Vector3.Up)
+
+    let proj =
+      Matrix.CreatePerspectiveFieldOfView(
+        sl.OuterConeAngle * 2.0f,
+        1.0f,
+        0.1f,
+        sl.Range
+      )
+
+    struct (view, proj)
+
+  let computePointShadowMatrices
+    (pl: PointLight)
+    (face: int)
+    : struct (Matrix * Matrix) =
+    let view =
+      match face with
+      | 0 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Right, Vector3.Up) // +X
+      | 1 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Left, Vector3.Up) // -X
+      | 2 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Up, Vector3.Backward) // +Y
+      | 3 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Down, Vector3.Forward) // -Y
+      | 4 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Forward, Vector3.Up) // +Z
+      | _ -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Backward, Vector3.Up) // -Z
+
+    let proj = Matrix.CreatePerspectiveFieldOfView(MathHelper.PiOver2, 1.0f, 0.1f, pl.Range)
+    struct (view, proj)
+
   let renderDrawableShadow
     (state: PipelineState)
     (drawable: Drawable)
@@ -242,9 +316,9 @@ module internal ShadowPass =
     state.Device.SetVertexBuffer(mesh.VertexBuffer)
     state.Device.Indices <- mesh.IndexBuffer
 
-    effect.Parameters.["World"].SetValue(drawable.Transform)
-    effect.Parameters.["View"].SetValue(view)
-    effect.Parameters.["Projection"].SetValue(projection)
+    EffectHelpers.setParam "World" drawable.Transform effect
+    EffectHelpers.setParam "View" view effect
+    EffectHelpers.setParam "Projection" projection effect
 
     for pass in effect.CurrentTechnique.Passes do
       pass.Apply()
@@ -259,98 +333,127 @@ module internal ShadowPass =
   let render (state: PipelineState) =
     match state.CustomShaders.TryGetValue(ShaderBase.ShadowCaster) with
     | true, shadowEffect ->
-      let frustum =
+      let mainFrustum =
         BoundingFrustum(
           state.CurrentCamera.View * state.CurrentCamera.Projection
         )
 
-      let corners = frustum.GetCorners()
+      let corners = mainFrustum.GetCorners()
       let mutable shadowMapIndex = 0
 
+      // Common shadow rendering state
+      state.Device.DepthStencilState <- DepthStencilState.Default
+      state.Device.RasterizerState <- RasterizerState.CullNone
+      state.Device.BlendState <- BlendState.Opaque
+
+      let renderPass (view: Matrix) (proj: Matrix) =
+        let lightFrustum = BoundingFrustum(view * proj)
+
+        for i in 0 .. state.OpaqueDrawables.Count - 1 do
+          let struct (_, drawable) = state.OpaqueDrawables.[i]
+
+          if
+            drawable.Material.Flags.HasFlag(MaterialFlags.CastsShadow)
+            && lightFrustum.Contains(drawable.BoundingSphere)
+               <> ContainmentType.Disjoint
+          then
+            renderDrawableShadow
+              state
+              drawable
+              shadowEffect
+              view
+              proj
+
       for light in state.CurrentLighting.Lights do
-        match light with
-        | Directional dl when
-          ValueOption.isSome dl.Shadow
-          && shadowMapIndex < state.ShadowMaps.Count
-          ->
-          let shadowMap = state.ShadowMaps.[shadowMapIndex]
-          state.Device.SetRenderTarget(shadowMap)
+        if shadowMapIndex < state.DiscreteShadowMaps.Count then
+          match light with
+          | Directional dl when ValueOption.isSome dl.Shadow ->
+            let shadowMap = state.DiscreteShadowMaps.[shadowMapIndex]
+            state.Device.SetRenderTarget(shadowMap)
 
-          state.Device.Clear(
-            ClearOptions.Target ||| ClearOptions.DepthBuffer,
-            Color.White,
-            1.0f,
-            0
-          )
-
-          let mutable center = Vector3.Zero
-
-          for i in 0 .. corners.Length - 1 do
-            center <- center + corners.[i]
-
-          center <- center / float32 corners.Length
-
-          let mutable radius = 0f
-
-          for i in 0 .. corners.Length - 1 do
-            radius <- max radius (Vector3.Distance(center, corners.[i]))
-
-          let lightPos = center - dl.Direction * (radius + 100f)
-          let lightView = Matrix.CreateLookAt(lightPos, center, Vector3.Up)
-
-          let mutable minX, minY = infinityf, infinityf
-          let mutable maxX, maxY = -infinityf, -infinityf
-
-          for i in 0 .. corners.Length - 1 do
-            let lp = Vector3.Transform(corners.[i], lightView)
-            minX <- min minX lp.X
-            maxX <- max maxX lp.X
-            minY <- min minY lp.Y
-            maxY <- max maxY lp.Y
-
-          for i in 0 .. state.OpaqueDrawables.Count - 1 do
-            let struct (_, d) = state.OpaqueDrawables.[i]
-            let lp = Vector3.Transform(d.BoundingSphere.Center, lightView)
-            let r = d.BoundingSphere.Radius
-            minX <- min minX (lp.X - r)
-            maxX <- max maxX (lp.X + r)
-            minY <- min minY (lp.Y - r)
-            maxY <- max maxY (lp.Y + r)
-
-          let padding = 10f
-
-          let lightProj =
-            Matrix.CreateOrthographicOffCenter(
-              minX - padding,
-              maxX + padding,
-              minY - padding,
-              maxY + padding,
-              0.1f,
-              (radius + 100f) * 2f
+            state.Device.Clear(
+              ClearOptions.Target ||| ClearOptions.DepthBuffer,
+              Color.White,
+              1.0f,
+              0
             )
 
-          state.Device.DepthStencilState <- DepthStencilState.Default
-          state.Device.RasterizerState <- RasterizerState.CullNone
-          state.Device.BlendState <- BlendState.Opaque
+            let mutable center = Vector3.Zero
+            for i in 0 .. corners.Length - 1 do center <- center + corners.[i]
+            center <- center / float32 corners.Length
 
-          for i in 0 .. state.OpaqueDrawables.Count - 1 do
-            let struct (_, drawable) = state.OpaqueDrawables.[i]
+            let mutable radius = 0f
+            for i in 0 .. corners.Length - 1 do
+              radius <- max radius (Vector3.Distance(center, corners.[i]))
 
-            if drawable.Material.Flags.HasFlag(MaterialFlags.CastsShadow) then
-              renderDrawableShadow
-                state
-                drawable
-                shadowEffect
-                lightView
-                lightProj
+            let lightPos = center - dl.Direction * (radius + 100f)
+            let lightView = Matrix.CreateLookAt(lightPos, center, Vector3.Up)
 
-          state.Device.RasterizerState <- RasterizerState.CullCounterClockwise
+            let mutable minX, minY = infinityf, infinityf
+            let mutable maxX, maxY = -infinityf, -infinityf
 
-          state.ShadowViewMatrices.Add(lightView)
-          state.ShadowProjectionMatrices.Add(lightProj)
+            for i in 0 .. corners.Length - 1 do
+              let lp = Vector3.Transform(corners.[i], lightView)
+              minX <- min minX lp.X
+              maxX <- max maxX lp.X
+              minY <- min minY lp.Y
+              maxY <- max maxY lp.Y
 
-          shadowMapIndex <- shadowMapIndex + 1
-        | _ -> ()
+            for i in 0 .. state.OpaqueDrawables.Count - 1 do
+              let struct (_, d) = state.OpaqueDrawables.[i]
+              let lp = Vector3.Transform(d.BoundingSphere.Center, lightView)
+              let r = d.BoundingSphere.Radius
+              minX <- min minX (lp.X - r)
+              maxX <- max maxX (lp.X + r)
+              minY <- min minY (lp.Y - r)
+              maxY <- max maxY (lp.Y + r)
+
+            let padding = 10f
+            let lightProj =
+              Matrix.CreateOrthographicOffCenter(
+                minX - padding,
+                maxX + padding,
+                minY - padding,
+                maxY + padding,
+                0.1f,
+                (radius + 100f) * 2f
+              )
+
+            renderPass lightView lightProj
+
+            state.ShadowViewMatrices.Add(lightView)
+            state.ShadowProjectionMatrices.Add(lightProj)
+            shadowMapIndex <- shadowMapIndex + 1
+
+          | Spot sl when ValueOption.isSome sl.Shadow ->
+            let shadowMap = state.DiscreteShadowMaps.[shadowMapIndex]
+            state.Device.SetRenderTarget(shadowMap)
+            state.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, Color.White, 1.0f, 0)
+
+            let struct (view, proj) = computeSpotShadowMatrices sl
+            renderPass view proj
+
+            state.ShadowViewMatrices.Add(view)
+            state.ShadowProjectionMatrices.Add(proj)
+            shadowMapIndex <- shadowMapIndex + 1
+
+          | Point pl when ValueOption.isSome pl.Shadow ->
+            if shadowMapIndex + 6 <= state.DiscreteShadowMaps.Count then
+              for face = 0 to 5 do
+                let shadowMap = state.DiscreteShadowMaps.[shadowMapIndex + face]
+                state.Device.SetRenderTarget(shadowMap)
+                state.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, Color.White, 1.0f, 0)
+
+                let struct (view, proj) = computePointShadowMatrices pl face
+                renderPass view proj
+
+                state.ShadowViewMatrices.Add(view)
+                state.ShadowProjectionMatrices.Add(proj)
+
+              shadowMapIndex <- shadowMapIndex + 6
+          | _ -> ()
+
+      state.Device.RasterizerState <- RasterizerState.CullCounterClockwise
 
       match state.MainSceneTarget with
       | ValueSome rt -> state.Device.SetRenderTarget(rt)
@@ -407,166 +510,169 @@ module internal Drawing =
     state.Device.SetVertexBuffer(mesh.VertexBuffer)
     state.Device.Indices <- mesh.IndexBuffer
 
-    let setParam (name: string) (value: obj) =
-      let p = effect.Parameters.[name]
+    EffectHelpers.setParam "World" drawable.Transform effect
+    EffectHelpers.setParam "View" state.CurrentCamera.View effect
+    EffectHelpers.setParam "Projection" state.CurrentCamera.Projection effect
 
-      if not(isNull p) then
-        match value with
-        | :? Matrix as m -> p.SetValue(m)
-        | :? Vector3 as v -> p.SetValue(v)
-        | :? Vector4 as v -> p.SetValue(v)
-        | :? float32 as f -> p.SetValue(f)
-        | :? bool as b -> p.SetValue(b)
-        | :? Texture2D as t -> p.SetValue(t)
-        | :? Color as c -> p.SetValue(c.ToVector4())
-        | _ -> ()
+    // Phase 6: Custom Lighting Binding Override
+    match state.Config.LightingBinder with
+    | ValueSome binder ->
+        binder effect state.CurrentCamera state.CurrentLighting
+    | ValueNone ->
+        // Standard Lighting Binding Logic
+        EffectHelpers.setParam
+          "AmbientColor"
+          (state.CurrentLighting.AmbientColor.ToVector3()
+           * state.CurrentLighting.AmbientIntensity)
+          effect
 
-    setParam "World" drawable.Transform
-    setParam "View" state.CurrentCamera.View
-    setParam "Projection" state.CurrentCamera.Projection
+        let lightDirs =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Directional dl -> Some dl.Direction
+            | _ -> None)
 
-    setParam
-      "AmbientColor"
-      (state.CurrentLighting.AmbientColor.ToVector3()
-       * state.CurrentLighting.AmbientIntensity)
+        let lightColors =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
+            | _ -> None)
 
-    let lightDirs =
-      state.CurrentLighting.Lights
-      |> Array.choose (function
-        | Directional dl -> Some dl.Direction
-        | _ -> None)
+        if lightDirs.Length > 0 then
+          match EffectHelpers.findParam "LightDirections" effect with
+          | Some p -> p.SetValue(lightDirs)
+          | None ->
+              EffectHelpers.setParam "LightDirection" lightDirs.[0] effect
 
-    let lightColors =
-      state.CurrentLighting.Lights
-      |> Array.choose (function
-        | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
-        | _ -> None)
+          match EffectHelpers.findParam "LightColors" effect with
+          | Some p -> p.SetValue(lightColors)
+          | None ->
+              EffectHelpers.setParam "LightColor" lightColors.[0] effect
 
-    if lightDirs.Length > 0 then
-      let pDirs = effect.Parameters.["LightDirections"]
+          EffectHelpers.setParam "DirectionalLightCount" (float32 lightDirs.Length) effect
+        else
+          EffectHelpers.setParam "DirectionalLightCount" 0.0f effect
 
-      if not(isNull pDirs) then
-        pDirs.SetValue(lightDirs)
+        let pointLightData =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Point pl ->
+              Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
+            | _ -> None)
+
+        let pointLightColors =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Point pl -> Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
+            | _ -> None)
+
+        if pointLightData.Length > 0 then
+          match EffectHelpers.findParam "PointLightData" effect with
+          | Some p -> p.SetValue(pointLightData)
+          | None -> ()
+
+          match EffectHelpers.findParam "PointLightColors" effect with
+          | Some p -> p.SetValue(pointLightColors)
+          | None -> ()
+
+          EffectHelpers.setParam "PointLightCount" (float32 pointLightData.Length) effect
+        else
+          EffectHelpers.setParam "PointLightCount" 0.0f effect
+
+        let spotLightData =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Spot sl ->
+              Some(Vector4(sl.Position.X, sl.Position.Y, sl.Position.Z, sl.Range))
+            | _ -> None)
+
+        let spotLightArgs =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Spot sl ->
+              Some(
+                Vector4(
+                  sl.Direction.X,
+                  sl.Direction.Y,
+                  sl.Direction.Z,
+                  float32(System.Math.Cos(float sl.OuterConeAngle))
+                )
+              )
+            | _ -> None)
+
+        let spotLightColors =
+          state.CurrentLighting.Lights
+          |> Array.choose (function
+            | Spot sl ->
+              Some(
+                Vector4(
+                  sl.Color.ToVector3() * sl.Intensity,
+                  float32(System.Math.Cos(float sl.InnerConeAngle))
+                )
+              )
+            | _ -> None)
+
+        if spotLightData.Length > 0 then
+          match EffectHelpers.findParam "SpotLightData" effect with
+          | Some p -> p.SetValue(spotLightData)
+          | None -> ()
+
+          match EffectHelpers.findParam "SpotLightArgs" effect with
+          | Some p -> p.SetValue(spotLightArgs)
+          | None -> ()
+
+          match EffectHelpers.findParam "SpotLightColors" effect with
+          | Some p -> p.SetValue(spotLightColors)
+          | None -> ()
+
+          EffectHelpers.setParam "SpotLightCount" (float32 spotLightData.Length) effect
+        else
+          EffectHelpers.setParam "SpotLightCount" 0.0f effect
+
+    if state.ShadowViewMatrices.Count > 0 then
+      // 1. Matrices
+      match EffectHelpers.findParam "LightViews" effect with
+      | Some p -> p.SetValue(state.ShadowViewMatrices.ToArray())
+      | None ->
+          EffectHelpers.setParam "LightView" state.ShadowViewMatrices.[0] effect
+
+      match EffectHelpers.findParam "LightProjections" effect with
+      | Some p -> p.SetValue(state.ShadowProjectionMatrices.ToArray())
+      | None ->
+          EffectHelpers.setParam "LightProjection" state.ShadowProjectionMatrices.[0] effect
+
+      // 2. Textures
+      let useArray =
+        match state.Config.ShadowPath with
+        | ForceArray -> true
+        | ForceDiscrete
+        | Auto -> false
+
+      if useArray then
+        // Modern Path: Bind as array if possible
+        match state.ShadowMapArray with
+        | ValueSome texArray ->
+            EffectHelpers.setParam "ShadowMapArray" texArray effect
+        | ValueNone ->
+            if state.DiscreteShadowMaps.Count > 0 then
+              EffectHelpers.setParam "ShadowMap" (state.DiscreteShadowMaps.[0] :> Texture) effect
       else
-        let pDir = effect.Parameters.["LightDirection"]
-        if not(isNull pDir) then pDir.SetValue(lightDirs.[0])
+        // Restricted Path: Bind to discrete slots
+        let findParam (name: string) =
+          effect.Parameters
+          |> Seq.cast<EffectParameter>
+          |> Seq.tryFind (fun p -> p.Name = name)
 
-      let pCols = effect.Parameters.["LightColors"]
+        for i = 0 to min 7 (state.DiscreteShadowMaps.Count - 1) do
+          match findParam $"ShadowMap{i}" with
+          | Some p -> p.SetValue(state.DiscreteShadowMaps.[i] :> Texture)
+          | None -> ()
 
-      if not(isNull pCols) then
-        pCols.SetValue(lightColors)
-      else
-        let pCol = effect.Parameters.["LightColor"]
-        if not(isNull pCol) then pCol.SetValue(lightColors.[0])
-
-      let pCount = effect.Parameters.["DirectionalLightCount"]
-
-      if not(isNull pCount) then
-        pCount.SetValue(float32 lightDirs.Length)
-    else
-      let pCount = effect.Parameters.["DirectionalLightCount"]
-
-      if not(isNull pCount) then
-        pCount.SetValue(0.0f)
-
-    let pointLightData =
-      state.CurrentLighting.Lights
-      |> Array.choose (function
-        | Point pl ->
-          Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
-        | _ -> None)
-
-    let pointLightColors =
-      state.CurrentLighting.Lights
-      |> Array.choose (function
-        | Point pl -> Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
-        | _ -> None)
-
-    if pointLightData.Length > 0 then
-      let pParams = effect.Parameters.["PointLightData"]
-
-      if not(isNull pParams) then
-        pParams.SetValue(pointLightData)
-
-      let pColors = effect.Parameters.["PointLightColors"]
-
-      if not(isNull pColors) then
-        pColors.SetValue(pointLightColors)
-
-      let pCount = effect.Parameters.["PointLightCount"]
-
-      if not(isNull pCount) then
-        pCount.SetValue(float32 pointLightData.Length)
-    else
-      let pCount = effect.Parameters.["PointLightCount"]
-
-      if not(isNull pCount) then
-        pCount.SetValue(0.0f)
-
-    let spotLightData =
-      state.CurrentLighting.Lights
-      |> Array.choose (function
-        | Spot sl ->
-          Some(Vector4(sl.Position.X, sl.Position.Y, sl.Position.Z, sl.Range))
-        | _ -> None)
-
-    let spotLightArgs =
-      state.CurrentLighting.Lights
-      |> Array.choose (function
-        | Spot sl ->
-          Some(
-            Vector4(
-              sl.Direction.X,
-              sl.Direction.Y,
-              sl.Direction.Z,
-              float32(System.Math.Cos(float sl.OuterConeAngle))
-            )
-          )
-        | _ -> None)
-
-    let spotLightColors =
-      state.CurrentLighting.Lights
-      |> Array.choose (function
-        | Spot sl ->
-          Some(
-            Vector4(
-              sl.Color.ToVector3() * sl.Intensity,
-              float32(System.Math.Cos(float sl.InnerConeAngle))
-            )
-          )
-        | _ -> None)
-
-    if spotLightData.Length > 0 then
-      let pData = effect.Parameters.["SpotLightData"]
-      if not(isNull pData) then pData.SetValue(spotLightData)
-
-      let pArgs = effect.Parameters.["SpotLightArgs"]
-      if not(isNull pArgs) then pArgs.SetValue(spotLightArgs)
-
-      let pCols = effect.Parameters.["SpotLightColors"]
-      if not(isNull pCols) then pCols.SetValue(spotLightColors)
-
-      let pCount = effect.Parameters.["SpotLightCount"]
-      if not(isNull pCount) then pCount.SetValue(float32 spotLightData.Length)
-    else
-      let pCount = effect.Parameters.["SpotLightCount"]
-      if not(isNull pCount) then pCount.SetValue(0.0f)
-
-    if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
-      let pShadowMap = effect.Parameters.["ShadowMap"]
-
-      if not(isNull pShadowMap) then
-        pShadowMap.SetValue(state.ShadowMaps.[0])
-
-      let pLightView = effect.Parameters.["LightView"]
-
-      if not(isNull pLightView) then
-        pLightView.SetValue(state.ShadowViewMatrices.[0])
-
-      let pLightProj = effect.Parameters.["LightProjection"]
-
-      if not(isNull pLightProj) then
-        pLightProj.SetValue(state.ShadowProjectionMatrices.[0])
+      // 4. Shadow Config
+      state.Config.Shadows |> ValueOption.iter (fun cfg ->
+        EffectHelpers.setParam "ShadowBias" cfg.Bias effect
+        EffectHelpers.setParam "ShadowNormalBias" cfg.NormalBias effect
+      )
 
     let albedoColor, hasTexture, albedoTex =
       match drawable.Material.PBR.AlbedoMap with
@@ -583,18 +689,18 @@ module internal Drawing =
             color, false, Unchecked.defaultof<_>
         | _ -> drawable.Material.PBR.AlbedoColor, false, Unchecked.defaultof<_>
 
-    setParam "AlbedoColor" albedoColor
-    setParam "Metallic" drawable.Material.PBR.Metallic
-    setParam "Roughness" drawable.Material.PBR.Roughness
+    EffectHelpers.setParam "AlbedoColor" albedoColor effect
+    EffectHelpers.setParam "Metallic" drawable.Material.PBR.Metallic effect
+    EffectHelpers.setParam "Roughness" drawable.Material.PBR.Roughness effect
 
     if hasTexture then
-      setParam "HasAlbedoMap" 1.0f
-      setParam "AlbedoMap" albedoTex
+      EffectHelpers.setParam "HasAlbedoMap" 1.0f effect
+      EffectHelpers.setParam "AlbedoMap" albedoTex effect
     else
-      setParam "HasAlbedoMap" 0.0f
+      EffectHelpers.setParam "HasAlbedoMap" 0.0f effect
 
     match drawable.Material.PBR.NormalMap with
-    | ValueSome tex -> setParam "NormalMap" tex
+    | ValueSome tex -> EffectHelpers.setParam "NormalMap" tex effect
     | ValueNone -> ()
 
     for pass in effect.CurrentTechnique.Passes do
@@ -623,13 +729,9 @@ module internal Drawing =
       em.View <- state.CurrentCamera.View
       em.Projection <- state.CurrentCamera.Projection
     | _ ->
-      let set (name: string) (m: Matrix) =
-        let p = effect.Parameters.[name]
-        if not(isNull p) then p.SetValue(m)
-
-      set "World" drawable.Transform
-      set "View" state.CurrentCamera.View
-      set "Projection" state.CurrentCamera.Projection
+      EffectHelpers.setParam "World" drawable.Transform effect
+      EffectHelpers.setParam "View" state.CurrentCamera.View effect
+      EffectHelpers.setParam "Projection" state.CurrentCamera.Projection effect
 
     match effect with
     | :? BasicEffect as be ->
@@ -699,18 +801,6 @@ module internal Drawing =
 
 module internal PostProcess =
 
-  let renderFullScreenQuad (device: GraphicsDevice) (effect: Effect) =
-    let vertices = [|
-      VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
-      VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
-      VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
-      VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
-    |]
-
-    for pass in effect.CurrentTechnique.Passes do
-      pass.Apply()
-      device.DrawUserPrimitives(PrimitiveType.TriangleStrip, vertices, 0, 2)
-
   let render (state: PipelineState) (sceneTarget: RenderTarget2D) =
     match state.Config.PostProcess with
     | ValueSome pp ->
@@ -718,11 +808,8 @@ module internal PostProcess =
       |> ValueOption.iter(fun bloomCfg ->
         match state.CustomShaders.TryGetValue(ShaderBase.Bloom) with
         | true, bloomEffect ->
-          if not(isNull bloomEffect.Parameters.["Threshold"]) then
-            bloomEffect.Parameters.["Threshold"].SetValue(bloomCfg.Threshold)
-
-          if not(isNull bloomEffect.Parameters.["Intensity"]) then
-            bloomEffect.Parameters.["Intensity"].SetValue(bloomCfg.Intensity)
+          EffectHelpers.setParam "Threshold" bloomCfg.Threshold bloomEffect
+          EffectHelpers.setParam "Intensity" bloomCfg.Intensity bloomEffect
           ()
         | false, _ -> ())
 
@@ -737,14 +824,19 @@ module internal PostProcess =
       match state.CustomShaders.TryGetValue(ShaderBase.PostProcess) with
       | true, ppEffect ->
         state.Device.SetRenderTarget(null)
+        EffectHelpers.setParam "SceneTexture" sceneTarget ppEffect
+        EffectHelpers.setParam "ToneMapping" tmMode ppEffect
 
-        if not(isNull ppEffect.Parameters.["SceneTexture"]) then
-          ppEffect.Parameters.["SceneTexture"].SetValue(sceneTarget)
+        let vertices = [|
+          VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
+          VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
+          VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
+          VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
+        |]
 
-        if not(isNull ppEffect.Parameters.["ToneMapping"]) then
-          ppEffect.Parameters.["ToneMapping"].SetValue(tmMode)
-
-        renderFullScreenQuad state.Device ppEffect
+        for pass in ppEffect.CurrentTechnique.Passes do
+          pass.Apply()
+          state.Device.DrawUserPrimitives(PrimitiveType.TriangleStrip, vertices, 0, 2)
       | false, _ ->
         state.Device.SetRenderTarget(null)
 
@@ -824,6 +916,10 @@ module internal Orchestrate =
     for i in 0 .. buffer.Count - 1 do
       let struct (_, cmd) = buffer.[i]
       processCommand state cmd
+
+    state.Config.PreRenderCallback |> ValueOption.iter (fun cb ->
+      cb state.Device state.CurrentCamera state.CurrentLighting
+    )
 
     Drawing.flush state
 

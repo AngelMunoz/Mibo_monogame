@@ -17,6 +17,9 @@ type ShadowConfig = {
   CascadeCount: int
   PCFSamples: int
   SoftShadows: SoftShadowConfig voption
+  Bias: float32
+  NormalBias: float32
+  MaxPointShadows: int
 }
 
 module ShadowConfig =
@@ -25,6 +28,9 @@ module ShadowConfig =
     CascadeCount = 3
     PCFSamples = 4
     SoftShadows = ValueNone
+    Bias = 0.005f
+    NormalBias = 0.01f
+    MaxPointShadows = 4
   }
 
   let withResolution (res: int) (cfg: ShadowConfig) = {
@@ -38,6 +44,17 @@ module ShadowConfig =
   let withSoftShadows (penumbra: float32) (cfg: ShadowConfig) = {
     cfg with
         SoftShadows = ValueSome { Penumbra = penumbra }
+  }
+
+  let withBias (bias: float32) (normalBias: float32) (cfg: ShadowConfig) = {
+    cfg with
+        Bias = bias
+        NormalBias = normalBias
+  }
+
+  let withMaxPointShadows (n: int) (cfg: ShadowConfig) = {
+    cfg with
+        MaxPointShadows = n
   }
 
 /// SSAO configuration
@@ -116,6 +133,10 @@ type PipelineConfig = {
   PostProcess: PostProcessConfig voption
   DefaultLighting: LightingState voption
   ShaderOverrides: Map<ShaderBase, string>
+  /// Optional callback to run custom logic before the main render pass (e.g. Depth Pre-Pass, Compute Shaders)
+  PreRenderCallback: (GraphicsDevice -> Camera -> LightingState -> unit) voption
+  /// Optional override for binding light data to shaders
+  LightingBinder: (Effect -> Camera -> LightingState -> unit) voption
 }
 
 module PipelineConfig =
@@ -125,6 +146,8 @@ module PipelineConfig =
     PostProcess = ValueNone
     DefaultLighting = ValueNone
     ShaderOverrides = Map.empty
+    PreRenderCallback = ValueNone
+    LightingBinder = ValueNone
   }
 
   let withShadowPath (path: ShadowPath) (pc: PipelineConfig) = {
