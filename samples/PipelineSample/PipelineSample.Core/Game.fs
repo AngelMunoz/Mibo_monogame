@@ -157,7 +157,24 @@ module Game =
 
     // Setup rendering environment with directional sunlight + rotating colored point lights
     let lights = [|
+      // Primary Sunlight (White)
       yield Lighting.defaultSunlight.Lights.[0]
+
+      // Spot Lights above each platform
+      let spotColors = [| Color.Cyan; Color.Magenta; Color.Yellow; Color.Orange; Color.Lime; Color.DeepPink |]
+      for i in 0 .. state.Platforms.Length - 1 do
+        let plat = state.Platforms.[i]
+        let color = spotColors.[i % spotColors.Length]
+        yield Light.Spot {
+            Position = plat.Position + Vector3(0f, 5f, 0f) // 5 units above platform
+            Direction = Vector3.Down
+            Color = color
+            Intensity = 1.2f
+            Range = 15.0f
+            InnerConeAngle = MathHelper.ToRadians(20f)
+            OuterConeAngle = MathHelper.ToRadians(30f)
+            Shadow = ValueNone
+        }
 
       // Add 16 colorful moving point lights
       for i in 0..15 do
@@ -167,17 +184,20 @@ module Game =
         let z = sin(angle) * radius
         let h = (float32 i / 16.0f) // Hue
 
-        // Convert simple HSV to RGB (rough)
+        // Improved Hue-based color selection
         let color =
-          if h < 0.33f then Color.Red
-          elif h < 0.66f then Color.Green
-          else Color.Blue
+          if h < 0.16f then Color.Red
+          elif h < 0.33f then Color.Orange
+          elif h < 0.5f then Color.Yellow
+          elif h < 0.66f then Color.Lime
+          elif h < 0.83f then Color.Cyan
+          else Color.Magenta
 
         yield
           Light.Point {
             Position = Vector3(x, 3f, z)
             Color = color
-            Intensity = 3.0f
+            Intensity = 1.0f
             Range = 8.0f
             Shadow = ValueNone
           }

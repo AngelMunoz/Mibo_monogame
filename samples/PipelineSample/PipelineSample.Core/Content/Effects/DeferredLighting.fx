@@ -19,14 +19,21 @@ sampler WorldPosSampler = sampler_state { Texture = <WorldPosMap>; MagFilter = P
 
 // Lighting
 float3 AmbientColor;
-// Use individual parameters instead of arrays to fix MonoGame array binding issue
-float3 LightDirection0;
-float3 LightColor0;
+// Directional lights
+float3 LightDirections[16];
+float3 LightColors[16];
+float DirectionalLightCount = 0;
 
- // Point Lights
+// Point Lights
 float4 PointLightData[32];   // xyz = position, w = range
 float4 PointLightColors[32]; // rgb = color * intensity
 float PointLightCount = 0;
+
+// Spot Lights
+float4 SpotLightData[16];    // xyz = position, w = range
+float4 SpotLightArgs[16];    // xyz = direction, w = cosOuter
+float4 SpotLightColors[16];  // rgb = color * intensity, w = cosInner
+float SpotLightCount = 0;
 
 // Shadow Mapping
 texture ShadowMap;
@@ -108,9 +115,14 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 
     float3 diffuse = AmbientColor;
 
-    // Primary directional light with shadow (using individual params instead of array)
-    float ndotl = max(dot(normal, -normalize(LightDirection0)), 0.0);
-    diffuse += ndotl * LightColor0 * shadow;
+    // Primary directional light with shadow
+    for(int i = 0; i < 16; i++)
+    {
+        if (i >= (int)DirectionalLightCount) break;
+        float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);
+        float atten = (i == 0) ? shadow : 1.0;
+        diffuse += ndotl * LightColors[i] * atten;
+    }
 
      // 3. Point Lights
     for(int j = 0; j < 32; j++)
@@ -127,6 +139,39 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
             float ndotl = max(dot(normal, lightDir), 0.0);
             float atten = pow(max(1.0 - (dist / range), 0.0), 2.0);
             diffuse += ndotl * PointLightColors[j].rgb * atten;
+        }
+    }
+
+    // 4. Spot Lights
+    for(int k = 0; k < 16; k++)
+    {
+        if (k >= (int)SpotLightCount) break;
+
+        float3 lightPos = SpotLightData[k].xyz;
+        float3 lightDir = SpotLightArgs[k].xyz;
+        float range = SpotLightData[k].w;
+        float cosOuter = SpotLightArgs[k].w;
+        float cosInner = SpotLightColors[k].w;
+
+        float3 L = lightPos - worldPos;
+        float dist = length(L);
+
+        if (dist < range)
+        {
+            L /= dist;
+            float theta = dot(L, -normalize(lightDir));
+
+            if (theta > cosOuter)
+            {
+                float ndotl = max(dot(normal, L), 0.0);
+                float distAtten = pow(max(1.0 - (dist / range), 0.0), 2.0);
+                
+                // Cone falloff
+                float epsilon = cosInner - cosOuter;
+                float coneAtten = clamp((theta - cosOuter) / epsilon, 0.0, 1.0);
+                
+                diffuse += ndotl * SpotLightColors[k].rgb * distAtten * coneAtten;
+            }
         }
     }
 

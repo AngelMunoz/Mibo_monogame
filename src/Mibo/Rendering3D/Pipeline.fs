@@ -182,18 +182,33 @@ module internal Shared =
         | _ -> None)
 
     if lightDirs.Length > 0 then
-      let dirs = lightDirs |> Array.truncate 3
-      let colors = lightColors |> Array.truncate 3
-
       let pDirs = effect.Parameters.["LightDirections"]
 
       if not(isNull pDirs) then
-        pDirs.SetValue(dirs)
+        pDirs.SetValue(lightDirs)
+      else
+        // Fallback: Try binding single directional light
+        let pDir = effect.Parameters.["LightDirection"]
+        if not(isNull pDir) then pDir.SetValue(lightDirs.[0])
 
       let pCols = effect.Parameters.["LightColors"]
 
       if not(isNull pCols) then
-        pCols.SetValue(colors)
+        pCols.SetValue(lightColors)
+      else
+        // Fallback: Try binding single directional light color
+        let pCol = effect.Parameters.["LightColor"]
+        if not(isNull pCol) then pCol.SetValue(lightColors.[0])
+
+      let pCount = effect.Parameters.["DirectionalLightCount"]
+
+      if not(isNull pCount) then
+        pCount.SetValue(float32 lightDirs.Length)
+    else
+      let pCount = effect.Parameters.["DirectionalLightCount"]
+
+      if not(isNull pCount) then
+        pCount.SetValue(0.0f)
 
     // Point Lights
     let pointLightData =
@@ -210,28 +225,75 @@ module internal Shared =
         | _ -> None)
 
     if pointLightData.Length > 0 then
-      let pData = pointLightData |> Array.truncate 32
-      let pCols = pointLightColors |> Array.truncate 32
-
       let pParams = effect.Parameters.["PointLightData"]
 
       if not(isNull pParams) then
-        pParams.SetValue(pData)
+        pParams.SetValue(pointLightData)
 
       let pColors = effect.Parameters.["PointLightColors"]
 
       if not(isNull pColors) then
-        pColors.SetValue(pCols)
+        pColors.SetValue(pointLightColors)
 
       let pCount = effect.Parameters.["PointLightCount"]
 
       if not(isNull pCount) then
-        pCount.SetValue(float32 pData.Length)
+        pCount.SetValue(float32 pointLightData.Length)
     else
       let pCount = effect.Parameters.["PointLightCount"]
 
       if not(isNull pCount) then
         pCount.SetValue(0.0f)
+
+    // Spot Lights
+    let spotLightData =
+      state.CurrentLighting.Lights
+      |> Array.choose (function
+        | Spot sl ->
+          Some(Vector4(sl.Position.X, sl.Position.Y, sl.Position.Z, sl.Range))
+        | _ -> None)
+
+    let spotLightArgs =
+      state.CurrentLighting.Lights
+      |> Array.choose (function
+        | Spot sl ->
+          Some(
+            Vector4(
+              sl.Direction.X,
+              sl.Direction.Y,
+              sl.Direction.Z,
+              float32(System.Math.Cos(float sl.OuterConeAngle))
+            )
+          )
+        | _ -> None)
+
+    let spotLightColors =
+      state.CurrentLighting.Lights
+      |> Array.choose (function
+        | Spot sl ->
+          Some(
+            Vector4(
+              sl.Color.ToVector3() * sl.Intensity,
+              float32(System.Math.Cos(float sl.InnerConeAngle))
+            )
+          )
+        | _ -> None)
+
+    if spotLightData.Length > 0 then
+      let pData = effect.Parameters.["SpotLightData"]
+      if not(isNull pData) then pData.SetValue(spotLightData)
+
+      let pArgs = effect.Parameters.["SpotLightArgs"]
+      if not(isNull pArgs) then pArgs.SetValue(spotLightArgs)
+
+      let pCols = effect.Parameters.["SpotLightColors"]
+      if not(isNull pCols) then pCols.SetValue(spotLightColors)
+
+      let pCount = effect.Parameters.["SpotLightCount"]
+      if not(isNull pCount) then pCount.SetValue(float32 spotLightData.Length)
+    else
+      let pCount = effect.Parameters.["SpotLightCount"]
+      if not(isNull pCount) then pCount.SetValue(0.0f)
 
     // Shadow Mapping
     if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
@@ -860,6 +922,7 @@ module internal ForwardPlus =
                 tileMasks.[ty * tilesX + tx] <-
                   tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
       | Spot sl ->
+        // Use conservative sphere projection for spot lights
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport sl.Position sl.Range
 
@@ -1130,29 +1193,118 @@ module internal Deferred =
         lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity
       )
 
-    // Get first directional light (primary sunlight)
-    // Uses individual parameters instead of arrays to fix MonoGame array binding issue
-    let firstDirectional =
+    // Bind Directional Lights
+    let lightDirs =
       lighting.Lights
-      |> Array.tryPick (function
-        | Directional dl -> Some dl
+      |> Array.choose (function
+        | Directional dl -> Some dl.Direction
         | _ -> None)
 
-    match firstDirectional with
-    | Some dl ->
-      let dir = dl.Direction
-      let color = dl.Color.ToVector3() * dl.Intensity
+    let lightColors =
+      lighting.Lights
+      |> Array.choose (function
+        | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
+        | _ -> None)
 
-      let pDir = effect.Parameters.["LightDirection0"]
+    let pDirs = effect.Parameters.["LightDirections"]
+    if not(isNull pDirs) then
+      pDirs.SetValue(lightDirs)
+    else
+      // Fallback: Try binding single directional light
+      let pDir = effect.Parameters.["LightDirection"]
+      if not(isNull pDir) && lightDirs.Length > 0 then
+        pDir.SetValue(lightDirs.[0])
 
-      if not(isNull pDir) then
-        pDir.SetValue(dir)
+    let pCols = effect.Parameters.["LightColors"]
+    if not(isNull pCols) then
+      pCols.SetValue(lightColors)
+    else
+      // Fallback: Try binding single directional light color
+      let pCol = effect.Parameters.["LightColor"]
+      if not(isNull pCol) && lightColors.Length > 0 then
+        pCol.SetValue(lightColors.[0])
 
-      let pCol = effect.Parameters.["LightColor0"]
+    let pDirCount = effect.Parameters.["DirectionalLightCount"]
+    if not(isNull pDirCount) then
+      pDirCount.SetValue(float32 lightDirs.Length)
 
-      if not(isNull pCol) then
-        pCol.SetValue(color)
-    | None -> ()
+    // Bind Point Lights
+    let pointLightData =
+      lighting.Lights
+      |> Array.choose (function
+        | Point pl ->
+          Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
+        | _ -> None)
+
+    let pointLightColors =
+      lighting.Lights
+      |> Array.choose (function
+        | Point pl ->
+          Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
+        | _ -> None)
+
+    if pointLightData.Length > 0 then
+      let pData = effect.Parameters.["PointLightData"]
+      if not(isNull pData) then pData.SetValue(pointLightData)
+
+      let pColors = effect.Parameters.["PointLightColors"]
+      if not(isNull pColors) then pColors.SetValue(pointLightColors)
+
+      let pCount = effect.Parameters.["PointLightCount"]
+      if not(isNull pCount) then pCount.SetValue(float32 pointLightData.Length)
+    else
+      let pCount = effect.Parameters.["PointLightCount"]
+      if not(isNull pCount) then pCount.SetValue(0.0f)
+
+    // Bind Spot Lights
+    let spotLightData =
+      lighting.Lights
+      |> Array.choose (function
+        | Spot sl ->
+          Some(Vector4(sl.Position.X, sl.Position.Y, sl.Position.Z, sl.Range))
+        | _ -> None)
+
+    let spotLightArgs =
+      lighting.Lights
+      |> Array.choose (function
+        | Spot sl ->
+          Some(
+            Vector4(
+              sl.Direction.X,
+              sl.Direction.Y,
+              sl.Direction.Z,
+              float32(System.Math.Cos(float sl.OuterConeAngle))
+            )
+          )
+        | _ -> None)
+
+    let spotLightColors =
+      lighting.Lights
+      |> Array.choose (function
+        | Spot sl ->
+          Some(
+            Vector4(
+              sl.Color.ToVector3() * sl.Intensity,
+              float32(System.Math.Cos(float sl.InnerConeAngle))
+            )
+          )
+        | _ -> None)
+
+    if spotLightData.Length > 0 then
+      let pData = effect.Parameters.["SpotLightData"]
+      if not(isNull pData) then pData.SetValue(spotLightData)
+
+      let pArgs = effect.Parameters.["SpotLightArgs"]
+      if not(isNull pArgs) then pArgs.SetValue(spotLightArgs)
+
+      let pCols = effect.Parameters.["SpotLightColors"]
+      if not(isNull pCols) then pCols.SetValue(spotLightColors)
+
+      let pCount = effect.Parameters.["SpotLightCount"]
+      if not(isNull pCount) then pCount.SetValue(float32 spotLightData.Length)
+    else
+      let pCount = effect.Parameters.["SpotLightCount"]
+      if not(isNull pCount) then pCount.SetValue(0.0f)
 
   let renderLighting
     (state: PipelineState)

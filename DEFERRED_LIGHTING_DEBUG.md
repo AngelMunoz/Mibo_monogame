@@ -12,11 +12,11 @@
 
 ## Current Status
 
-| Mode | Directional Lights | Point Lights | Shadows |
-|------|-------------------|--------------|---------|
-| Forward | ✅ Works | ✅ Works | ✅ Works |
-| Forward+ | ✅ Works | ✅ Works | ✅ Works |
-| Deferred | ❌ **Fails** | ✅ Works | ✅ Works |
+| Mode     | Directional Lights | Point Lights | Shadows  |
+| -------- | ------------------ | ------------ | -------- |
+| Forward  | ✅ Works           | ✅ Works     | ✅ Works |
+| Forward+ | ✅ Works           | ✅ Works     | ✅ Works |
+| Deferred | ❌ **Fails**       | ✅ Works     | ✅ Works |
 
 **Critical observation**: Point lights use `float4[]` arrays and work. Directional lights use `float3[]` arrays and fail.
 
@@ -27,6 +27,7 @@
 The only approach that works is using **individual parameters** instead of arrays:
 
 ### Shader (DeferredLighting.fx)
+
 ```hlsl
 // Instead of arrays:
 // float3 LightDirections[3];
@@ -42,6 +43,7 @@ diffuse += ndotl * LightColor * shadow;
 ```
 
 ### F# Binding (Pipeline.fs)
+
 ```fsharp
 let firstDirectional =
   lighting.Lights
@@ -66,69 +68,86 @@ match firstDirectional with
 ## What We Tried (All Failed)
 
 ### 1. Array SetValue with Vector3[]
+
 ```fsharp
 let dirs = [| light.Direction |]
 effect.Parameters.["LightDirections"].SetValue(dirs)
 ```
+
 **Result**: Values stored correctly (verified by `GetValueVector3Array()`), but shader reads zeros.
 
 ### 2. Array SetValue with Vector4[] (to match point lights)
+
 ```fsharp
 let dirs = [| Vector4(light.Direction, 0f) |]
 effect.Parameters.["LightDirections"].SetValue(dirs)
 ```
+
 **Shader**: Changed to `float4 LightDirections[3]`
 **Result**: Still fails.
 
 ### 3. Individual Element Access via Elements[]
+
 ```fsharp
 effect.Parameters.["LightDirections"].Elements.[0].SetValue(dirs.[0])
 ```
+
 **Result**: SetValue succeeds, but shader reads zeros.
 
 ### 4. Indexed Name Access "LightDirections[0]"
+
 ```fsharp
 effect.Parameters.["LightDirections[0]"].SetValue(dirs.[0])
 ```
+
 **Result**: Parameter is NULL - this naming convention doesn't work in MonoGame.
 
 ### 5. Padded Arrays (exactly 3 elements)
+
 ```fsharp
 let lightDirs = Array.init 3 (fun i -> if i < raw.Length then raw.[i] else Vector3.Zero)
 effect.Parameters.["LightDirections"].SetValue(lightDirs)
 ```
+
 **Result**: Still fails.
 
 ### 6. Inline Binding (same location as working point lights)
+
 Moved directional light binding to be inline with point light binding in `renderLighting`.
 **Result**: Still fails.
 
 ### 7. ReadBack Verification
+
 ```fsharp
 pDirs.SetValue(lightDirs)
 let readBack = pDirs.GetValueVector3Array()
 // Output: Set: {-0.19, -0.96, -0.19}, ReadBack: {-0.19, -0.96, -0.19}
 ```
+
 **Result**: ReadBack confirms values ARE stored in the effect parameter. The issue is between EffectParameter storage and HLSL shader execution.
 
 ### 8. Dynamic Loop with Count Variable + Float4 Arrays (Latest Attempt)
+
 We hypothesized that the compiler was unrolling the static loop `for(int i=0; i<3; i++)`, breaking the array binding mapping.
 **Action**:
+
 1.  Changed `LightDirections` and `LightColors` to `float4[]` (matching Point Lights).
 2.  Added `float DirectionalLightCount`.
 3.  Changed loop to `for(int i=0; i<3; i++) { if (i >= DirectionalLightCount) break; ... }`.
-**Result**: ❌ Fails. Still renders black (only point lights visible). This suggests loop unrolling is likely not the primary culprit, or the issue is deeper in the constant buffer mapping for this specific shader profile (`ps_4_0_level_9_1` / `ps_3_0`).
+    **Result**: ❌ Fails. Still renders black (only point lights visible). This suggests loop unrolling is likely not the primary culprit, or the issue is deeper in the constant buffer mapping for this specific shader profile (`ps_4_0_level_9_1` / `ps_3_0`).
 
 ---
 
 ## Key Observations
 
 ### Point Lights Work (Same Effect, Same Shader)
+
 ```fsharp
 // F# Side - WORKS
 let pData = [| Vector4(pos.X, pos.Y, pos.Z, range) |]  // Vector4[]
 effect.Parameters.["PointLightData"].SetValue(pData)
 ```
+
 ```hlsl
 // Shader Side - WORKS
 float4 PointLightData[32];
@@ -136,11 +155,13 @@ float4 PointLightColors[32];
 ```
 
 ### Directional Lights Fail (Same Effect, Same Shader)
+
 ```fsharp
 // F# Side - FAILS
 let dirs = [| direction |]  // Vector3[]
 effect.Parameters.["LightDirections"].SetValue(dirs)
 ```
+
 ```hlsl
 // Shader Side - FAILS (reads zeros despite correct SetValue)
 float3 LightDirections[3];
@@ -148,6 +169,7 @@ float3 LightColors[3];
 ```
 
 ### Identical Code in Forward Works
+
 The exact same `float3 LightDirections[3]` and `SetValue(Vector3[])` code works in Forward mode (PBR.fx).
 
 ---
@@ -155,7 +177,9 @@ The exact same `float3 LightDirections[3]` and `SetValue(Vector3[])` code works 
 ## Hypotheses
 
 ### 1. HLSL Constant Buffer Packing for float3[]
+
 In HLSL, `float3` arrays are padded to 16-byte boundaries per element. This creates hidden padding:
+
 ```
 float3[0] = 12 bytes + 4 padding
 float3[1] = 12 bytes + 4 padding
@@ -165,19 +189,23 @@ float3[2] = 12 bytes + 4 padding
 MonoGame's `SetValue(Vector3[])` may not account for this padding correctly in all shader contexts. `Vector4[]` naturally aligns to 16 bytes and works.
 
 ### 2. Per-Draw vs Once-Per-Frame Binding
+
 - **Forward**: Parameters are set per-drawable, effect is applied, geometry is drawn.
 - **Deferred**: Parameters are set once, then a fullscreen quad is drawn.
 
 The difference in binding frequency might affect how constant buffers are updated.
 
 ### 3. Effect Technique/Pass Differences
+
 Forward uses standard geometry rendering with vertex/pixel shaders operating on vertices.
 Deferred uses a fullscreen quad where the vertex shader is minimal.
 
 The constant buffer layout might differ between these shader configurations.
 
 ### 4. MonoGame Bug for float3[] in Post-Process Shaders
+
 Given that:
+
 - `Vector3[]` → `float3[]` fails in deferred
 - `Vector4[]` → `float4[]` works in deferred (point lights)
 - `Vector3[]` → `float3[]` works in forward
@@ -491,12 +519,14 @@ let renderLighting
 ## Console Output (Proof F# Side Works)
 
 Every frame, the console shows:
+
 ```
 [Deferred] Set LightDirections: {X:-0.19245009 Y:-0.9622505 Z:-0.19245009}, ReadBack: {X:-0.19245009 Y:-0.9622505 Z:-0.19245009}
 [Deferred] Set LightColors: {X:0.8 Y:0.8 Z:0.8}, ReadBack: {X:0.8 Y:0.8 Z:0.8}
 ```
 
 This proves:
+
 - `SetValue` is called with correct values
 - `GetValueVector3Array` returns the same values (stored correctly)
 - The issue is between Effect parameter storage and HLSL shader execution
@@ -523,6 +553,7 @@ dotnet run --project samples/PipelineSample
 2. **Investigate MonoGame source code** for how `EffectParameter.SetValue(Vector3[])` maps to D3D constant buffers.
 
 3. **Test with explicit cbuffer layout in HLSL**:
+
    ```hlsl
    cbuffer LightingData : register(b0)
    {
@@ -537,11 +568,17 @@ dotnet run --project samples/PipelineSample
 
 ---
 
-## Environment
+## Update: Resolution and Cross-Platform Strategy
 
-- MonoGame: Latest (check project references)
-- .NET: 8.0
-- Platform: Windows DirectX
-- Shader Model: 4.0 (level 9.1)
+**Resolution (DirectX)**:
+Confirmed that `float3[]` arrays work correctly for multiple directional lights on DirectX. The previous failure in Deferred mode was resolved by harmonizing the shader structure with the working Forward implementation.
 
-```
+**Cross-Platform Strategy (OpenGL & DirectX)**:
+To ensure robust cross-platform support (specifically for OpenGL where `float3[]` packing in fullscreen quads can be problematic), we can implement a "Both Bindings" fallback in `Pipeline.fs`:
+
+1.  Check for `LightDirections` (array parameter).
+2.  If found, use `SetValue(vector3Array)`.
+3.  If NOT found, check for `LightDirection0` (scalar parameter).
+4.  If found, use `SetValue(vector3)` for the first light only.
+
+This allows the _shader definition_ to dictate the binding mode, ensuring the F# code remains platform-agnostic while accommodating specific shader compiler quirks.
