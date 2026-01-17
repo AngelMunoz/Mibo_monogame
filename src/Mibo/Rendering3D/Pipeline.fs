@@ -1130,84 +1130,46 @@ module internal Deferred =
         lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity
       )
 
-    // Extract directional lights (same approach as Shared.renderDrawableWithEffect)
-    let lightDirs =
+    // Get first directional light (primary sunlight)
+    // Uses individual parameters instead of arrays to fix MonoGame array binding issue
+    let firstDirectional =
       lighting.Lights
-      |> Array.choose (function
-        | Directional dl -> Some dl.Direction
+      |> Array.tryPick (function
+        | Directional dl -> Some dl
         | _ -> None)
 
-    let lightColors =
-      lighting.Lights
-      |> Array.choose (function
-        | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
-        | _ -> None)
+    match firstDirectional with
+    | Some dl ->
+      let dir = dl.Direction
+      let color = dl.Color.ToVector3() * dl.Intensity
 
-    if lightDirs.Length > 0 then
-      // Pad arrays to exactly 3 elements (shader expects float3[3])
-      let dirs =
-        let truncated = lightDirs |> Array.truncate 3
+      let pDir = effect.Parameters.["LightDirection0"]
 
-        if truncated.Length < 3 then
-          Array.append
-            truncated
-            (Array.replicate (3 - truncated.Length) Vector3.Zero)
-        else
-          truncated
+      if not(isNull pDir) then
+        pDir.SetValue(dir)
 
-      let colors =
-        let truncated = lightColors |> Array.truncate 3
+      let pCol = effect.Parameters.["LightColor0"]
 
-        if truncated.Length < 3 then
-          Array.append
-            truncated
-            (Array.replicate (3 - truncated.Length) Vector3.Zero)
-        else
-          truncated
-
-      printfn
-        $"[Deferred.bindLighting] Binding {dirs.Length} directional lights (padded)"
-
-      printfn
-        $"[Deferred.bindLighting] LightDir[0]={dirs.[0]}, LightColor[0]={colors.[0]}"
-
-      let pDirs = effect.Parameters.["LightDirections"]
-
-      if not(isNull pDirs) then
-        pDirs.SetValue(dirs)
-
-        printfn "[Deferred.bindLighting] LightDirections SET"
-      else
-        printfn "[Deferred.bindLighting] LightDirections param is NULL!"
-
-      let pCols = effect.Parameters.["LightColors"]
-
-      if not(isNull pCols) then
-        pCols.SetValue(colors)
-
-        printfn "[Deferred.bindLighting] LightColors SET"
-      else
-        printfn "[Deferred.bindLighting] LightColors param is NULL!"
-    else
-      printfn "[Deferred.bindLighting] No directional lights found!"
+      if not(isNull pCol) then
+        pCol.SetValue(color)
+    | None -> ()
 
   let renderLighting
     (state: PipelineState)
     (gBuffer: (RenderTarget2D * RenderTarget2D * RenderTarget2D) voption)
     =
-    printfn $"[Deferred.renderLighting] gBuffer has value: {gBuffer.IsSome}"
+
 
     match gBuffer with
     | ValueSome(albedo, normal, depth) ->
       let hasDeferredShader =
         state.CustomShaders.ContainsKey(ShaderBase.DeferredLighting)
 
-      printfn
-        $"[Deferred.renderLighting] Has DeferredLighting shader: {hasDeferredShader}"
+
 
       match state.CustomShaders.TryGetValue(ShaderBase.DeferredLighting) with
       | true, effect ->
-        printfn "[Deferred.renderLighting] Entering lighting pass"
+
         // Bind G-Buffer textures
         if not(isNull effect.Parameters.["AlbedoMap"]) then
           effect.Parameters.["AlbedoMap"].SetValue(albedo)
@@ -1261,8 +1223,7 @@ module internal Deferred =
 
         // Bind Shadow Data
         if state.ShadowMaps.Count > 0 && state.ShadowViewMatrices.Count > 0 then
-          printfn
-            $"[Deferred.renderLighting] Binding shadow map. Count={state.ShadowMaps.Count}"
+
 
           let pShadowMap = effect.Parameters.["ShadowMap"]
 

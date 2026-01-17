@@ -19,8 +19,9 @@ sampler WorldPosSampler = sampler_state { Texture = <WorldPosMap>; MagFilter = P
 
 // Lighting
 float3 AmbientColor;
-float3 LightDirections[3];
-float3 LightColors[3];
+// Use individual parameters instead of arrays to fix MonoGame array binding issue
+float3 LightDirection0;
+float3 LightColor0;
 
 // Point Lights
 float4 PointLightData[32];   // xyz = position, w = range
@@ -73,7 +74,7 @@ float CalculateShadow(float4 shadowCoord)
 
     float shadow = 0.0;
     float2 texelSize = float2(1.0 / 2048.0, 1.0 / 2048.0);
-    float bias = 0.005;
+    float bias = 0.002;  // Lower shadow bias
 
     for(int x = -1; x <= 1; ++x)
     {
@@ -97,31 +98,19 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 	float3 normal = normalize(tex2D(NormalSampler, input.TexCoord).rgb);
     float3 worldPos = tex2D(WorldPosSampler, input.TexCoord).rgb;
 
-    // 2. Directional Lighting
-    // Use Normal-Offset Bias to prevent self-shadowing (acne)
-    // We shift the world position slightly along the normal for the shadow lookup
-    float3 biasedWorldPos = worldPos + normal * 0.05;
-
-    // Calculate shadow coordinates for the biased world position
-    float4 shadowPos = mul(float4(biasedWorldPos, 1.0), LightView);
+    // 2. Calculate shadow coordinates from world position (no normal offset to match Forward mode)
+    float4 shadowPos = mul(float4(worldPos, 1.0), LightView);
     shadowPos = mul(shadowPos, LightProjection);
     float shadow = CalculateShadow(shadowPos);
 
+    // DEBUG: Visualize shadow value - WHITE = lit (1.0), BLACK = shadowed (0.0)
+    // return float4(shadow, shadow, shadow, 1.0);
+
     float3 diffuse = AmbientColor;
 
-    // DEBUG: Hardcoded directional light to test shader math (bypass LightDirections/LightColors)
-    float3 hardcodedLightDir = normalize(float3(-0.2, -1.0, -0.2)); // Same as defaultSunlight
-    float3 hardcodedLightColor = float3(0.8, 0.8, 0.8);
-    float ndotl = max(dot(normal, -hardcodedLightDir), 0.0);
-    diffuse += ndotl * hardcodedLightColor * shadow;
-
-    // Original loop (commented out for testing)
-    // for(int i = 0; i < 3; i++)
-    // {
-    //     float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);
-    //     float atten = (i == 0) ? shadow : 1.0;
-    //     diffuse += ndotl * LightColors[i] * atten;
-    // }
+    // Primary directional light with shadow (using individual params instead of array)
+    float ndotl = max(dot(normal, -normalize(LightDirection0)), 0.0);
+    diffuse += ndotl * LightColor0 * shadow;
 
     // 3. Point Lights
     for(int j = 0; j < 32; j++)
