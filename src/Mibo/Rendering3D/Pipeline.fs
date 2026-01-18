@@ -16,6 +16,54 @@ type IRenderPipeline =
   abstract member Render:
     GameContext * RenderBuffer<unit, RenderCommand> -> unit
 
+module internal ShadowAtlas =
+
+  type State = {
+    RenderTarget: RenderTarget2D
+    Size: int
+    TileSize: int
+    TilesAcross: int
+    MaxShadows: int
+  }
+
+  let create (device: GraphicsDevice) (config: ShadowConfig) =
+    let tilesAcross = 4
+    let maxShadows = tilesAcross * tilesAcross
+    let atlasSize = config.Resolution * tilesAcross
+
+    let maxTextureSize = 8192
+    let actualAtlasSize = min atlasSize maxTextureSize
+    let actualTileSize = actualAtlasSize / tilesAcross
+
+    let rt =
+      new RenderTarget2D(
+        device,
+        actualAtlasSize,
+        actualAtlasSize,
+        false,
+        SurfaceFormat.Single,
+        DepthFormat.Depth24,
+        0,
+        RenderTargetUsage.DiscardContents
+      )
+
+    {
+      RenderTarget = rt
+      Size = actualAtlasSize
+      TileSize = actualTileSize
+      TilesAcross = tilesAcross
+      MaxShadows = maxShadows
+    }
+
+  let getViewport (state: State) (shadowIndex: int) : Viewport =
+    let col = shadowIndex % state.TilesAcross
+    let row = shadowIndex / state.TilesAcross
+    let x = col * state.TileSize
+    let y = row * state.TileSize
+    Viewport(x, y, state.TileSize, state.TileSize)
+
+  let dispose(state: State) = state.RenderTarget.Dispose()
+
 /// Pipeline state container
 type internal PipelineState = {
   mutable Config: PipelineConfig
@@ -24,23 +72,18 @@ type internal PipelineState = {
   mutable BasicEffect: BasicEffect
   mutable SpriteBatch: SpriteBatch
   CustomShaders: Dictionary<ShaderBase, Effect>
-  DiscreteShadowMaps: ResizeArray<RenderTarget2D>
-  mutable ShadowMapArray: Texture2D voption // Texture2DArray for DX
+  mutable ShadowAtlas: ShadowAtlas.State voption
   ShadowViewMatrices: ResizeArray<Matrix>
   ShadowProjectionMatrices: ResizeArray<Matrix>
-  mutable LightGridTexture: Texture2D voption
+  mutable LightDataTexture: Texture2D voption
+  mutable ShadowMatrixTexture: Texture2D voption
   mutable MainSceneTarget: RenderTarget2D voption
   mutable CurrentCamera: Mibo.Rendering.Graphics3D.Camera
   mutable CurrentLighting: LightingState
   mutable CameraWasSet: bool
-  // Draw batching for sorting
-  OpaqueDrawables: ResizeArray<struct (float32 * Drawable)> // (distance, drawable)
+  OpaqueDrawables: ResizeArray<struct (float32 * Drawable)>
   TransparentDrawables: ResizeArray<struct (float32 * Drawable)>
 }
-
-// ============================================================================
-// Internal Modules - Semantic Organization
-// ============================================================================
 
 module internal State =
 
@@ -51,11 +94,11 @@ module internal State =
     BasicEffect = Unchecked.defaultof<_>
     SpriteBatch = Unchecked.defaultof<_>
     CustomShaders = Dictionary<ShaderBase, Effect>()
-    DiscreteShadowMaps = ResizeArray<RenderTarget2D>()
-    ShadowMapArray = ValueNone
+    ShadowAtlas = ValueNone
     ShadowViewMatrices = ResizeArray<Matrix>()
     ShadowProjectionMatrices = ResizeArray<Matrix>()
-    LightGridTexture = ValueNone
+    LightDataTexture = ValueNone
+    ShadowMatrixTexture = ValueNone
     MainSceneTarget = ValueNone
     CurrentCamera = Camera.identity
     CurrentLighting = Lighting.ambient
@@ -77,113 +120,227 @@ module internal State =
     state.ShadowProjectionMatrices.Clear()
     state.MainSceneTarget <- ValueNone
 
-  let initialize
-    (state: PipelineState)
-    (game: Game)
-    (gd: GraphicsDevice)
-    =
+  let initialize (state: PipelineState) (game: Game) (gd: GraphicsDevice) =
     state.Device <- gd
     state.RtPool <- RenderTargetPool.create gd
     state.SpriteBatch <- new SpriteBatch(gd)
 
-    // BasicEffect as fallback
     state.BasicEffect <- new BasicEffect(gd)
     state.BasicEffect.EnableDefaultLighting()
     state.BasicEffect.PreferPerPixelLighting <- true
     state.BasicEffect.SpecularColor <- Vector3.Zero
     state.BasicEffect.SpecularPower <- 1f
 
-    // Set default lighting from config
     state.CurrentLighting <-
       state.Config.DefaultLighting |> ValueOption.defaultValue Lighting.ambient
 
-    // Load custom shaders from content
     for KeyValue(shaderBase, assetName) in state.Config.ShaderOverrides do
       state.CustomShaders.[shaderBase] <- game.Content.Load<Effect>(assetName)
 
-    // Pre-allocate shadow maps
     if state.CustomShaders.ContainsKey(ShaderBase.ShadowCaster) then
       state.Config.Shadows
       |> ValueOption.iter(fun cfg ->
-        // Use the user-defined toggle, default to Discrete for Auto
-        let useArray =
-          match state.Config.ShadowPath with
-          | ForceArray -> true
-          | ForceDiscrete
-          | Auto -> false
+        state.ShadowAtlas <- ValueSome(ShadowAtlas.create gd cfg))
 
-        if useArray then
-          // Allocation for Texture2DArray/Modern path
-          // Note: In MonoGame, we can use a RenderTarget2D with ArraySize > 1 on supported platforms
-          // For now, we'll keep the discrete collection but flag the intent to use Array binding
-          ()
-
-        // Ensure we have enough discrete maps for the chosen or fallback path
-        let totalNeeded = cfg.CascadeCount + cfg.MaxPointShadows * 6 + 16
-        if state.DiscreteShadowMaps.Count < totalNeeded then
-          for _ in state.DiscreteShadowMaps.Count .. totalNeeded - 1 do
-            state.DiscreteShadowMaps.Add(
-              new RenderTarget2D(
-                gd,
-                cfg.Resolution,
-                cfg.Resolution,
-                false,
-                SurfaceFormat.Single,
-                DepthFormat.Depth24
-              )
-            ))
-
+[<AutoOpen>]
 module internal EffectHelpers =
-  /// Helper to find a parameter by name, avoiding indexer ambiguity in F#
   let findParam (name: string) (effect: Effect) =
-    effect.Parameters
-    |> Seq.cast<EffectParameter>
-    |> Seq.tryFind (fun p -> p.Name = name)
+    let mutable found = ValueNone
+    use enum = effect.Parameters.GetEnumerator()
 
-  let setParam (name: string) (value: obj) (effect: Effect) =
-    match findParam name effect with
-    | Some p ->
-        match value with
-        | :? Matrix as m -> p.SetValue(m)
-        | :? (Matrix[]) as ma -> p.SetValue(ma)
-        | :? Vector3 as v -> p.SetValue(v)
-        | :? (Vector3[]) as va -> p.SetValue(va)
-        | :? Vector4 as v -> p.SetValue(v)
-        | :? (Vector4[]) as va -> p.SetValue(va)
-        | :? float32 as f -> p.SetValue(f)
-        | :? bool as b -> p.SetValue(b)
-        | :? Texture as t -> p.SetValue(t)
-        | :? Color as c -> p.SetValue(c.ToVector4())
-        | _ -> ()
-    | None -> ()
+    while enum.MoveNext() do
+      let p = enum.Current
+
+      if p.Name = name then
+        found <- ValueSome p
+
+    found
+
+  type Effect with
+    member this.SafeSetParam(name: string, value: bool) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: int) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Matrix) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Matrix[]) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Quaternion) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: float32) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: float32[]) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Texture) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Texture[]) =
+      findParam name this
+      |> ValueOption.iter(fun p ->
+        for i = 0 to min (value.Length - 1) (p.Elements.Count - 1) do
+          p.Elements.[i].SetValue(value.[i]))
+
+    member this.SafeSetParam(name: string, value: Vector2) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Vector2[]) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Vector3) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Vector3[]) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Vector4) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Vector4[]) =
+      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
+
+    member this.SafeSetParam(name: string, value: Color) =
+      findParam name this
+      |> ValueOption.iter(fun p -> p.SetValue(value.ToVector4()))
+
+module internal LightPacking =
+  let packLightData(state: PipelineState) =
+    let lights = state.CurrentLighting.Lights
+
+    if lights.Length = 0 then
+      state.LightDataTexture <- ValueNone
+    else
+      let data = Array.zeroCreate<Vector4>(lights.Length * 4)
+      let mutable shadowMapIndex = 0
+
+      for i = 0 to lights.Length - 1 do
+        let offset = i * 4
+
+        match lights.[i] with
+        | Directional dl ->
+          let shadowIdx =
+            if ValueOption.isSome dl.Shadow then
+              let s = shadowMapIndex in
+              shadowMapIndex <- shadowMapIndex + 1
+              float32 s
+            else
+              -1.0f
+
+          data.[offset + 0] <- Vector4(0.0f, dl.Intensity, 0.0f, shadowIdx)
+          data.[offset + 1] <- Vector4.Zero
+
+          data.[offset + 2] <-
+            Vector4(dl.Direction.X, dl.Direction.Y, dl.Direction.Z, 0.0f)
+
+          data.[offset + 3] <- Vector4(dl.Color.ToVector3(), 0.0f)
+        | Point pl ->
+          let shadowIdx =
+            if ValueOption.isSome pl.Shadow then
+              let s = shadowMapIndex in
+              shadowMapIndex <- shadowMapIndex + 6
+              float32 s
+            else
+              -1.0f
+
+          data.[offset + 0] <- Vector4(1.0f, pl.Intensity, pl.Range, shadowIdx)
+
+          data.[offset + 1] <-
+            Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, 0.0f)
+
+          data.[offset + 2] <- Vector4.Zero
+          data.[offset + 3] <- Vector4(pl.Color.ToVector3(), 0.0f)
+        | Spot sl ->
+          let shadowIdx =
+            if ValueOption.isSome sl.Shadow then
+              let s = shadowMapIndex in
+              shadowMapIndex <- shadowMapIndex + 1
+              float32 s
+            else
+              -1.0f
+
+          data.[offset + 0] <- Vector4(2.0f, sl.Intensity, sl.Range, shadowIdx)
+
+          data.[offset + 1] <-
+            Vector4(
+              sl.Position.X,
+              sl.Position.Y,
+              sl.Position.Z,
+              float32(System.Math.Cos(float sl.OuterConeAngle))
+            )
+
+          data.[offset + 2] <-
+            Vector4(
+              sl.Direction.X,
+              sl.Direction.Y,
+              sl.Direction.Z,
+              float32(System.Math.Cos(float sl.InnerConeAngle))
+            )
+
+          data.[offset + 3] <- Vector4(sl.Color.ToVector3(), 0.0f)
+
+      let tex =
+        new Texture2D(
+          state.Device,
+          4,
+          lights.Length,
+          false,
+          SurfaceFormat.Vector4
+        )
+
+      tex.SetData(data)
+      state.LightDataTexture <- ValueSome tex
+
+  let packShadowMatrices(state: PipelineState) =
+    if state.ShadowViewMatrices.Count = 0 then
+      state.ShadowMatrixTexture <- ValueNone
+    else
+      let count = state.ShadowViewMatrices.Count
+      let data = Array.zeroCreate<Vector4>(count * 2 * 4)
+
+      for i = 0 to count - 1 do
+        let v = state.ShadowViewMatrices.[i]
+        let p = state.ShadowProjectionMatrices.[i]
+        let offset = i * 8
+        data.[offset + 0] <- Vector4(v.M11, v.M12, v.M13, v.M14)
+        data.[offset + 1] <- Vector4(v.M21, v.M22, v.M23, v.M24)
+        data.[offset + 2] <- Vector4(v.M31, v.M32, v.M33, v.M34)
+        data.[offset + 3] <- Vector4(v.M41, v.M42, v.M43, v.M44)
+        data.[offset + 4] <- Vector4(p.M11, p.M12, p.M13, p.M14)
+        data.[offset + 5] <- Vector4(p.M21, p.M22, p.M23, p.M24)
+        data.[offset + 6] <- Vector4(p.M31, p.M32, p.M33, p.M34)
+        data.[offset + 7] <- Vector4(p.M41, p.M42, p.M43, p.M44)
+
+      let tex =
+        new Texture2D(state.Device, 4, count * 2, false, SurfaceFormat.Vector4)
+
+      tex.SetData(data)
+      state.ShadowMatrixTexture <- ValueSome tex
 
 module internal Culling =
-
   let isVisible
     (camera: Mibo.Rendering.Graphics3D.Camera)
     (drawable: Drawable)
-    : bool =
+    =
     let frustum = BoundingFrustum(camera.View * camera.Projection)
     frustum.Contains(drawable.BoundingSphere) <> ContainmentType.Disjoint
 
   let distanceToCamera
     (camera: Mibo.Rendering.Graphics3D.Camera)
     (drawable: Drawable)
-    : float32 =
+    =
     Vector3.DistanceSquared(camera.Position, drawable.BoundingSphere.Center)
 
-  let isTransparent(drawable: Drawable) : bool =
+  let isTransparent(drawable: Drawable) =
     drawable.Material.Flags.HasFlag(MaterialFlags.Transparent)
     || drawable.Material.PBR.AlbedoColor.A < 255uy
 
   let batchDrawable (state: PipelineState) (drawable: Drawable) =
-#if DEBUG
-    if not state.CameraWasSet then
-      System.Diagnostics.Debug.WriteLine(
-        "[Pipeline] Warning: Draw called without SetCamera"
-      )
-#endif
-
     if not(isVisible state.CurrentCamera drawable) then
       ()
     else
@@ -197,7 +354,6 @@ module internal Culling =
 module internal Tiling =
   let TileSize = 16
 
-  /// Projects a sphere to screen-space AABB
   let private projectSphere
     (camera: Mibo.Rendering.Graphics3D.Camera)
     (viewport: Viewport)
@@ -225,21 +381,18 @@ module internal Tiling =
     let toScreen x size = (x + 1f) * 0.5f * float32 size
     let left = toScreen minX viewport.Width |> int |> max 0
     let right = toScreen maxX viewport.Width |> int |> min viewport.Width
-    let top = toScreen -maxY viewport.Height |> int |> max 0 // Flip Y
+    let top = toScreen -maxY viewport.Height |> int |> max 0
     let bottom = toScreen -minY viewport.Height |> int |> min viewport.Height
-
     struct (left, top, right, bottom)
 
-  let cullLights(state: PipelineState) : uint32[] =
+  let cullLights(state: PipelineState) =
     let viewport =
-      if isNull (box state.Device) then
-        Viewport(0, 0, 1280, 720)
-      else
-        state.Device.Viewport
+      match state.Device with
+      | null -> Viewport(0, 0, 1280, 720)
+      | _ -> state.Device.Viewport
 
     let tilesX = (viewport.Width + TileSize - 1) / TileSize
     let tilesY = (viewport.Height + TileSize - 1) / TileSize
-
     let tileMasks = Array.zeroCreate<uint32>(tilesX * tilesY)
     let lights = state.CurrentLighting.Lights
 
@@ -272,10 +425,7 @@ module internal Tiling =
     tileMasks
 
 module internal ShadowPass =
-
-  let computeSpotShadowMatrices
-    (sl: SpotLight)
-    : struct (Matrix * Matrix) =
+  let computeSpotShadowMatrices(sl: SpotLight) =
     let view =
       Matrix.CreateLookAt(sl.Position, sl.Position + sl.Direction, Vector3.Up)
 
@@ -289,20 +439,50 @@ module internal ShadowPass =
 
     struct (view, proj)
 
-  let computePointShadowMatrices
-    (pl: PointLight)
-    (face: int)
-    : struct (Matrix * Matrix) =
+  let computePointShadowMatrices (pl: PointLight) (face: int) =
     let view =
       match face with
-      | 0 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Right, Vector3.Up) // +X
-      | 1 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Left, Vector3.Up) // -X
-      | 2 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Up, Vector3.Backward) // +Y
-      | 3 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Down, Vector3.Forward) // -Y
-      | 4 -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Forward, Vector3.Up) // +Z
-      | _ -> Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Backward, Vector3.Up) // -Z
+      | 0 ->
+        Matrix.CreateLookAt(
+          pl.Position,
+          pl.Position + Vector3.Right,
+          Vector3.Up
+        )
+      | 1 ->
+        Matrix.CreateLookAt(pl.Position, pl.Position + Vector3.Left, Vector3.Up)
+      | 2 ->
+        Matrix.CreateLookAt(
+          pl.Position,
+          pl.Position + Vector3.Up,
+          Vector3.Backward
+        )
+      | 3 ->
+        Matrix.CreateLookAt(
+          pl.Position,
+          pl.Position + Vector3.Down,
+          Vector3.Forward
+        )
+      | 4 ->
+        Matrix.CreateLookAt(
+          pl.Position,
+          pl.Position + Vector3.Forward,
+          Vector3.Up
+        )
+      | _ ->
+        Matrix.CreateLookAt(
+          pl.Position,
+          pl.Position + Vector3.Backward,
+          Vector3.Up
+        )
 
-    let proj = Matrix.CreatePerspectiveFieldOfView(MathHelper.PiOver2, 1.0f, 0.1f, pl.Range)
+    let proj =
+      Matrix.CreatePerspectiveFieldOfView(
+        MathHelper.PiOver2,
+        1.0f,
+        0.1f,
+        pl.Range
+      )
+
     struct (view, proj)
 
   let renderDrawableShadow
@@ -315,10 +495,9 @@ module internal ShadowPass =
     let mesh = drawable.Mesh
     state.Device.SetVertexBuffer(mesh.VertexBuffer)
     state.Device.Indices <- mesh.IndexBuffer
-
-    EffectHelpers.setParam "World" drawable.Transform effect
-    EffectHelpers.setParam "View" view effect
-    EffectHelpers.setParam "Projection" projection effect
+    effect.SafeSetParam("World", drawable.Transform)
+    effect.SafeSetParam("View", view)
+    effect.SafeSetParam("Projection", projection)
 
     for pass in effect.CurrentTechnique.Passes do
       pass.Apply()
@@ -330,9 +509,12 @@ module internal ShadowPass =
         mesh.IndexCount / 3
       )
 
-  let render (state: PipelineState) =
-    match state.CustomShaders.TryGetValue(ShaderBase.ShadowCaster) with
-    | true, shadowEffect ->
+  let render(state: PipelineState) =
+    match
+      state.CustomShaders.TryGetValue(ShaderBase.ShadowCaster),
+      state.ShadowAtlas
+    with
+    | (true, shadowEffect), ValueSome atlas ->
       let mainFrustum =
         BoundingFrustum(
           state.CurrentCamera.View * state.CurrentCamera.Projection
@@ -341,54 +523,52 @@ module internal ShadowPass =
       let corners = mainFrustum.GetCorners()
       let mutable shadowMapIndex = 0
 
-      // Common shadow rendering state
+      state.Device.SetRenderTarget(atlas.RenderTarget)
+
+      state.Device.Clear(
+        ClearOptions.Target ||| ClearOptions.DepthBuffer,
+        Color.White,
+        1.0f,
+        0
+      )
+
       state.Device.DepthStencilState <- DepthStencilState.Default
       state.Device.RasterizerState <- RasterizerState.CullNone
       state.Device.BlendState <- BlendState.Opaque
 
       let renderPass (view: Matrix) (proj: Matrix) =
-        let lightFrustum = BoundingFrustum(view * proj)
+        if shadowMapIndex < atlas.MaxShadows then
+          let vp = ShadowAtlas.getViewport atlas shadowMapIndex
+          state.Device.Viewport <- vp
+          let lightFrustum = BoundingFrustum(view * proj)
 
-        for i in 0 .. state.OpaqueDrawables.Count - 1 do
-          let struct (_, drawable) = state.OpaqueDrawables.[i]
+          for i in 0 .. state.OpaqueDrawables.Count - 1 do
+            let struct (_, drawable) = state.OpaqueDrawables.[i]
 
-          if
-            drawable.Material.Flags.HasFlag(MaterialFlags.CastsShadow)
-            && lightFrustum.Contains(drawable.BoundingSphere)
-               <> ContainmentType.Disjoint
-          then
-            renderDrawableShadow
-              state
-              drawable
-              shadowEffect
-              view
-              proj
+            if
+              drawable.Material.Flags.HasFlag(MaterialFlags.CastsShadow)
+              && lightFrustum.Contains(drawable.BoundingSphere)
+                 <> ContainmentType.Disjoint
+            then
+              renderDrawableShadow state drawable shadowEffect view proj
 
       for light in state.CurrentLighting.Lights do
-        if shadowMapIndex < state.DiscreteShadowMaps.Count then
+        if shadowMapIndex < atlas.MaxShadows then
           match light with
           | Directional dl when ValueOption.isSome dl.Shadow ->
-            let shadowMap = state.DiscreteShadowMaps.[shadowMapIndex]
-            state.Device.SetRenderTarget(shadowMap)
-
-            state.Device.Clear(
-              ClearOptions.Target ||| ClearOptions.DepthBuffer,
-              Color.White,
-              1.0f,
-              0
-            )
-
             let mutable center = Vector3.Zero
-            for i in 0 .. corners.Length - 1 do center <- center + corners.[i]
-            center <- center / float32 corners.Length
 
+            for i in 0 .. corners.Length - 1 do
+              center <- center + corners.[i]
+
+            center <- center / float32 corners.Length
             let mutable radius = 0f
+
             for i in 0 .. corners.Length - 1 do
               radius <- max radius (Vector3.Distance(center, corners.[i]))
 
             let lightPos = center - dl.Direction * (radius + 100f)
             let lightView = Matrix.CreateLookAt(lightPos, center, Vector3.Up)
-
             let mutable minX, minY = infinityf, infinityf
             let mutable maxX, maxY = -infinityf, -infinityf
 
@@ -409,6 +589,7 @@ module internal ShadowPass =
               maxY <- max maxY (lp.Y + r)
 
             let padding = 10f
+
             let lightProj =
               Matrix.CreateOrthographicOffCenter(
                 minX - padding,
@@ -420,37 +601,23 @@ module internal ShadowPass =
               )
 
             renderPass lightView lightProj
-
             state.ShadowViewMatrices.Add(lightView)
             state.ShadowProjectionMatrices.Add(lightProj)
             shadowMapIndex <- shadowMapIndex + 1
-
           | Spot sl when ValueOption.isSome sl.Shadow ->
-            let shadowMap = state.DiscreteShadowMaps.[shadowMapIndex]
-            state.Device.SetRenderTarget(shadowMap)
-            state.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, Color.White, 1.0f, 0)
-
             let struct (view, proj) = computeSpotShadowMatrices sl
             renderPass view proj
-
             state.ShadowViewMatrices.Add(view)
             state.ShadowProjectionMatrices.Add(proj)
             shadowMapIndex <- shadowMapIndex + 1
-
           | Point pl when ValueOption.isSome pl.Shadow ->
-            if shadowMapIndex + 6 <= state.DiscreteShadowMaps.Count then
+            if shadowMapIndex + 6 <= atlas.MaxShadows then
               for face = 0 to 5 do
-                let shadowMap = state.DiscreteShadowMaps.[shadowMapIndex + face]
-                state.Device.SetRenderTarget(shadowMap)
-                state.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, Color.White, 1.0f, 0)
-
                 let struct (view, proj) = computePointShadowMatrices pl face
                 renderPass view proj
-
                 state.ShadowViewMatrices.Add(view)
                 state.ShadowProjectionMatrices.Add(proj)
-
-              shadowMapIndex <- shadowMapIndex + 6
+                shadowMapIndex <- shadowMapIndex + 1
           | _ -> ()
 
       state.Device.RasterizerState <- RasterizerState.CullCounterClockwise
@@ -458,10 +625,9 @@ module internal ShadowPass =
       match state.MainSceneTarget with
       | ValueSome rt -> state.Device.SetRenderTarget(rt)
       | ValueNone -> state.Device.SetRenderTarget(null)
-    | false, _ -> ()
+    | _ -> ()
 
 module internal Drawing =
-
   let configureBasicEffectLighting
     (effect: BasicEffect)
     (lighting: LightingState)
@@ -474,7 +640,6 @@ module internal Drawing =
     effect.DirectionalLight0.Enabled <- false
     effect.DirectionalLight1.Enabled <- false
     effect.DirectionalLight2.Enabled <- false
-
     let mutable lightIndex = 0
 
     for light in lighting.Lights do
@@ -509,170 +674,51 @@ module internal Drawing =
     let mesh = drawable.Mesh
     state.Device.SetVertexBuffer(mesh.VertexBuffer)
     state.Device.Indices <- mesh.IndexBuffer
+    effect.SafeSetParam("World", drawable.Transform)
+    effect.SafeSetParam("View", state.CurrentCamera.View)
+    effect.SafeSetParam("Projection", state.CurrentCamera.Projection)
 
-    EffectHelpers.setParam "World" drawable.Transform effect
-    EffectHelpers.setParam "View" state.CurrentCamera.View effect
-    EffectHelpers.setParam "Projection" state.CurrentCamera.Projection effect
-
-    // Phase 6: Custom Lighting Binding Override
     match state.Config.LightingBinder with
     | ValueSome binder ->
-        binder effect state.CurrentCamera state.CurrentLighting
+      binder effect state.CurrentCamera state.CurrentLighting
     | ValueNone ->
-        // Standard Lighting Binding Logic
-        EffectHelpers.setParam
-          "AmbientColor"
-          (state.CurrentLighting.AmbientColor.ToVector3()
-           * state.CurrentLighting.AmbientIntensity)
-          effect
-
-        let lightDirs =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Directional dl -> Some dl.Direction
-            | _ -> None)
-
-        let lightColors =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Directional dl -> Some(dl.Color.ToVector3() * dl.Intensity)
-            | _ -> None)
-
-        if lightDirs.Length > 0 then
-          match EffectHelpers.findParam "LightDirections" effect with
-          | Some p -> p.SetValue(lightDirs)
-          | None ->
-              EffectHelpers.setParam "LightDirection" lightDirs.[0] effect
-
-          match EffectHelpers.findParam "LightColors" effect with
-          | Some p -> p.SetValue(lightColors)
-          | None ->
-              EffectHelpers.setParam "LightColor" lightColors.[0] effect
-
-          EffectHelpers.setParam "DirectionalLightCount" (float32 lightDirs.Length) effect
-        else
-          EffectHelpers.setParam "DirectionalLightCount" 0.0f effect
-
-        let pointLightData =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Point pl ->
-              Some(Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, pl.Range))
-            | _ -> None)
-
-        let pointLightColors =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Point pl -> Some(Vector4(pl.Color.ToVector3() * pl.Intensity, 1.0f))
-            | _ -> None)
-
-        if pointLightData.Length > 0 then
-          match EffectHelpers.findParam "PointLightData" effect with
-          | Some p -> p.SetValue(pointLightData)
-          | None -> ()
-
-          match EffectHelpers.findParam "PointLightColors" effect with
-          | Some p -> p.SetValue(pointLightColors)
-          | None -> ()
-
-          EffectHelpers.setParam "PointLightCount" (float32 pointLightData.Length) effect
-        else
-          EffectHelpers.setParam "PointLightCount" 0.0f effect
-
-        let spotLightData =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Spot sl ->
-              Some(Vector4(sl.Position.X, sl.Position.Y, sl.Position.Z, sl.Range))
-            | _ -> None)
-
-        let spotLightArgs =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Spot sl ->
-              Some(
-                Vector4(
-                  sl.Direction.X,
-                  sl.Direction.Y,
-                  sl.Direction.Z,
-                  float32(System.Math.Cos(float sl.OuterConeAngle))
-                )
-              )
-            | _ -> None)
-
-        let spotLightColors =
-          state.CurrentLighting.Lights
-          |> Array.choose (function
-            | Spot sl ->
-              Some(
-                Vector4(
-                  sl.Color.ToVector3() * sl.Intensity,
-                  float32(System.Math.Cos(float sl.InnerConeAngle))
-                )
-              )
-            | _ -> None)
-
-        if spotLightData.Length > 0 then
-          match EffectHelpers.findParam "SpotLightData" effect with
-          | Some p -> p.SetValue(spotLightData)
-          | None -> ()
-
-          match EffectHelpers.findParam "SpotLightArgs" effect with
-          | Some p -> p.SetValue(spotLightArgs)
-          | None -> ()
-
-          match EffectHelpers.findParam "SpotLightColors" effect with
-          | Some p -> p.SetValue(spotLightColors)
-          | None -> ()
-
-          EffectHelpers.setParam "SpotLightCount" (float32 spotLightData.Length) effect
-        else
-          EffectHelpers.setParam "SpotLightCount" 0.0f effect
-
-    if state.ShadowViewMatrices.Count > 0 then
-      // 1. Matrices
-      match EffectHelpers.findParam "LightViews" effect with
-      | Some p -> p.SetValue(state.ShadowViewMatrices.ToArray())
-      | None ->
-          EffectHelpers.setParam "LightView" state.ShadowViewMatrices.[0] effect
-
-      match EffectHelpers.findParam "LightProjections" effect with
-      | Some p -> p.SetValue(state.ShadowProjectionMatrices.ToArray())
-      | None ->
-          EffectHelpers.setParam "LightProjection" state.ShadowProjectionMatrices.[0] effect
-
-      // 2. Textures
-      let useArray =
-        match state.Config.ShadowPath with
-        | ForceArray -> true
-        | ForceDiscrete
-        | Auto -> false
-
-      if useArray then
-        // Modern Path: Bind as array if possible
-        match state.ShadowMapArray with
-        | ValueSome texArray ->
-            EffectHelpers.setParam "ShadowMapArray" texArray effect
-        | ValueNone ->
-            if state.DiscreteShadowMaps.Count > 0 then
-              EffectHelpers.setParam "ShadowMap" (state.DiscreteShadowMaps.[0] :> Texture) effect
-      else
-        // Restricted Path: Bind to discrete slots
-        let findParam (name: string) =
-          effect.Parameters
-          |> Seq.cast<EffectParameter>
-          |> Seq.tryFind (fun p -> p.Name = name)
-
-        for i = 0 to min 7 (state.DiscreteShadowMaps.Count - 1) do
-          match findParam $"ShadowMap{i}" with
-          | Some p -> p.SetValue(state.DiscreteShadowMaps.[i] :> Texture)
-          | None -> ()
-
-      // 4. Shadow Config
-      state.Config.Shadows |> ValueOption.iter (fun cfg ->
-        EffectHelpers.setParam "ShadowBias" cfg.Bias effect
-        EffectHelpers.setParam "ShadowNormalBias" cfg.NormalBias effect
+      effect.SafeSetParam(
+        "AmbientColor",
+        state.CurrentLighting.AmbientColor.ToVector3()
+        * state.CurrentLighting.AmbientIntensity
       )
+
+      match state.LightDataTexture with
+      | ValueSome tex ->
+        effect.SafeSetParam("LightDataTexture", tex :> Texture)
+
+        effect.SafeSetParam(
+          "LightCount",
+          float32 state.CurrentLighting.Lights.Length
+        )
+      | ValueNone -> effect.SafeSetParam("LightCount", 0.0f)
+
+    match state.ShadowMatrixTexture with
+    | ValueSome tex ->
+      effect.SafeSetParam("ShadowMatrixTexture", tex)
+
+      effect.SafeSetParam(
+        "ShadowMatrixCount",
+        float32(state.ShadowViewMatrices.Count * 2)
+      )
+    | ValueNone -> effect.SafeSetParam("ShadowMatrixCount", 0.0f)
+
+    match state.ShadowAtlas with
+    | ValueSome atlas ->
+      effect.SafeSetParam("ShadowAtlas", atlas.RenderTarget :> Texture)
+      effect.SafeSetParam("ShadowAtlasTilesX", float32 atlas.TilesAcross)
+      effect.SafeSetParam("ShadowAtlasSize", float32 atlas.Size)
+    | ValueNone -> ()
+
+    state.Config.Shadows
+    |> ValueOption.iter(fun cfg ->
+      effect.SafeSetParam("ShadowBias", cfg.Bias)
+      effect.SafeSetParam("ShadowNormalBias", cfg.NormalBias))
 
     let albedoColor, hasTexture, albedoTex =
       match drawable.Material.PBR.AlbedoMap with
@@ -680,27 +726,25 @@ module internal Drawing =
       | ValueNone ->
         match mesh.Effect with
         | :? BasicEffect as be ->
-          let color =
-            Color(be.DiffuseColor.X, be.DiffuseColor.Y, be.DiffuseColor.Z)
+          let c = Color(be.DiffuseColor.X, be.DiffuseColor.Y, be.DiffuseColor.Z) in
 
-          if not(isNull be.Texture) then
-            color, true, be.Texture
-          else
-            color, false, Unchecked.defaultof<_>
+          match be.Texture with
+          | null -> c, false, Unchecked.defaultof<_>
+          | tex -> c, true, tex
         | _ -> drawable.Material.PBR.AlbedoColor, false, Unchecked.defaultof<_>
 
-    EffectHelpers.setParam "AlbedoColor" albedoColor effect
-    EffectHelpers.setParam "Metallic" drawable.Material.PBR.Metallic effect
-    EffectHelpers.setParam "Roughness" drawable.Material.PBR.Roughness effect
+    effect.SafeSetParam("AlbedoColor", albedoColor)
+    effect.SafeSetParam("Metallic", drawable.Material.PBR.Metallic)
+    effect.SafeSetParam("Roughness", drawable.Material.PBR.Roughness)
 
     if hasTexture then
-      EffectHelpers.setParam "HasAlbedoMap" 1.0f effect
-      EffectHelpers.setParam "AlbedoMap" albedoTex effect
+      effect.SafeSetParam("HasAlbedoMap", 1.0f)
+      effect.SafeSetParam("AlbedoMap", albedoTex)
     else
-      EffectHelpers.setParam "HasAlbedoMap" 0.0f effect
+      effect.SafeSetParam("HasAlbedoMap", 0.0f)
 
     match drawable.Material.PBR.NormalMap with
-    | ValueSome tex -> EffectHelpers.setParam "NormalMap" tex effect
+    | ValueSome tex -> effect.SafeSetParam("NormalMap", tex)
     | ValueNone -> ()
 
     for pass in effect.CurrentTechnique.Passes do
@@ -715,6 +759,7 @@ module internal Drawing =
 
   let drawFallback (state: PipelineState) (drawable: Drawable) =
     let mesh = drawable.Mesh
+
     let effect =
       match drawable.EffectOverride with
       | ValueSome e -> e
@@ -729,23 +774,23 @@ module internal Drawing =
       em.View <- state.CurrentCamera.View
       em.Projection <- state.CurrentCamera.Projection
     | _ ->
-      EffectHelpers.setParam "World" drawable.Transform effect
-      EffectHelpers.setParam "View" state.CurrentCamera.View effect
-      EffectHelpers.setParam "Projection" state.CurrentCamera.Projection effect
+      effect.SafeSetParam("World", drawable.Transform)
+      effect.SafeSetParam("View", state.CurrentCamera.View)
+      effect.SafeSetParam("Projection", state.CurrentCamera.Projection)
 
     match effect with
     | :? BasicEffect as be ->
       configureBasicEffectLighting be state.CurrentLighting
 
       if drawable.Material.PBR.AlbedoColor <> Color.White then
-        be.DiffuseColor <- drawable.Material.PBR.AlbedoColor.ToVector3()
-        be.Alpha <- float32 drawable.Material.PBR.AlbedoColor.A / 255f
+        (be.DiffuseColor <- drawable.Material.PBR.AlbedoColor.ToVector3()
+         be.Alpha <- float32 drawable.Material.PBR.AlbedoColor.A / 255f)
 
-      match drawable.Material.PBR.AlbedoMap with
-      | ValueSome tex ->
-        be.TextureEnabled <- true
-        be.Texture <- tex
-      | ValueNone -> ()
+        match drawable.Material.PBR.AlbedoMap with
+        | ValueSome tex ->
+          be.TextureEnabled <- true
+          be.Texture <- tex
+        | ValueNone -> ()
     | _ -> ()
 
     for pass in effect.CurrentTechnique.Passes do
@@ -758,7 +803,7 @@ module internal Drawing =
         mesh.IndexCount / 3
       )
 
-  let flush (state: PipelineState) =
+  let flush(state: PipelineState) =
     if
       state.OpaqueDrawables.Count = 0 && state.TransparentDrawables.Count = 0
     then
@@ -771,9 +816,10 @@ module internal Drawing =
         d2.CompareTo(d1))
 
       ShadowPass.render state
+      LightPacking.packLightData state
+      LightPacking.packShadowMatrices state
 
       let _tileMasks = Tiling.cullLights state
-
       state.Device.DepthStencilState <- DepthStencilState.Default
 
       let draw(d: Drawable) =
@@ -800,7 +846,6 @@ module internal Drawing =
       state.TransparentDrawables.Clear()
 
 module internal PostProcess =
-
   let render (state: PipelineState) (sceneTarget: RenderTarget2D) =
     match state.Config.PostProcess with
     | ValueSome pp ->
@@ -808,9 +853,8 @@ module internal PostProcess =
       |> ValueOption.iter(fun bloomCfg ->
         match state.CustomShaders.TryGetValue(ShaderBase.Bloom) with
         | true, bloomEffect ->
-          EffectHelpers.setParam "Threshold" bloomCfg.Threshold bloomEffect
-          EffectHelpers.setParam "Intensity" bloomCfg.Intensity bloomEffect
-          ()
+          bloomEffect.SafeSetParam("Threshold", bloomCfg.Threshold)
+          bloomEffect.SafeSetParam("Intensity", bloomCfg.Intensity)
         | false, _ -> ())
 
       let tmMode =
@@ -821,40 +865,41 @@ module internal PostProcess =
         | Filmic -> 3
         | AgX -> 4
 
-      match state.CustomShaders.TryGetValue(ShaderBase.PostProcess) with
+      match state.CustomShaders.TryGetValue ShaderBase.PostProcess with
       | true, ppEffect ->
         state.Device.SetRenderTarget(null)
-        EffectHelpers.setParam "SceneTexture" sceneTarget ppEffect
-        EffectHelpers.setParam "ToneMapping" tmMode ppEffect
+        ppEffect.SafeSetParam("SceneTexture", sceneTarget)
+        ppEffect.SafeSetParam("ToneMapping", float32 tmMode)
 
         let vertices = [|
           VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
           VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
           VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
           VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
-        |]
+        |] in
 
         for pass in ppEffect.CurrentTechnique.Passes do
           pass.Apply()
-          state.Device.DrawUserPrimitives(PrimitiveType.TriangleStrip, vertices, 0, 2)
+
+          state.Device.DrawUserPrimitives(
+            PrimitiveType.TriangleStrip,
+            vertices,
+            0,
+            2
+          )
       | false, _ ->
         state.Device.SetRenderTarget(null)
 
-        if not(isNull(box state.SpriteBatch)) then
-          state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+        match state.SpriteBatch with
+        | null -> ()
+        | sprite ->
+          sprite.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
           state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-
-          state.SpriteBatch.Draw(
-            sceneTarget,
-            state.Device.Viewport.Bounds,
-            Color.White
-          )
-
-          state.SpriteBatch.End()
+          sprite.Draw(sceneTarget, state.Device.Viewport.Bounds, Color.White)
+          sprite.End()
     | ValueNone -> ()
 
 module internal Orchestrate =
-
   let processCommand (state: PipelineState) (cmd: RenderCommand) =
     match cmd with
     | SetCamera camera ->
@@ -862,6 +907,7 @@ module internal Orchestrate =
       state.CurrentCamera <- camera
       state.CameraWasSet <- true
       Drawing.configureBasicEffectCamera state.BasicEffect camera
+
       Drawing.configureBasicEffectLighting
         state.BasicEffect
         state.CurrentLighting
@@ -873,14 +919,15 @@ module internal Orchestrate =
       state.Device.Viewport <- viewport
     | ClearTarget(colorOpt, clearDepth) ->
       Drawing.flush state
+
       let flags =
         match colorOpt, clearDepth with
         | ValueSome _, true -> ClearOptions.Target ||| ClearOptions.DepthBuffer
         | ValueSome _, false -> ClearOptions.Target
         | ValueNone, true -> ClearOptions.DepthBuffer
-        | ValueNone, false -> ClearOptions.Target
+        | ValueNone, false -> ClearOptions.Target in
 
-      let color = colorOpt |> ValueOption.defaultValue Color.Black
+      let color = colorOpt |> ValueOption.defaultValue Color.Black in
       state.Device.Clear(flags, color, 1f, 0)
     | Draw drawable -> Culling.batchDrawable state drawable
     | DrawCustom drawFn ->
@@ -894,19 +941,18 @@ module internal Orchestrate =
     State.reset state
 
     let needsTarget =
-      state.Config.PostProcess.IsSome
-      || state.Config.Shadows.IsSome
+      state.Config.PostProcess.IsSome || state.Config.Shadows.IsSome
 
     let sceneTarget =
-      if needsTarget && not(isNull(box state.RtPool)) then
+      if needsTarget then
         let spec = {
           Width = state.Device.PresentationParameters.BackBufferWidth
           Height = state.Device.PresentationParameters.BackBufferHeight
           Format = SurfaceFormat.Color
           DepthFormat = DepthFormat.Depth24
-        }
+        } in
 
-        let rt = state.RtPool.Acquire spec
+        let rt = state.RtPool.Acquire spec in
         state.Device.SetRenderTarget(rt)
         state.MainSceneTarget <- ValueSome rt
         ValueSome rt
@@ -914,38 +960,31 @@ module internal Orchestrate =
         ValueNone
 
     for i in 0 .. buffer.Count - 1 do
-      let struct (_, cmd) = buffer.[i]
-      processCommand state cmd
+      let struct (_, cmd) = buffer.[i] in processCommand state cmd
 
-    state.Config.PreRenderCallback |> ValueOption.iter (fun cb ->
-      cb state.Device state.CurrentCamera state.CurrentLighting
-    )
+    state.Config.PreRenderCallback
+    |> ValueOption.iter(fun cb ->
+      cb state.Device state.CurrentCamera state.CurrentLighting)
 
     Drawing.flush state
-
-    sceneTarget
-    |> ValueOption.iter(fun rt -> PostProcess.render state rt)
+    sceneTarget |> ValueOption.iter(PostProcess.render state)
 
     match sceneTarget with
     | ValueSome rt when state.Config.PostProcess.IsNone ->
-      state.Device.SetRenderTarget(null)
+      (state.Device.SetRenderTarget(null)
 
-      if not(isNull(box state.SpriteBatch)) then
-        state.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
-        state.Device.SamplerStates.[0] <- SamplerState.PointClamp
-        state.SpriteBatch.Draw(rt, state.Device.Viewport.Bounds, Color.White)
-        state.SpriteBatch.End()
+       match state.SpriteBatch with
+       | null -> ()
+       | sprite ->
+         (sprite.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+          state.Device.SamplerStates.[0] <- SamplerState.PointClamp
+          sprite.Draw(rt, state.Device.Viewport.Bounds, Color.White)
+          sprite.End()))
     | _ -> ()
 
-    if not(isNull(box state.RtPool)) then
-      state.RtPool.ReleaseAll()
-
-// ============================================================================
-// RenderPipeline - Public API
-// ============================================================================
+    state.RtPool.ReleaseAll()
 
 module RenderPipeline =
-
   let create (config: PipelineConfig) (game: Game) : IRenderPipeline =
     let state = State.create config
 

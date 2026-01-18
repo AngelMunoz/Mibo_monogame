@@ -170,7 +170,7 @@ module Game =
             Range = 15.0f
             InnerConeAngle = MathHelper.ToRadians(20f)
             OuterConeAngle = MathHelper.ToRadians(30f)
-            Shadow = ValueNone
+            Shadow = ValueSome ShadowSettings.defaults
         }
 
       // Add 16 colorful moving point lights
@@ -196,7 +196,7 @@ module Game =
             Color = color
             Intensity = 1.0f
             Range = 8.0f
-            Shadow = ValueNone
+            Shadow = if i < 4 then ValueSome ShadowSettings.defaults else ValueNone
           }
     |]
 

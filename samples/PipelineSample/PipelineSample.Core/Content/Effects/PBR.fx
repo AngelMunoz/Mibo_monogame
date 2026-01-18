@@ -12,195 +12,153 @@ matrix View;
 matrix Projection;
 
 float4 AlbedoColor = float4(1, 1, 1, 1);
-float HasAlbedoMap = 0.0; // 0 = no texture, 1 = has texture
+float HasAlbedoMap = 0.0; 
 texture AlbedoMap;
 sampler AlbedoSampler = sampler_state
 {
 	Texture = <AlbedoMap>;
-	MagFilter = Linear;
-	MinFilter = Linear;
-	MipFilter = Linear;
-	AddressU = Wrap;
-	AddressV = Wrap;
+	MagFilter = Linear; MinFilter = Linear; MipFilter = Linear;
+	AddressU = Wrap; AddressV = Wrap;
 };
 
-// Lighting
+// Lighting Buffers (Unconstrained)
+texture LightDataTexture;
+sampler LightDataSampler = sampler_state { 
+    Texture = <LightDataTexture>; 
+    MinFilter = Point; MagFilter = Point; MipFilter = None; 
+    AddressU = Clamp; AddressV = Clamp;
+};
+float LightCount = 0;
+
+texture ShadowMatrixTexture;
+sampler ShadowMatrixSampler = sampler_state { 
+    Texture = <ShadowMatrixTexture>; 
+    MinFilter = Point; MagFilter = Point; MipFilter = None; 
+    AddressU = Clamp; AddressV = Clamp;
+};
+float ShadowMatrixCount = 0;
+
+// Shadow Atlas
+texture ShadowAtlas;
+sampler ShadowAtlasSampler = sampler_state
+{
+    Texture = <ShadowAtlas>;
+    MinFilter = Point; MagFilter = Point; MipFilter = None;
+    AddressU = Clamp; AddressV = Clamp;
+};
+float ShadowAtlasTilesX = 4.0;
+float ShadowAtlasSize = 4096.0;
+
 float3 AmbientColor;
-float3 LightDirections[16];
-float3 LightColors[16];
-float DirectionalLightCount = 0;
+float ShadowBias = 0.0005;
+float ShadowNormalBias = 0.001;
 
- // Point Lights
-float4 PointLightData[32];   // xyz = position, w = range
-float4 PointLightColors[32]; // rgb = color * intensity
-float PointLightCount = 0;
-
-// Spot Lights
-float4 SpotLightData[16];    // xyz = position, w = range
-float4 SpotLightArgs[16];    // xyz = direction, w = cosOuter
-float4 SpotLightColors[16];  // rgb = color * intensity, w = cosInner
-float SpotLightCount = 0;
-
-// Shadow Mapping
-texture ShadowMap;
-sampler ShadowSampler = sampler_state
-{
-    Texture = <ShadowMap>;
-    AddressU = Clamp;
-    AddressV = Clamp;
-    MinFilter = Point;
-    MagFilter = Point;
-    MipFilter = None;
-};
-
-matrix LightView;
-matrix LightProjection;
-
-struct VertexShaderInput
-{
-	float4 Position : POSITION0;
-	float2 TexCoord : TEXCOORD0;
-	float3 Normal : NORMAL0;
-};
-
-struct VertexShaderOutput
-{
+struct VertexShaderOutput {
 	float4 Position : SV_POSITION;
 	float2 TexCoord : TEXCOORD0;
 	float3 Normal : TEXCOORD1;
-    float4 ShadowCoord : TEXCOORD3;
     float3 WorldPos : TEXCOORD4;
 };
 
-VertexShaderOutput MainVS(in VertexShaderInput input)
-{
-	VertexShaderOutput output;
-
-	float4 worldPosition = mul(input.Position, World);
-	float4 viewPosition = mul(worldPosition, View);
-	output.Position = mul(viewPosition, Projection);
-	output.TexCoord = input.TexCoord;
-    float3 normal = normalize(mul(input.Normal, (float3x3)World));
-    output.Normal = normal;
-    output.WorldPos = worldPosition.xyz;
-
-    // Shadow coordinates
-    float4 shadowPos = mul(worldPosition, LightView);
-    shadowPos = mul(shadowPos, LightProjection);
-    output.ShadowCoord = shadowPos;
-
-	return output;
+float4 FetchData(sampler s, float2 pixelCoord, float width, float height) {
+    float2 uv = (pixelCoord + 0.5) / float2(width, height);
+    return tex2Dlod(s, float4(uv, 0, 0));
 }
 
- float CalculateShadow(float4 shadowCoord)
- {
-     // Perspective divide
-     float3 projCoords = shadowCoord.xyz / shadowCoord.w;
-     
-     // Transform to [0,1] range
-     float2 uv = float2(0.5 * projCoords.x + 0.5, -0.5 * projCoords.y + 0.5);
-     float z = projCoords.z;
+matrix FetchMatrix(int index) {
+    float startRow = (float)index * 4.0;
+    float4 r1 = FetchData(ShadowMatrixSampler, float2(0, startRow), 4.0, ShadowMatrixCount);
+    float4 r2 = FetchData(ShadowMatrixSampler, float2(1, startRow), 4.0, ShadowMatrixCount);
+    float4 r3 = FetchData(ShadowMatrixSampler, float2(2, startRow), 4.0, ShadowMatrixCount);
+    float4 r4 = FetchData(ShadowMatrixSampler, float2(3, startRow), 4.0, ShadowMatrixCount);
+    return matrix(r1, r2, r3, r4);
+}
 
-     // Check if outside shadow map range [0, 1]
-     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || z < 0.0 || z > 1.0)
-         return 1.0;
+float CalculateShadow(int shadowIdx, float3 worldPos, float3 normal) {
+    matrix lView = FetchMatrix(shadowIdx * 2);
+    matrix lProj = FetchMatrix(shadowIdx * 2 + 1);
 
-     // PCF 3x3
-     float shadow = 0.0;
-     float2 texelSize = float2(1.0 / 2048.0, 1.0 / 2048.0);
-     float bias = 0.002;
+    float4 shadowCoord = mul(float4(worldPos + normal * ShadowNormalBias, 1.0), lView);
+    shadowCoord = mul(shadowCoord, lProj);
 
-     for(int x = -1; x <= 1; ++x)
-     {
-         for(int y = -1; y <= 1; ++y)
-         {
-             float pcfDepth = tex2Dlod(ShadowSampler, float4(uv + float2(x, y) * texelSize, 0.0, 0.0)).r; 
-             shadow += (z > pcfDepth + bias) ? 0.1 : 1.0;
-         }
-     }
-     return shadow / 9.0;
- }
+    float3 projCoords = shadowCoord.xyz / shadowCoord.w;
+    float2 uv = float2(0.5 * projCoords.x + 0.5, -0.5 * projCoords.y + 0.5);
+    float z = projCoords.z;
+
+    // Check bounds of light frustum
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || z < 0.0 || z > 1.0) return 1.0;
+
+    // Convert to Atlas UVs
+    float col = fmod((float)shadowIdx, ShadowAtlasTilesX);
+    float row = floor((float)shadowIdx / ShadowAtlasTilesX);
+    
+    float tileSize = 1.0 / ShadowAtlasTilesX;
+    float2 atlasUV = (uv * tileSize) + float2(col * tileSize, row * tileSize);
+
+    // PCF or simple sample
+    float pcfDepth = tex2Dlod(ShadowAtlasSampler, float4(atlasUV, 0, 0)).r;
+    
+    return (z > pcfDepth + ShadowBias) ? 0.1 : 1.0;
+}
 
 float4 MainPS(VertexShaderOutput input) : COLOR0
 {
-	// Use texture if available, otherwise just use AlbedoColor
-	float4 albedo = (HasAlbedoMap > 0.5)
-		? tex2D(AlbedoSampler, input.TexCoord) * AlbedoColor
-		: AlbedoColor;
-
+	float4 albedo = (HasAlbedoMap > 0.5) ? tex2D(AlbedoSampler, input.TexCoord) * AlbedoColor : AlbedoColor;
     float3 normal = normalize(input.Normal);
-    float shadow = CalculateShadow(input.ShadowCoord);
-
     float3 diffuse = AmbientColor;
 
-    // Directional Lights
-    for(int i = 0; i < 16; i++)
-    {
-        if (i >= (int)DirectionalLightCount) break;
-        float ndotl = max(dot(normal, -normalize(LightDirections[i])), 0.0);
-        float atten = (i == 0) ? shadow : 1.0; 
-        diffuse += ndotl * LightColors[i] * atten;
-    }
+    for(int i = 0; i < (int)LightCount; i++) {
+        float h = LightCount;
+        float4 p0 = FetchData(LightDataSampler, float2(0, (float)i), 4.0, h);
+        float type = p0.x;
+        float intensity = p0.y;
+        float range = p0.z;
+        int shadowIdx = (int)p0.w;
 
-     // Point Lights
-    for(int j = 0; j < 32; j++)
-    {
-        if (j >= (int)PointLightCount) break;
+        float4 p1 = FetchData(LightDataSampler, float2(1, (float)i), 4.0, h);
+        float4 p2 = FetchData(LightDataSampler, float2(2, (float)i), 4.0, h);
+        float4 p3 = FetchData(LightDataSampler, float2(3, (float)i), 4.0, h);
 
-        float3 lightDir = PointLightData[j].xyz - input.WorldPos;
-        float dist = length(lightDir);
-        float range = PointLightData[j].w;
-        
-        if (dist < range)
-        {
-            lightDir /= dist;
-            float ndotl = max(dot(normal, lightDir), 0.0);
-            float atten = pow(max(1.0 - (dist / range), 0.0), 2.0);
-            diffuse += ndotl * PointLightColors[j].rgb * atten;
-        }
-    }
+        float3 lightDir;
+        float atten = 1.0;
 
-    // Spot Lights
-    for(int k = 0; k < 16; k++)
-    {
-        if (k >= (int)SpotLightCount) break;
+        if (type == 0.0) { 
+            lightDir = -normalize(p2.xyz);
+        } else { 
+            float3 L = p1.xyz - input.WorldPos;
+            float dist = length(L);
+            if (dist > range) continue;
+            
+            lightDir = L / dist;
+            atten = pow(max(1.0 - (dist / range), 0.0), 2.0);
 
-        float3 lightPos = SpotLightData[k].xyz;
-        float3 lightDir = SpotLightArgs[k].xyz;
-        float range = SpotLightData[k].w;
-        float cosOuter = SpotLightArgs[k].w;
-        float cosInner = SpotLightColors[k].w;
-
-        float3 L = lightPos - input.WorldPos;
-        float dist = length(L);
-
-        if (dist < range)
-        {
-            L /= dist;
-            float theta = dot(L, -normalize(lightDir));
-
-            if (theta > cosOuter)
-            {
-                float ndotl = max(dot(normal, L), 0.0);
-                float distAtten = pow(max(1.0 - (dist / range), 0.0), 2.0);
-                
-                // Cone falloff
-                float epsilon = cosInner - cosOuter;
-                float coneAtten = clamp((theta - cosOuter) / epsilon, 0.0, 1.0);
-                
-                diffuse += ndotl * SpotLightColors[k].rgb * distAtten * coneAtten;
+            if (type == 2.0) { 
+                float cosOuter = p1.w;
+                float cosInner = p2.w;
+                float theta = dot(lightDir, -normalize(p2.xyz));
+                if (theta <= cosOuter) continue;
+                atten *= clamp((theta - cosOuter) / (cosInner - cosOuter), 0.0, 1.0);
             }
         }
+
+        float ndotl = max(dot(normal, lightDir), 0.0);
+        float shadow = 1.0;
+        if (shadowIdx >= 0) shadow = CalculateShadow(shadowIdx, input.WorldPos, normal);
+        
+        diffuse += ndotl * p3.rgb * intensity * atten * shadow;
     }
 
 	return float4(albedo.rgb * diffuse, albedo.a);
 }
 
-technique Forward
-{
-	pass P0
-	{
-		VertexShader = compile VS_SHADERMODEL MainVS();
-		PixelShader = compile PS_SHADERMODEL MainPS();
-	}
-};
+VertexShaderOutput MainVS(in float4 Position : POSITION0, in float2 TexCoord : TEXCOORD0, in float3 Normal : NORMAL0) {
+    VertexShaderOutput output;
+    float4 worldPosition = mul(Position, World);
+    output.Position = mul(mul(worldPosition, View), Projection);
+    output.TexCoord = TexCoord;
+    output.Normal = normalize(mul(Normal, (float3x3)World));
+    output.WorldPos = worldPosition.xyz;
+    return output;
+}
+
+technique Forward { pass P0 { VertexShader = compile VS_SHADERMODEL MainVS(); PixelShader = compile PS_SHADERMODEL MainPS(); } };
