@@ -162,6 +162,7 @@ module Game =
         Shadow = ValueSome ShadowSettings.defaults
         CascadeCount = 4
         CascadeSplits = [| 0.05f; 0.15f; 0.4f; 1.0f |]
+        SourceRadius = 0.1f
       }
 
       // Secondary Directional Light (Navy Blue, Angled)
@@ -172,6 +173,7 @@ module Game =
         Shadow = ValueSome ShadowSettings.defaults
         CascadeCount = 0
         CascadeSplits = [||]
+        SourceRadius = 0.1f
       }
 
       // Spot Lights above each platform
@@ -197,6 +199,7 @@ module Game =
           InnerConeAngle = MathHelper.ToRadians(20f)
           OuterConeAngle = MathHelper.ToRadians(40f) // Widened to 40 degrees
           Shadow = ValueSome ShadowSettings.defaults
+          SourceRadius = 0.2f
         }
 
       // Add 16 colorful moving point lights
@@ -222,6 +225,7 @@ module Game =
           Intensity = 1.0f
           Range = 8.0f
           Shadow = ValueSome ShadowSettings.defaults
+          SourceRadius = 0.1f
         }
     |]
 
