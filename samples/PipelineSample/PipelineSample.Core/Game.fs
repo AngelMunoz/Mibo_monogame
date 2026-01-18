@@ -148,7 +148,7 @@ module Game =
   let view
     (ctx: GameContext)
     (state: State)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     // Camera follows player
     let cameraOffset = Vector3(8f, 8f, 8f)
@@ -240,11 +240,11 @@ module Game =
     }
 
     buffer
-    |> RenderBuilder.camera camera
-    |> RenderBuilder.lighting lighting
-    |> RenderBuilder.clear Color.CornflowerBlue
-    |> RenderBuilder.clearDepth
-    |> RenderBuilder.drawMany(
+    |> Buffer.camera camera
+    |> Buffer.lighting lighting
+    |> Buffer.clear Color.CornflowerBlue
+    |> Buffer.clearDepth
+    |> Buffer.drawMany(
       [|
         for plat in state.Platforms do
           draw {
@@ -253,7 +253,7 @@ module Game =
           }
       |]
     )
-    |> RenderBuilder.draw(
+    |> Buffer.draw(
       draw {
         mesh state.Assets.PlayerMesh
         at state.PlayerPosition
@@ -264,7 +264,7 @@ module Game =
         withEmissive Color.Magenta state.EmissivePulse
       }
     )
-    |> RenderBuilder.custom(
+    |> Buffer.custom(
       Grid.draw
         state.PlayerPosition
         7.0f
@@ -273,7 +273,7 @@ module Game =
         state.Assets.PlatformGridLineCount
     )
     // 1. Target Circle (Relative Quad)
-    |> RenderBuilder.quadTransparent
+    |> Buffer.quadTransparent
       state.Assets.PlatformTexture
       (quad {
         onXZ(Vector2(2.0f, 2.0f))
@@ -281,7 +281,7 @@ module Game =
         at(Vector3(0f, -0.48f, 0f))
         color(Color.White * 0.3f)
       })
-    |> RenderBuilder.billboards
+    |> Buffer.billboards
       state.Assets.PlatformTexture
       ([|
         let sparkCount = 8
@@ -302,11 +302,11 @@ module Game =
           }
       |])
     // 2. Velocity vector (Line)
-    |> RenderBuilder.line
+    |> Buffer.line
       state.PlayerPosition
       (state.PlayerPosition + state.Velocity * 0.5f)
       Color.Green
-    |> RenderBuilder.submit
+    |> Buffer.submit
 
 
   // ─────────────────────────────────────────────────────────────

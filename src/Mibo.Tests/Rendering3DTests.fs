@@ -55,7 +55,11 @@ module TestHelpers =
       Material = materialWithFlags flags
       BoundingSphere = mockMesh.BoundingSphere.Transform(transform)
       EffectOverride = ValueNone
-      Pass = if flags.HasFlag(MaterialFlags.Transparent) then Transparent else Opaque
+      Pass =
+        if flags.HasFlag(MaterialFlags.Transparent) then
+          Transparent
+        else
+          Opaque
       Bones = ValueNone
     }
 
@@ -230,10 +234,7 @@ let dslTests =
       let buffer = RenderBuffer<unit, RenderCommand>()
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
 
-      buffer
-      |> RenderBuilder.camera cam
-      |> RenderBuilder.clear Color.CornflowerBlue
-      |> ignore
+      buffer |> Buffer.camera cam |> Buffer.clear Color.CornflowerBlue |> ignore
 
       Expect.equal buffer.Count 2 "Should have 2 commands"
       let struct (_, cmd0) = buffer.[0]
@@ -261,10 +262,10 @@ let dslTests =
       let drawable = TestHelpers.drawableAt Vector3.Zero false
 
       buffer
-      |> RenderBuilder.camera cam
-      |> RenderBuilder.lighting lighting
-      |> RenderBuilder.clear Color.Black
-      |> RenderBuilder.clearDepth
+      |> Buffer.camera cam
+      |> Buffer.lighting lighting
+      |> Buffer.clear Color.Black
+      |> Buffer.clearDepth
       |> ignore
 
       // Add draw manually since draw { } CE syntax is tricky to test
@@ -433,10 +434,12 @@ let dslTests =
       let testMesh = TestHelpers.mockMesh
 
       buffer
-      |> RenderBuilder.draw (draw {
+      |> Buffer.draw(
+        draw {
           mesh testMesh
           at(Vector3(25f, 0f, 0f))
-        })
+        }
+      )
       |> ignore
 
       Expect.equal buffer.Count 1 "Should have 1 command in buffer"
@@ -697,7 +700,11 @@ let pipelineOrchestrationTests =
 
     testCase "TiledForward.cullLights assigns point light to correct tiles"
     <| fun _ ->
-      let config = { PipelineConfig.defaults with TileSize = 16 }
+      let config = {
+        PipelineConfig.defaults with
+            TileSize = 16
+      }
+
       let state = State.create config
 
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))

@@ -135,7 +135,8 @@ module internal State =
     SpriteEffect = Unchecked.defaultof<_>
     LineEffect = Unchecked.defaultof<_>
     OpaqueSpriteCommands = ResizeArray<struct (float32 * RenderCommand)>(128)
-    TransparentSpriteCommands = ResizeArray<struct (float32 * RenderCommand)>(64)
+    TransparentSpriteCommands =
+      ResizeArray<struct (float32 * RenderCommand)>(64)
   }
 
   let reset(state: PipelineState) =
@@ -204,55 +205,55 @@ module internal EffectHelpers =
     found
 
   type Effect with
-    member this.SafeSetParam(name: string, value: bool) =
+    member inline this.SafeSetParam(name: string, value: bool) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: int) =
+    member inline this.SafeSetParam(name: string, value: int) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Matrix) =
+    member inline this.SafeSetParam(name: string, value: Matrix) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Matrix[]) =
+    member inline this.SafeSetParam(name: string, value: Matrix[]) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Quaternion) =
+    member inline this.SafeSetParam(name: string, value: Quaternion) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: float32) =
+    member inline this.SafeSetParam(name: string, value: float32) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: float32[]) =
+    member inline this.SafeSetParam(name: string, value: float32[]) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Texture) =
+    member inline this.SafeSetParam(name: string, value: Texture) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Texture[]) =
+    member inline this.SafeSetParam(name: string, value: Texture[]) =
       findParam name this
       |> ValueOption.iter(fun p ->
         for i = 0 to min (value.Length - 1) (p.Elements.Count - 1) do
           p.Elements.[i].SetValue(value.[i]))
 
-    member this.SafeSetParam(name: string, value: Vector2) =
+    member inline this.SafeSetParam(name: string, value: Vector2) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Vector2[]) =
+    member inline this.SafeSetParam(name: string, value: Vector2[]) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Vector3) =
+    member inline this.SafeSetParam(name: string, value: Vector3) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Vector3[]) =
+    member inline this.SafeSetParam(name: string, value: Vector3[]) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Vector4) =
+    member inline this.SafeSetParam(name: string, value: Vector4) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Vector4[]) =
+    member inline this.SafeSetParam(name: string, value: Vector4[]) =
       findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
 
-    member this.SafeSetParam(name: string, value: Color) =
+    member inline this.SafeSetParam(name: string, value: Color) =
       findParam name this
       |> ValueOption.iter(fun p -> p.SetValue(value.ToVector4()))
 
@@ -498,7 +499,10 @@ module internal Tiling =
         let left = toScreen minX viewport.Width |> int |> max 0
         let right = toScreen maxX viewport.Width |> int |> min viewport.Width
         let top = toScreen -maxY viewport.Height |> int |> max 0
-        let bottom = toScreen -minY viewport.Height |> int |> min viewport.Height
+
+        let bottom =
+          toScreen -minY viewport.Height |> int |> min viewport.Height
+
         struct (left, top, right, bottom)
 
   let cullLights(state: PipelineState) =
@@ -860,6 +864,7 @@ module internal Drawing =
         | :? BasicEffect as be ->
           // Use material color, but fallback to mesh texture if available
           let c = drawable.Material.PBR.AlbedoColor
+
           match be.Texture with
           | null -> c, false, Unchecked.defaultof<_>
           | tex -> c, true, tex
@@ -869,8 +874,15 @@ module internal Drawing =
     effect.SafeSetParam("Metallic", drawable.Material.PBR.Metallic)
     effect.SafeSetParam("Roughness", drawable.Material.PBR.Roughness)
     // Pass as Vector3 to avoid mismatch if shader expects float3, or let shader handle float4
-    effect.SafeSetParam("EmissiveColor", drawable.Material.PBR.EmissiveColor.ToVector3())
-    effect.SafeSetParam("EmissiveIntensity", drawable.Material.PBR.EmissiveIntensity)
+    effect.SafeSetParam(
+      "EmissiveColor",
+      drawable.Material.PBR.EmissiveColor.ToVector3()
+    )
+
+    effect.SafeSetParam(
+      "EmissiveIntensity",
+      drawable.Material.PBR.EmissiveIntensity
+    )
 
     if hasTexture then
       effect.SafeSetParam("HasAlbedoMap", 1.0f)
@@ -1160,7 +1172,7 @@ module internal Drawing =
 
   let flush(state: PipelineState) =
     if
-      state.OpaqueDrawables.Count = 0 
+      state.OpaqueDrawables.Count = 0
       && state.TransparentDrawables.Count = 0
       && state.OpaqueSpriteCommands.Count = 0
       && state.TransparentSpriteCommands.Count = 0
@@ -1196,7 +1208,10 @@ module internal Drawing =
 
       drawSpritesInList state Opaque state.OpaqueSpriteCommands
 
-      if state.TransparentDrawables.Count > 0 || state.TransparentSpriteCommands.Count > 0 then
+      if
+        state.TransparentDrawables.Count > 0
+        || state.TransparentSpriteCommands.Count > 0
+      then
         state.Device.BlendState <- BlendState.AlphaBlend
         state.Device.DepthStencilState <- DepthStencilState.DepthRead
 
@@ -1353,21 +1368,33 @@ module internal Orchestrate =
       state.Device.Clear(flags, color, 1f, 0)
     | Draw drawable -> Culling.batchDrawable state drawable
     | DrawSpriteQuad s ->
-      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, s.Quad.Center)
+      let distSq =
+        Vector3.DistanceSquared(state.CurrentCamera.Position, s.Quad.Center)
+
       Culling.batchSpriteCommand state s.Pass distSq cmd
     | DrawSpriteBillboard s ->
-      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, s.Billboard.Position)
+      let distSq =
+        Vector3.DistanceSquared(
+          state.CurrentCamera.Position,
+          s.Billboard.Position
+        )
+
       Culling.batchSpriteCommand state s.Pass distSq cmd
     | DrawQuadEffect e ->
-      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, e.Quad.Center)
+      let distSq =
+        Vector3.DistanceSquared(state.CurrentCamera.Position, e.Quad.Center)
+
       Culling.batchSpriteCommand state e.Pass distSq cmd
     | DrawBillboardEffect e ->
-      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, e.Billboard.Position)
+      let distSq =
+        Vector3.DistanceSquared(
+          state.CurrentCamera.Position,
+          e.Billboard.Position
+        )
+
       Culling.batchSpriteCommand state e.Pass distSq cmd
-    | DrawLine(_, _, _, pass) ->
-      Culling.batchSpriteCommand state pass 0f cmd
-    | DrawLines(_, _, pass) ->
-      Culling.batchSpriteCommand state pass 0f cmd
+    | DrawLine(_, _, _, pass) -> Culling.batchSpriteCommand state pass 0f cmd
+    | DrawLines(_, _, pass) -> Culling.batchSpriteCommand state pass 0f cmd
     | DrawLinesEffect(_, _, _, _, pass) ->
       Culling.batchSpriteCommand state pass 0f cmd
     | DrawCustom drawFn ->

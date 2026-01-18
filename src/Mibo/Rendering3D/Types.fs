@@ -8,6 +8,8 @@ open Microsoft.Xna.Framework.Graphics
 // Core Types for the Rendering Pipeline
 // ============================================================================
 
+type PipelineBuffer<'Cmd> = Mibo.Elmish.RenderBuffer<unit, 'Cmd>
+
 /// <summary>Coarse rendering pass selection for 3D.</summary>
 type RenderPass =
   | Opaque
@@ -170,14 +172,21 @@ module Mesh =
   let fromModel(model: Model) : Mesh seq =
     model.Meshes |> Seq.collect fromModelMesh
 
-  let create (vb: VertexBuffer) (ib: IndexBuffer) (indexCount: int) (bounds: BoundingBox) (effect: Effect) : Mesh = {
-    VertexBuffer = vb
-    IndexBuffer = ib
-    IndexCount = indexCount
-    BoundingBox = bounds
-    BoundingSphere = BoundingSphere.CreateFromBoundingBox(bounds)
-    Effect = effect
-  }
+  let create
+    (vb: VertexBuffer)
+    (ib: IndexBuffer)
+    (indexCount: int)
+    (bounds: BoundingBox)
+    (effect: Effect)
+    : Mesh =
+    {
+      VertexBuffer = vb
+      IndexBuffer = ib
+      IndexCount = indexCount
+      BoundingBox = bounds
+      BoundingSphere = BoundingSphere.CreateFromBoundingBox(bounds)
+      Effect = effect
+    }
 
 // ============================================================================
 // Material System
@@ -251,13 +260,50 @@ module Material =
     RenderQueue = 3000
   }
 
-  let withAlbedo (color: Color) (mat: Material) = { mat with PBR = { mat.PBR with AlbedoColor = color } }
-  let withAlbedoMap (tex: Texture2D) (mat: Material) = { mat with PBR = { mat.PBR with AlbedoMap = ValueSome tex } }
-  let withNormalMap (tex: Texture2D) (mat: Material) = { mat with PBR = { mat.PBR with NormalMap = ValueSome tex } }
-  let withMetallic (value: float32) (mat: Material) = { mat with PBR = { mat.PBR with Metallic = value } }
-  let withRoughness (value: float32) (mat: Material) = { mat with PBR = { mat.PBR with Roughness = value } }
-  let withEmissive (color: Color) (intensity: float32) (mat: Material) = { mat with PBR = { mat.PBR with EmissiveColor = color; EmissiveIntensity = intensity } }
-  let withFlags (flags: MaterialFlags) (mat: Material) = { mat with Flags = flags }
+  let withAlbedo (color: Color) (mat: Material) = {
+    mat with
+        PBR = { mat.PBR with AlbedoColor = color }
+  }
+
+  let withAlbedoMap (tex: Texture2D) (mat: Material) = {
+    mat with
+        PBR = {
+          mat.PBR with
+              AlbedoMap = ValueSome tex
+        }
+  }
+
+  let withNormalMap (tex: Texture2D) (mat: Material) = {
+    mat with
+        PBR = {
+          mat.PBR with
+              NormalMap = ValueSome tex
+        }
+  }
+
+  let withMetallic (value: float32) (mat: Material) = {
+    mat with
+        PBR = { mat.PBR with Metallic = value }
+  }
+
+  let withRoughness (value: float32) (mat: Material) = {
+    mat with
+        PBR = { mat.PBR with Roughness = value }
+  }
+
+  let withEmissive (color: Color) (intensity: float32) (mat: Material) = {
+    mat with
+        PBR = {
+          mat.PBR with
+              EmissiveColor = color
+              EmissiveIntensity = intensity
+        }
+  }
+
+  let withFlags (flags: MaterialFlags) (mat: Material) = {
+    mat with
+        Flags = flags
+  }
 
 // ============================================================================
 // Drawable - The unit of rendering
@@ -282,7 +328,11 @@ module Drawable =
     Material = material
     BoundingSphere = mesh.BoundingSphere.Transform(transform)
     EffectOverride = ValueNone
-    Pass = if material.Flags.HasFlag(MaterialFlags.Transparent) then Transparent else Opaque
+    Pass =
+      if material.Flags.HasFlag(MaterialFlags.Transparent) then
+        Transparent
+      else
+        Opaque
     Bones = ValueNone
   }
 
@@ -365,7 +415,10 @@ type RenderCommand =
   | DrawQuadEffect of quadEffect: EffectQuadCmd
   | DrawBillboardEffect of billboardEffect: EffectBillboardCmd
   | DrawLine of p1: Vector3 * p2: Vector3 * color: Color * pass: RenderPass
-  | DrawLines of vertices: VertexPositionColor[] * lineCount: int * pass: RenderPass
+  | DrawLines of
+    vertices: VertexPositionColor[] *
+    lineCount: int *
+    pass: RenderPass
   | DrawLinesEffect of
     vertices: VertexPositionColor[] *
     lineCount: int *

@@ -542,14 +542,14 @@ module SpriteHelpers =
 /// Module for building a 3D frame by submitting commands to a RenderBuffer.
 /// Recommended usage: 'buffer |> RenderBuilder.camera ... |> RenderBuilder.draw ...'
 /// </summary>
-module RenderBuilder =
+module Buffer =
 
   /// <summary>
   /// Submits a command to set the current camera.
   /// </summary>
   let inline camera
     (camera: Mibo.Rendering.Graphics3D.Camera)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), SetCamera camera)
     buffer
@@ -559,7 +559,7 @@ module RenderBuilder =
   /// </summary>
   let inline lighting
     (lighting: LightingState)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), SetLighting lighting)
     buffer
@@ -569,7 +569,7 @@ module RenderBuilder =
   /// </summary>
   let inline viewport
     (viewport: Viewport)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), SetViewport viewport)
     buffer
@@ -577,7 +577,7 @@ module RenderBuilder =
   /// <summary>
   /// Submits a command to clear the target (Color + Depth).
   /// </summary>
-  let inline clear (color: Color) (buffer: RenderBuffer<unit, RenderCommand>) =
+  let inline clear (color: Color) (buffer: PipelineBuffer<RenderCommand>) =
     buffer.Add((), ClearTarget(ValueSome color, true))
     buffer
 
@@ -587,7 +587,7 @@ module RenderBuilder =
   let inline clearTarget
     (color: Color)
     (clearDepth: bool)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), ClearTarget(ValueSome color, clearDepth))
     buffer
@@ -595,7 +595,7 @@ module RenderBuilder =
   /// <summary>
   /// Submits a command to clear only the depth buffer.
   /// </summary>
-  let inline clearDepth(buffer: RenderBuffer<unit, RenderCommand>) =
+  let inline clearDepth(buffer: PipelineBuffer<RenderCommand>) =
     buffer.Add((), ClearTarget(ValueNone, true))
     buffer
 
@@ -605,7 +605,7 @@ module RenderBuilder =
   let inline custom
     ([<InlineIfLambda>] drawFn:
       GraphicsDevice -> Mibo.Rendering.Graphics3D.Camera -> unit)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), DrawCustom drawFn)
     buffer
@@ -616,7 +616,7 @@ module RenderBuilder =
   let inline quad
     (texture: Texture2D)
     (quad: Quad3D)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add(
       (),
@@ -633,7 +633,7 @@ module RenderBuilder =
   let inline quadTransparent
     (texture: Texture2D)
     (quad: Quad3D)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add(
       (),
@@ -650,7 +650,7 @@ module RenderBuilder =
   let inline billboard
     (texture: Texture2D)
     (billboard: Billboard3D)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add(
       (),
@@ -667,7 +667,7 @@ module RenderBuilder =
   let inline billboardOpaque
     (texture: Texture2D)
     (billboard: Billboard3D)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add(
       (),
@@ -685,7 +685,7 @@ module RenderBuilder =
     (p1: Vector3)
     (p2: Vector3)
     (color: Color)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), DrawLine(p1, p2, color, Opaque))
     buffer
@@ -694,7 +694,7 @@ module RenderBuilder =
   let inline lines
     (verts: VertexPositionColor[])
     (lineCount: int)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), DrawLines(verts, lineCount, Opaque))
     buffer
@@ -706,7 +706,7 @@ module RenderBuilder =
     (setup: (Effect -> EffectContext -> unit) voption)
     (verts: VertexPositionColor[])
     (lineCount: int)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     buffer.Add((), DrawLinesEffect(verts, lineCount, effect, setup, pass))
     buffer
@@ -715,7 +715,7 @@ module RenderBuilder =
   let inline billboards
     (texture: Texture2D)
     (billboards: #seq<Billboard3D>)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     for b in billboards do
       buffer.Add(
@@ -733,7 +733,7 @@ module RenderBuilder =
   let inline quads
     (texture: Texture2D)
     (quads: #seq<Quad3D>)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     for q in quads do
       buffer.Add(
@@ -752,7 +752,7 @@ module RenderBuilder =
   /// </summary>
   let inline draw
     (drawable: Drawable voption)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     drawable |> ValueOption.iter(fun d -> buffer.Add((), Draw d))
     buffer
@@ -762,7 +762,7 @@ module RenderBuilder =
   /// </summary>
   let inline drawMany
     (drawables: #seq<Drawable voption>)
-    (buffer: RenderBuffer<unit, RenderCommand>)
+    (buffer: PipelineBuffer<RenderCommand>)
     =
     for drawable in drawables do
       drawable |> ValueOption.iter(fun d -> buffer.Add((), Draw d))
@@ -772,7 +772,7 @@ module RenderBuilder =
   /// <summary>
   /// Ends the render command sequence. Currently a no-op used for pipeline readability.
   /// </summary>
-  let inline submit(_: RenderBuffer<unit, RenderCommand>) = ()
+  let inline submit(_: PipelineBuffer<RenderCommand>) = ()
 
 // ============================================================================
 // Module API
