@@ -6,61 +6,167 @@ open Microsoft.Xna.Framework
 // Lighting System
 // ============================================================================
 
-/// Shadow settings for a light
+/// <summary>
+/// Shadow settings for a light.
+/// </summary>
 [<Struct>]
-type ShadowSettings = { Bias: float32; NormalBias: float32 }
+type ShadowSettings = { 
+    /// <summary>
+    /// Constant depth bias to prevent shadow acne.
+    /// </summary>
+    Bias: float32
+    /// <summary>
+    /// Bias applied along the surface normal to prevent acne on curved surfaces.
+    /// </summary>
+    NormalBias: float32 
+}
 
 module ShadowSettings =
   let defaults: ShadowSettings = { Bias = 0.001f; NormalBias = 0.02f }
 
-/// Directional light (e.g., sun)
+/// <summary>
+/// Directional light (e.g., sun).
+/// Infinite distance, parallel rays. Covers the entire view frustum via cascades.
+/// </summary>
 [<Struct>]
 type DirectionalLight = {
+  /// <summary>
+  /// Direction the light is pointing (should be normalized).
+  /// </summary>
   Direction: Vector3
+  /// <summary>
+  /// Light color.
+  /// </summary>
   Color: Color
+  /// <summary>
+  /// Light intensity (typically 1.0 - 5.0 for sunlight).
+  /// </summary>
   Intensity: float32
+  /// <summary>
+  /// Shadow settings (ValueNone to disable shadows).
+  /// </summary>
   Shadow: ShadowSettings voption
+  /// <summary>
+  /// Number of shadow cascades (1-4).
+  /// </summary>
   CascadeCount: int
+  /// <summary>
+  /// Manual split distances for cascades (0.0 to 1.0 relative to ViewFrustum far plane).
+  /// Example: [| 0.05f; 0.15f; 0.5f; 1.0f |]
+  /// Adjust these to concentrate resolution near the camera.
+  /// </summary>
   CascadeSplits: float32[]
+  /// <summary>
+  /// Physical radius of the light source (angular diameter in radians approx).
+  /// Used by PCSS algorithms to calculate penumbra softness.
+  /// </summary>
   SourceRadius: float32
 }
 
-/// Point light (omni-directional)
+/// <summary>
+/// Point light (omni-directional).
+/// Falls off with distance.
+/// </summary>
 [<Struct>]
 type PointLight = {
+  /// <summary>
+  /// World position of the light.
+  /// </summary>
   Position: Vector3
+  /// <summary>
+  /// Light color.
+  /// </summary>
   Color: Color
+  /// <summary>
+  /// Peak intensity at the source.
+  /// </summary>
   Intensity: float32
+  /// <summary>
+  /// Maximum range of influence. Light attenuation falls to zero at this distance.
+  /// </summary>
   Range: float32
+  /// <summary>
+  /// Shadow settings. Point lights use CubeMap shadows (6 faces).
+  /// Expensive! Use sparingly or with low atlas resolution.
+  /// </summary>
   Shadow: ShadowSettings voption
+  /// <summary>
+  /// Physical radius of the light bulb/sphere.
+  /// Used for soft shadow calculations.
+  /// </summary>
   SourceRadius: float32
 }
 
-/// Spot light (cone)
+/// <summary>
+/// Spot light (conical).
+/// Directional point light with inner/outer cone falloff.
+/// </summary>
 [<Struct>]
 type SpotLight = {
+  /// <summary>
+  /// World position.
+  /// </summary>
   Position: Vector3
+  /// <summary>
+  /// Direction the spot is pointing.
+  /// </summary>
   Direction: Vector3
+  /// <summary>
+  /// Light color.
+  /// </summary>
   Color: Color
+  /// <summary>
+  /// Peak intensity.
+  /// </summary>
   Intensity: float32
+  /// <summary>
+  /// Maximum range.
+  /// </summary>
   Range: float32
+  /// <summary>
+  /// Inner cone angle (radians). Full intensity within this angle.
+  /// </summary>
   InnerConeAngle: float32
+  /// <summary>
+  /// Outer cone angle (radians). Intensity fades to zero between Inner and Outer angles.
+  /// </summary>
   OuterConeAngle: float32
+  /// <summary>
+  /// Shadow settings. Spot lights use standard 2D shadow maps (perspective projection).
+  /// </summary>
   Shadow: ShadowSettings voption
+  /// <summary>
+  /// Physical radius of the light source.
+  /// </summary>
   SourceRadius: float32
 }
 
-/// Light type union
+/// <summary>
+/// Discriminated union of all supported light types.
+/// </summary>
 type Light =
   | Directional of DirectionalLight
   | Point of PointLight
   | Spot of SpotLight
 
-/// Scene lighting state
+/// <summary>
+/// The complete lighting state for a scene.
+/// Passed to the renderer via 'SetLighting' command.
+/// </summary>
 [<Struct>]
 type LightingState = {
+  /// <summary>
+  /// Global ambient color added to all surfaces.
+  /// </summary>
   AmbientColor: Color
+  /// <summary>
+  /// Intensity multiplier for ambient color.
+  /// </summary>
   AmbientIntensity: float32
+  /// <summary>
+  /// Array of active lights in the scene.
+  /// The renderer will cull/sort these.
+  /// </summary>
   Lights: Light[]
 }
 

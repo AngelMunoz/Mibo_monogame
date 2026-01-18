@@ -300,11 +300,6 @@ module Game =
     |> Program.withSubscription subscribe
     |> Program.withPipeline
       (PipelineConfig.defaults
-#if OPENGL
-       |> PipelineConfig.withShadowPath ForceDiscrete
-#else
-       |> PipelineConfig.withShadowPath ForceArray
-#endif
        |> PipelineConfig.withShadows(
          ShadowConfig.defaults
          |> ShadowConfig.withBias 0.0015f 0.005f

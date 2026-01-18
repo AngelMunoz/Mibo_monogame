@@ -8,18 +8,18 @@ open Microsoft.Xna.Framework.Graphics
 // Core Types for the Rendering Pipeline
 // ============================================================================
 
-/// Shadow rendering path
-type ShadowPath =
-  | Auto
-  | ForceDiscrete
-  | ForceArray
 
 /// Shader base types for override mapping
 type ShaderBase =
+  /// The default shadow casting shader (depth only).
   | ShadowCaster
+  /// High-fidelity PBR shader (Albedo + Normal + MRA).
   | PBRForward
+  /// Unlit shader (full brightness, no shadows).
   | Unlit
+  /// Bloom extraction shader.
   | Bloom
+  /// Final post-processing and tone mapping shader.
   | PostProcess
 
 /// Camera for 3D rendering
@@ -225,11 +225,20 @@ module Material =
   }
 
   // Builders
+
+  /// <summary>
+  /// Sets the base surface color (diffuse reflection).
+  /// In PBR, this represents the raw color of the material free of any lighting information.
+  /// </summary>
   let withAlbedo (color: Color) (mat: Material) = {
     mat with
         PBR = { mat.PBR with AlbedoColor = color }
   }
 
+  /// <summary>
+  /// Applies a texture to control the base surface color.
+  /// Use this for complex surfaces with patterns, text, or variations.
+  /// </summary>
   let withAlbedoMap (tex: Texture2D) (mat: Material) = {
     mat with
         PBR = {
@@ -238,6 +247,10 @@ module Material =
         }
   }
 
+  /// <summary>
+  /// Applies a normal map to simulate fine surface details.
+  /// Adds perception of bumps, scratches, and grooves without increasing polygon count.
+  /// </summary>
   let withNormalMap (tex: Texture2D) (mat: Material) = {
     mat with
         PBR = {
@@ -246,16 +259,31 @@ module Material =
         }
   }
 
+  /// <summary>
+  /// Controls the metallicity of the surface.
+  /// 0.0: Dielectric (plastic, wood, stone).
+  /// 1.0: Metal (Gold, Silver).
+  /// Values between 0 and 1 are rare physically but useful for transitions (e.g., rusty metal).
+  /// </summary>
   let withMetallic (value: float32) (mat: Material) = {
     mat with
         PBR = { mat.PBR with Metallic = value }
   }
 
+  /// <summary>
+  /// Controls the microscopic roughness of the surface.
+  /// 0.0: Smooth (Mirror-like reflections).
+  /// 1.0: Rough (Matte/Chalky appearance).
+  /// </summary>
   let withRoughness (value: float32) (mat: Material) = {
     mat with
         PBR = { mat.PBR with Roughness = value }
   }
 
+  /// <summary>
+  /// Makes the object appear to emit light.
+  /// Useful for screens, fire, or magic effects. Note: Does not cast actual light on other objects unless using GI.
+  /// </summary>
   let withEmissive (color: Color) (intensity: float32) (mat: Material) = {
     mat with
         PBR = {
@@ -265,6 +293,10 @@ module Material =
         }
   }
 
+  /// <summary>
+  /// Configures special rendering behaviors.
+  /// Use 'Transparent' for glass/liquids or 'DoubleSided' for thin geometry (leaves, paper).
+  /// </summary>
   let withFlags (flags: MaterialFlags) (mat: Material) = {
     mat with
         Flags = flags

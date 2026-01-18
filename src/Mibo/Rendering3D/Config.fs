@@ -6,25 +6,85 @@ open Microsoft.Xna.Framework.Graphics
 // Pipeline Configuration
 // ============================================================================
 
-/// Soft shadow configuration
+/// <summary>
+/// Configuration for soft shadow rendering (PCF/Poisson).
+/// </summary>
 [<Struct>]
-type SoftShadowConfig = { Penumbra: float32 }
+type SoftShadowConfig = {
+  /// <summary>
+  /// The physical radius of the light source in world units.
+  /// Used by advanced algorithms (like PCSS) to calculate variable penumbra softness.
+  /// Larger values create softer shadows that blur more over distance.
+  /// </summary>
+  Penumbra: float32
+}
 
-/// Shadow configuration
+/// <summary>
+/// Configuration for the Shadow Atlas system.
+/// </summary>
 [<Struct>]
 type ShadowConfig = {
+  /// <summary>
+  /// The resolution for a single shadow map slice (e.g., 2048 or 4096).
+  /// A higher resolution reduces aliasing but increases VRAM usage significantly
+  /// as it scales with the number of AtlasTiles.
+  /// </summary>
   Resolution: int
+
+  /// <summary>
+  /// Number of cascades to use for Directional Lights (typically 3 or 4).
+  /// Cascades distribute resolution over distance.
+  /// 4 cascades provide the best quality for open worlds but require 4 render passes per directional light.
+  /// </summary>
   CascadeCount: int
+
+  /// <summary>
+  /// Number of samples for Percentage Closer Filtering (PCF).
+  /// Ignored if a custom shader uses a different technique (e.g., Poisson Disk).
+  /// </summary>
   PCFSamples: int
+
+  /// <summary>
+  /// Enables soft shadows if set (ValueSome).
+  /// </summary>
   SoftShadows: SoftShadowConfig voption
+
+  /// <summary>
+  /// Constant depth bias to prevent shadow acne (self-shadowing artifacts).
+  /// Too high: shadows detach from objects (Peter Panning).
+  /// Too low: moire patterns appear on surfaces.
+  /// </summary>
   Bias: float32
+
+  /// <summary>
+  /// Bias applied along the surface normal to prevent acne on curved surfaces.
+  /// </summary>
   NormalBias: float32
+
+  /// <summary>
+  /// Maximum number of point lights that can cast shadows.
+  /// (Note: This logic is largely superseded by the AtlasTiles limit).
+  /// </summary>
   MaxPointShadows: int
+
+  /// <summary>
+  /// Number of tiles across the shadow atlas (Width/Height).
+  /// Total shadow slots = AtlasTiles * AtlasTiles.
+  /// Example: 12 tiles = 144 slots.
+  /// Crucial for determining how many lights can cast shadows simultaneously.
+  /// </summary>
   AtlasTiles: int
+
+  /// <summary>
+  /// Hard limit for the Shadow Atlas texture size (e.g., 16384).
+  /// If (Resolution * AtlasTiles) exceeds this, the effective resolution per tile will be downscaled.
+  /// Watch VRAM usage: a 16k atlas consumes ~2GB of memory.
+  /// </summary>
   MaxAtlasSize: int
 }
 
 module ShadowConfig =
+  /// Default shadow settings: 1024px, 3 Cascades, 4x4 Atlas (16 slots), 8k Max Texture.
   let defaults: ShadowConfig = {
     Resolution = 1024
     CascadeCount = 3
@@ -37,41 +97,74 @@ module ShadowConfig =
     MaxAtlasSize = 8192
   }
 
+  /// <summary>
+  /// Sets the resolution of a single shadow map slice (e.g., 2048).
+  /// Higher values reduce aliasing (jaggies) but increase VRAM usage and GPU memory bandwidth.
+  /// </summary>
   let withResolution (res: int) (cfg: ShadowConfig) = {
     cfg with
         Resolution = res
   }
 
+  /// <summary>
+  /// Sets the number of cascades for directional light shadows (typically 3 or 4).
+  /// More cascades improve shadow sharpness at various distances but increase the number of draw calls per directional light.
+  /// </summary>
   let withCascades (n: int) (cfg: ShadowConfig) = { cfg with CascadeCount = n }
+
+  /// <summary>
+  /// Sets the number of PCF samples for soft shadow filtering (e.g., 16).
+  /// Higher sample counts create smoother soft shadows but are more expensive to compute in the pixel shader.
+  /// </summary>
   let withPCFSamples (n: int) (cfg: ShadowConfig) = { cfg with PCFSamples = n }
 
+  /// <summary>
+  /// Enables the soft shadow code path in the shader.
+  /// 'penumbra' controls the physical size of the light source, determining how blurry the shadows get with distance.
+  /// </summary>
   let withSoftShadows (penumbra: float32) (cfg: ShadowConfig) = {
     cfg with
         SoftShadows = ValueSome { Penumbra = penumbra }
   }
 
+  /// <summary>
+  /// Tunable bias values to prevent shadow mapping artifacts.
+  /// 'bias': Constant depth offset to prevent acne (self-shadowing).
+  /// 'normalBias': Offset along the geometric normal to cure acne on curved surfaces without inducing Peter-Panning (detached shadows).
+  /// </summary>
   let withBias (bias: float32) (normalBias: float32) (cfg: ShadowConfig) = {
     cfg with
         Bias = bias
         NormalBias = normalBias
   }
 
+  /// <summary>
+  /// Sets the maximum number of point lights that can cast shadows.
+  /// Note: This is largely superseded by 'withAtlasTiles', which determines the total slot capacity.
+  /// </summary>
   let withMaxPointShadows (n: int) (cfg: ShadowConfig) = {
     cfg with
         MaxPointShadows = n
   }
 
-  let withAtlasTiles (n: int) (cfg: ShadowConfig) = {
-    cfg with
-        AtlasTiles = n
-  }
+  /// <summary>
+  /// Sets the grid size (N x N) of the shadow atlas texture.
+  /// Determines the total capacity for shadow casting lights (Total Slots = N * N).
+  /// </summary>
+  let withAtlasTiles (n: int) (cfg: ShadowConfig) = { cfg with AtlasTiles = n }
 
+  /// <summary>
+  /// Sets a hard limit on the shadow atlas texture size in pixels (e.g., 8192).
+  /// Prevents the system from allocating too much VRAM. If (Resolution * Tiles) exceeds this, individual shadow maps will be downscaled.
+  /// </summary>
   let withMaxAtlasSize (n: int) (cfg: ShadowConfig) = {
     cfg with
         MaxAtlasSize = n
   }
 
-/// SSAO configuration
+/// <summary>
+/// Configuration for Screen Space Ambient Occlusion (SSAO).
+/// </summary>
 [<Struct>]
 type SSAOConfig = {
   Radius: float32
@@ -86,7 +179,9 @@ module SSAOConfig =
     SampleCount = 16
   }
 
-/// Bloom configuration
+/// <summary>
+/// Configuration for Bloom post-process effect.
+/// </summary>
 [<Struct>]
 type BloomConfig = {
   Threshold: float32
@@ -101,7 +196,7 @@ module BloomConfig =
     Scatter = 0.7f
   }
 
-/// Tone mapping options
+/// Tone mapping algorithms for HDR -> LDR conversion.
 type ToneMappingConfig =
   | NoToneMapping
   | Reinhard
@@ -109,7 +204,9 @@ type ToneMappingConfig =
   | Filmic
   | AgX
 
-/// Post-processing configuration
+/// <summary>
+/// Configuration for the Post-Processing pipeline phase.
+/// </summary>
 [<Struct>]
 type PostProcessConfig = {
   SSAO: SSAOConfig voption
@@ -124,40 +221,61 @@ module PostProcessConfig =
     ToneMapping = ToneMappingConfig.ACES
   }
 
+  /// <summary>
+  /// Enables Screen Space Ambient Occlusion (SSAO).
+  /// Adds depth perception by darkening corners and crevices, at the cost of a full-screen sampling pass.
+  /// </summary>
   let withSSAO (cfg: SSAOConfig) (pp: PostProcessConfig) = {
     pp with
         SSAO = ValueSome cfg
   }
 
+  /// <summary>
+  /// Enables Bloom for glowing high-light areas.
+  /// Creates a soft glow around pixels that exceed the threshold brightness.
+  /// </summary>
   let withBloom (cfg: BloomConfig) (pp: PostProcessConfig) = {
     pp with
         Bloom = ValueSome cfg
   }
 
+  /// <summary>
+  /// Sets the tone mapping algorithm used to map HDR color values to the screen's limited range.
+  /// Different algorithms produce different visual styles (e.g., Filmic is cinematic, ACES is standard for games).
+  /// </summary>
   let withToneMapping (tm: ToneMappingConfig) (pp: PostProcessConfig) = {
     pp with
         ToneMapping = tm
   }
 
-/// Main pipeline configuration
+/// <summary>
+/// Main configuration for the 3D Render Pipeline.
+/// </summary>
 [<Struct>]
 type PipelineConfig = {
-  ShadowPath: ShadowPath
+  /// Shadow subsystem configuration (ValueNone to disable shadows).
   Shadows: ShadowConfig voption
+  /// Post-processing configuration.
   PostProcess: PostProcessConfig voption
+  /// Fallback lighting state if no 'SetLighting' command is issued.
   DefaultLighting: LightingState voption
+  /// Map of shader overrides (e.g., replacing the default PBR shader).
   ShaderOverrides: Map<ShaderBase, string>
   /// Optional callback to run custom logic before the main render pass (e.g. Depth Pre-Pass, Compute Shaders)
   PreRenderCallback: (GraphicsDevice -> Camera -> LightingState -> unit) voption
   /// Optional override for binding light data to shaders
   LightingBinder: (Effect -> Camera -> LightingState -> unit) voption
-  /// Screen-space tile size for light culling (default: 32)
+  /// <summary>
+  /// Screen-space tile size for CPU Tiled Forward culling (default: 32).
+  /// Controls the granularity of the light binning grid.
+  /// Smaller tiles (16) mean fewer lights per tile but more CPU overhead to calculate bins.
+  /// Larger tiles (32-64) reduce CPU cost but may pass more lights to the pixel shader for non-uniform scenes.
+  /// </summary>
   TileSize: int
 }
 
 module PipelineConfig =
   let defaults: PipelineConfig = {
-    ShadowPath = Auto
     Shadows = ValueNone
     PostProcess = ValueNone
     DefaultLighting = ValueNone
@@ -167,26 +285,36 @@ module PipelineConfig =
     TileSize = 32
   }
 
-  let withShadowPath (path: ShadowPath) (pc: PipelineConfig) = {
-    pc with
-        ShadowPath = path
-  }
 
+  /// <summary>
+  /// Enables and configures the shadow rendering subsystem.
+  /// Without this, no shadows will be rendered regardless of light settings.
+  /// </summary>
   let withShadows (cfg: ShadowConfig) (pc: PipelineConfig) = {
     pc with
         Shadows = ValueSome cfg
   }
 
+  /// <summary>
+  /// Enables and configures the post-processing pipeline phase.
+  /// </summary>
   let withPostProcess (cfg: PostProcessConfig) (pc: PipelineConfig) = {
     pc with
         PostProcess = ValueSome cfg
   }
 
+  /// <summary>
+  /// Provides a fallback lighting configuration.
+  /// This lighting state is used for any frame where the view function does not explicitly submit a 'SetLighting' command.
+  /// </summary>
   let withDefaultLighting (lighting: LightingState) (pc: PipelineConfig) = {
     pc with
         DefaultLighting = ValueSome lighting
   }
 
+  /// <summary>
+  /// Registers a custom shader asset to override a default internal shader (e.g., replacing 'PBRForward' with your own implementation).
+  /// </summary>
   let withShader
     (shaderBase: ShaderBase)
     (assetName: string)
@@ -197,4 +325,39 @@ module PipelineConfig =
           ShaderOverrides = pc.ShaderOverrides.Add(shaderBase, assetName)
     }
 
-  let withTileSize (size: int) (pc: PipelineConfig) = { pc with TileSize = size }
+  /// <summary>
+  /// [Advanced] Overrides the internal logic for binding lighting data to shaders.
+  /// Use this only if you are using completely custom shaders and need to manually map Mibo's lighting structures to your effect parameters.
+  /// </summary>
+  let withLightingBinder
+    (binder: Effect -> Camera -> LightingState -> unit)
+    (pc: PipelineConfig)
+    =
+    {
+      pc with
+          LightingBinder = ValueSome binder
+    }
+
+  /// <summary>
+  /// [Advanced] Registers a callback to execute before the main render pass.
+  /// Useful for global effect updates, compute shader dispatch, or custom depth pre-passes.
+  /// </summary>
+  let withPreRenderCallback
+    (cb: GraphicsDevice -> Camera -> LightingState -> unit)
+    (pc: PipelineConfig)
+    =
+    {
+      pc with
+          PreRenderCallback = ValueSome cb
+    }
+
+  /// <summary>
+  /// Tunable performance setting for CPU Tiled Forward culling.
+  /// 16: Tighter culling, higher CPU cost. Good for many small local lights.
+  /// 32: Balanced default.
+  /// 64: Faster CPU, looser culling. Good for fewer, larger lights.
+  /// </summary>
+  let withTileSize (size: int) (pc: PipelineConfig) = {
+    pc with
+        TileSize = size
+  }
