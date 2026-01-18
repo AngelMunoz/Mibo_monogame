@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- Rendering: **High-Performance 3D Forward Renderer**. Features CPU-based Tiled Forward culling for efficient management of many lights.
+- Rendering: **PBR Material System**. Full support for Physically Based Rendering including Albedo, Normal, Metallic, Roughness, Ambient Occlusion, and Emissive maps.
+- Rendering: **Declarative DSL**. Introduced `draw { ... }` computation expression for type-safe, composable creation of 3D drawables (Meshes, Materials, Transforms).
+- Rendering: **RenderBuilder API**. Fluent interface for submitting rendering commands (`.camera`, `.lighting`, `.draw`, `.clear`) to the `RenderBuffer`.
+- Lighting: Unified **Lighting System** supporting Directional (Sun), Point, and Spot lights with configurable intensity, range, and color.
+- Shadows: **Shadow Atlas System**. efficiently packs multiple shadow maps into a single texture. Supports Cascaded Shadow Maps (CSM) for sunlight and localized shadows for point/spot lights.
+- Shadows: **Soft Shadows**. Configurable PCF (Percentage Closer Filtering) and penumbra size settings for realistic shadow falloff.
+- Pipeline: **Post-Processing Stack**. Built-in configuration for Bloom, SSAO (Screen Space Ambient Occlusion), and high-quality Tone Mapping (ACES, Filmic, Reinhard).
+- Pipeline: **Advanced Configuration**. Granular control over the pipeline via `PipelineConfig`, including `TileSize` tuning, Shader overrides, and `PreRenderCallback` hooks.
+
+
 ## [1.2.0] - 2026-01-10
 
 ### Added
