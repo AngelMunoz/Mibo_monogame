@@ -120,12 +120,19 @@ module Game =
     | Tick gt ->
       let dt = float32 gt.ElapsedGameTime.TotalSeconds
       let newTime = state.Time + dt
-      
-      // Pulse between 2.0 and 5.0 to show color without blowing out to white
-      let pulse = 3.5f + 1.5f * float32(System.Math.Sin(float newTime * 3.0))
+
+      // Pulse between 0.0 (Normal Lit) and 8.0 (Super Bright Glow)
+      // Slower pulse (speed 2.0) to appreciate the transition
+      let s = float32(System.Math.Sin(float newTime * 2.0)) // -1 to 1
+      let t = (s + 1.0f) * 0.5f // 0 to 1
+      let pulse = t * 8.0f
 
       // Composable system pipeline using Mibo.Elmish.System
-      System.start { state with Time = newTime; EmissivePulse = pulse }
+      System.start {
+        state with
+            Time = newTime
+            EmissivePulse = pulse
+      }
       |> System.pipe(Movement.update dt)
       |> System.pipe(Physics.update dt)
       |> System.pipe(Rotation.update dt)
@@ -163,7 +170,7 @@ module Game =
       Light.Directional {
         Direction = Vector3.Normalize(Vector3.Down + Vector3.Forward * 0.5f)
         Color = Color.LightYellow
-        Intensity = 1.0f
+        Intensity = 0.5f
         Shadow = ValueSome ShadowSettings.defaults
         CascadeCount = 4
         CascadeSplits = [| 0.05f; 0.15f; 0.4f; 1.0f |]
@@ -173,8 +180,8 @@ module Game =
       // Secondary Directional Light (Navy Blue, Angled)
       Light.Directional {
         Direction = Vector3.Normalize(Vector3(-1f, -1f, -0.5f))
-        Color = Color.Navy
-        Intensity = 1.0f
+        Color = Color.Brown
+        Intensity = 0.5f
         Shadow = ValueSome ShadowSettings.defaults
         CascadeCount = 0
         CascadeSplits = [||]
@@ -182,14 +189,7 @@ module Game =
       }
 
       // Spot Lights above each platform
-      let spotColors = [|
-        Color.Cyan
-        Color.Magenta
-        Color.Yellow
-        Color.Orange
-        Color.Lime
-        Color.DeepPink
-      |]
+      let spotColors = [| Color.Orange; Color.DeepPink |]
 
       for i in 0 .. state.Platforms.Length - 1 do
         let plat = state.Platforms.[i]
@@ -208,7 +208,7 @@ module Game =
         }
 
       // Add 16 colorful moving point lights
-      for i in 0..15 do
+      for i in 0..5 do
         let angle = (float32 i / 16.0f) * MathHelper.TwoPi + state.Time
         let radius = 10.0f
         let x = cos(angle) * radius
@@ -218,10 +218,10 @@ module Game =
         // Improved Hue-based color selection
         let color =
           if h < 0.16f then Color.Red
-          elif h < 0.33f then Color.Orange
-          elif h < 0.5f then Color.Yellow
-          elif h < 0.66f then Color.Lime
-          elif h < 0.83f then Color.Cyan
+          elif h < 0.33f then Color.Purple
+          elif h < 0.5f then Color.GreenYellow
+          elif h < 0.66f then Color.Tomato
+          elif h < 0.83f then Color.SlateGray
           else Color.Magenta
 
         Light.Point {
@@ -258,8 +258,9 @@ module Game =
         mesh state.Assets.PlayerMesh
         at state.PlayerPosition
         rotatedBy state.Rotation
-        withFlags MaterialFlags.Unlit
-        withAlbedo Color.Magenta
+        // Remove Unlit flag to enable normal lighting/shadows
+        // withFlags MaterialFlags.Unlit
+        withAlbedo Color.White
         withEmissive Color.Magenta state.EmissivePulse
       }
     )
@@ -328,5 +329,6 @@ module Game =
        |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
        |> PipelineConfig.withShader ShaderBase.Unlit "Effects/Unlit"
        |> PipelineConfig.withShader ShaderBase.Bloom "Effects/BloomExtract"
-       |> PipelineConfig.withShader ShaderBase.PostProcess "Effects/PostProcess")
+      //  |> PipelineConfig.withShader ShaderBase.PostProcess "Effects/PostProcess"
+      )
       view

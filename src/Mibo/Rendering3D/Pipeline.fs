@@ -750,6 +750,9 @@ module internal Drawing =
     effect.SafeSetParam("AlbedoColor", albedoColor)
     effect.SafeSetParam("Metallic", drawable.Material.PBR.Metallic)
     effect.SafeSetParam("Roughness", drawable.Material.PBR.Roughness)
+    // Pass as Vector3 to avoid mismatch if shader expects float3, or let shader handle float4
+    effect.SafeSetParam("EmissiveColor", drawable.Material.PBR.EmissiveColor.ToVector3())
+    effect.SafeSetParam("EmissiveIntensity", drawable.Material.PBR.EmissiveIntensity)
 
     if hasTexture then
       effect.SafeSetParam("HasAlbedoMap", 1.0f)
@@ -762,6 +765,14 @@ module internal Drawing =
 
     match drawable.Material.PBR.NormalMap with
     | ValueSome tex -> effect.SafeSetParam("NormalMap", tex)
+    | ValueNone -> ()
+
+    match drawable.Material.PBR.MetallicRoughnessMap with
+    | ValueSome tex -> effect.SafeSetParam("MetallicRoughnessMap", tex)
+    | ValueNone -> ()
+
+    match drawable.Material.PBR.AmbientOcclusionMap with
+    | ValueSome tex -> effect.SafeSetParam("AmbientOcclusionMap", tex)
     | ValueNone -> ()
 
     for pass in effect.CurrentTechnique.Passes do

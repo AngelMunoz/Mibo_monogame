@@ -61,7 +61,7 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
     {
         for(float y = -1.5; y <= 1.5; y += 1.0)
         {
-            float2 offset = float2(x, y) * TexelSize * 3.0; // Spread factor 3.0
+            float2 offset = float2(x, y) * TexelSize * 1.5; // Spread factor 1.5 (Reduced from 3.0)
             float3 c = tex2D(SceneSampler, input.TexCoord + offset).rgb;
             colorSum += ThresholdColor(c);
         }

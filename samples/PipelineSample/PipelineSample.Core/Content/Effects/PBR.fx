@@ -1,4 +1,4 @@
- #if OPENGL
+#if OPENGL
 	#define SV_POSITION POSITION
 	#define VS_SHADERMODEL vs_3_0
 	#define PS_SHADERMODEL ps_3_0
@@ -20,6 +20,20 @@ sampler AlbedoSampler = sampler_state
 	MagFilter = Linear; MinFilter = Linear; MipFilter = Linear;
 	AddressU = Wrap; AddressV = Wrap;
 };
+
+// PBR Maps
+texture NormalMap;
+sampler NormalSampler = sampler_state { Texture = <NormalMap>; MagFilter = Linear; MinFilter = Linear; MipFilter = Linear; AddressU = Wrap; AddressV = Wrap; };
+
+texture MetallicRoughnessMap;
+sampler MetallicRoughnessSampler = sampler_state { Texture = <MetallicRoughnessMap>; MagFilter = Linear; MinFilter = Linear; MipFilter = Linear; AddressU = Wrap; AddressV = Wrap; };
+
+texture AmbientOcclusionMap;
+sampler AOSampler = sampler_state { Texture = <AmbientOcclusionMap>; MagFilter = Linear; MinFilter = Linear; MipFilter = Linear; AddressU = Wrap; AddressV = Wrap; };
+
+// Emissive properties
+float4 EmissiveColor = float4(0, 0, 0, 1);
+float EmissiveIntensity = 0.0;
 
 // Lighting Buffers (Unconstrained)
 texture LightDataTexture;
@@ -198,7 +212,12 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
         diffuse += ndotl * p3.rgb * intensity * atten * shadow;
     }
 
-	return float4(albedo.rgb * diffuse, albedo.a);
+    float3 finalColor = albedo.rgb * diffuse;
+    
+    // Apply Emissive contribution
+    finalColor += EmissiveColor.rgb * EmissiveIntensity;
+
+	return float4(finalColor, albedo.a);
 }
 
 VertexShaderOutput MainVS(in float4 Position : POSITION0, in float2 TexCoord : TEXCOORD0, in float3 Normal : NORMAL0) {
