@@ -1,7 +1,7 @@
 ---
-title: Render Pipeline Architecture & Usage
+title: Rendering 3D
 category: Rendering
-index: 15
+index: 12
 ---
 
 # Render Pipeline Architecture & Usage
@@ -87,7 +87,75 @@ draw {
 }
 ```
 
-### Level 2: Materials & Textures
+### Level 2: Quads, Billboards & Lines
+
+Mibo includes an optimized, unlit path for "Sprite3D" style rendering. This is ideal for decals, particles, and debug visualizations.
+
+#### Quads (Sprite3D)
+
+Quads are fast textured rectangles. Typical uses: ground decals, simple walls, UI in world space.
+
+```fsharp
+// Define a 2x2 ground decal on the XZ plane
+let decal =
+    quad {
+        at (Vector3(10f, 0f, 5f))
+        onXZ (Vector2(2f, 2f))
+        color Color.White
+    }
+
+// Submit to buffer
+buffer |> RenderBuilder.quad myTexture decal
+```
+
+#### Billboards (Sprite3D)
+
+Billboards always face the camera. Ideal for smoke, fire, or quest icons.
+
+```fsharp
+let spark =
+    billboard {
+        at (Vector3(0f, 1.5f, 0f))
+        size (Vector2(0.5f, 0.5f))
+        color Color.Yellow
+    }
+
+buffer |> RenderBuilder.billboard particleTex spark
+```
+
+For "tree style" billboards that only rotate around an axis:
+
+```fsharp
+let tree =
+    billboard {
+        at pos
+        size (Vector2(2f, 4f))
+        facing (Cylindrical Vector3.Up)
+    }
+
+buffer |> RenderBuilder.billboard treeTex tree
+```
+
+#### Lines & Grids
+
+Draw single or multiple line segments efficiently for debugging or wireframes.
+
+```fsharp
+// Single red line
+buffer |> RenderBuilder.line Vector3.Zero (Vector3(0f, 10f, 0f)) Color.Red
+
+// Grid or complex path
+let verts = [|
+    VertexPositionColor(p1, Color.White)
+    VertexPositionColor(p2, Color.White)
+|]
+buffer |> RenderBuilder.lines verts (verts.Length / 2)
+
+// Line segments with a custom shader (e.g. glowing grid)
+buffer |> RenderBuilder.linesEffect Transparent myShader (ValueSome mySetup) verts (verts.Length / 2)
+```
+
+### Level 3: Materials & Textures
 
 Mibo uses a PBR (Physically Based Rendering) material model by default. You can configure materials inline within the `draw` builder.
 
@@ -103,6 +171,12 @@ draw {
     // Tune material properties
     withMetallic 0.8f    // 0.0 (Dielectric) to 1.0 (Metal)
     withRoughness 0.2f   // 0.0 (Smooth) to 1.0 (Rough)
+
+    // Emissive (Glow)
+    withEmissive Color.Red 5.0f // Color + Intensity (>1.0 for Bloom)
+
+    // Animation
+    withBones myBoneMatrices     // Apply skinned mesh animation
 
     // Rendering flags
     withFlags (MaterialFlags.DoubleSided ||| MaterialFlags.Transparent)
@@ -157,333 +231,119 @@ draw {
 
 The alpha threshold is configurable per material and defaults to 0.5f.
 
-### Level 3: Scene Organization
+### Level 4: Scene Organization
 
 As your scene grows, the `RenderBuilder` fluent DSL organizes frame rendering cleanly.
+// ... (omitting middle)
 
-```fsharp
-// Global State
-buffer
-|> RenderBuilder.clear Color.Black
-|> RenderBuilder.clearDepth
-|> RenderBuilder.camera mainCamera
-|> RenderBuilder.lighting sceneLighting
-
-// Draw all enemies
-|> RenderBuilder.drawMany (
-    [|
-        for enemy in enemies do
-            draw {
-                mesh enemyMesh
-                at enemy.Position
-                rotatedByYawPitchRoll enemy.Rotation.Yaw 0f 0f
-            }
-    |]
-)
-
-// Draw player
-|> RenderBuilder.draw (
-    draw {
-        mesh playerMesh
-        at player.Pos
-    }
-)
-|> RenderBuilder.submit
-```
-
-> **Command Ordering Matters**
->
-> RenderBuilder commands accumulate in a buffer and execute at end of frame. The order you specify them determines the rendering sequence:
->
-> 1. **Clear commands first** - `clear`/`clearDepth` wipes the previous frame
-> 2. **Set camera before drawing** - Without it, uses default identity camera (nothing visible)
-> 3. **Set lighting** - Updates light state (no flush triggered)
-> 4. **Draw commands** - Batches geometry (renders when frame ends)
->
-> "Your screen is empty or showing wrong camera? Check that `RenderBuilder.camera` is called before your draw commands."
->
-> "Your mesh drawing overwrites everything? Make sure `clear` comes before your draws, not after."
-
-### Level 4: Lighting
+### Level 5: Lighting
 
 To light your scene, you construct a `LightingState` and pass it to the renderer. Lights work independently of shadows.
+// ... (omitting middle)
 
-#### Define Lights
-
-Use the `Light` union to define Directional, Point, or Spot lights.
-
-```fsharp
-let sun =
-    Light.Directional {
-        Direction = Vector3.Normalize(Vector3(-1f, -2f, -1f))
-        Color = Color.LightYellow
-        Intensity = 2.0f
-        Shadow = ValueNone  // No shadows initially
-        CascadeCount = 0
-        CascadeSplits = [||]
-        SourceRadius = 0.05f
-    }
-
-let lamp =
-    Light.Spot {
-        Position = Vector3(0f, 5f, 0f)
-        Direction = Vector3.Down
-        Color = Color.Orange
-        Intensity = 5.0f
-        Range = 20.0f
-        InnerConeAngle = MathHelper.ToRadians(30f)
-        OuterConeAngle = MathHelper.ToRadians(45f)
-        Shadow = ValueNone  // No shadows initially
-        SourceRadius = 0.1f
-    }
-```
-
-#### Apply to Scene
-
-```fsharp
-let lighting = {
-    Lighting.ambient with
-        Lights = [| sun; lamp |]
-        AmbientIntensity = 0.2f
-}
-
-buffer
- |> RenderBuilder.lighting lighting
-// ... draws ...
-```
-
-#### Lighting Scope
-
-You can define lighting in two ways:
-
-**Global Lighting (Program Setup):** Set lighting once in your program configuration. Used as fallback if you don't call `RenderBuilder.lighting` in your view function.
-
-```fsharp
-// In your Program.fs
-Program.mkProgram init update
- |> Program.withPipeline (
-    PipelineConfig.defaults
-    |> PipelineConfig.withDefaultLighting sceneLighting
-)
-
-// In your view function - lighting is already applied
-buffer
- |> RenderBuilder.drawMany drawables
-```
-
-**Per-Frame Lighting (View Function):** Override global lighting or set it dynamically in your view function. Changes every frame.
-
-```fsharp
-let lighting = {
-    Lighting.ambient with
-        Lights = [| sun; lamp |]
-        AmbientIntensity = 0.2f
-}
-
-buffer
- |> RenderBuilder.lighting lighting
-// ... draws ...
-```
-
-**Per-Drawable Lighting:** Use `withEffect` with custom shaders that implement their own lighting. Useful for emissive objects, force-lit items, or debug visualizations.
-
-```fsharp
-// Emissive object with no lighting
-let emissiveEffect = Assets.effect "Effects/Unlit" ctx
-
-draw {
-    mesh glowMesh
-    at 0f 2f 0f
-    withEffect emissiveEffect  // Bypasses scene lighting
-}
-```
-
-**Priority:** Global lighting (via `PipelineConfig`) → Per-frame lighting (via `RenderBuilder.lighting`) → Per-drawable lighting (via `withEffect`). Later settings override earlier ones.
-
-### Level 5: Shadows
+### Level 6: Shadows
 
 Shadows require three things to work together: lights configured with shadow settings, materials that cast shadows, and the pipeline configured to render shadows.
+// ... (omitting middle)
 
-#### 1. Enable Shadows on Lights
-
-```fsharp
-let sun =
-    Light.Directional {
-        Direction = Vector3.Normalize(Vector3(-1f, -2f, -1f))
-        Color = Color.LightYellow
-        Intensity = 2.0f
-        Shadow = ValueSome ShadowSettings.defaults  // Enable shadows
-        CascadeCount = 3
-        CascadeSplits = [| 0.1f; 0.3f; 1.0f |]
-        SourceRadius = 0.05f
-    }
-
-let lamp =
-    Light.Spot {
-        Position = Vector3(0f, 5f, 0f)
-        Direction = Vector3.Down
-        Color = Color.Orange
-        Intensity = 5.0f
-        Range = 20.0f
-        InnerConeAngle = MathHelper.ToRadians(30f)
-        OuterConeAngle = MathHelper.ToRadians(45f)
-        Shadow = ValueSome ShadowSettings.defaults  // Enable shadows
-        SourceRadius = 0.1f
-    }
-```
-
-#### 2. Ensure Materials Cast Shadows
-
-Opaque materials cast shadows by default. Transparent materials do not.
-
-```fsharp
-let opaqueMaterial = Material.defaultOpaque  // Has CastsShadow flag
-let transparentMaterial = Material.transparent   // Does NOT cast shadow
-```
-
-#### 3. Configure Pipeline for Shadows
-
-```fsharp
-// In your Program.fs
-Program.mkProgram init update
-|> Program.withPipeline (
-    PipelineConfig.defaults
-    |> PipelineConfig.withShadows (
-        ShadowConfig.defaults
-        // High quality (4096px per shadow), soft edges
-        |> ShadowConfig.withResolution 4096
-        |> ShadowConfig.withCascades 3
-        |> ShadowConfig.withSoftShadows 1.0f
-        // Ensure Atlas is large enough for all lights (Resolution * Tiles)
-        |> ShadowConfig.withAtlasTiles 8
-        |> ShadowConfig.withMaxAtlasSize 16384
-    )
-)
-```
-
-**Shadow Requirements Summary:**
-
-<table>
-<tr><th>Component</th><th>Requirement</th></tr>
-<tr><td>Light</td><td><code>Shadow = ValueSome ShadowSettings.defaults</code></td></tr>
-<tr><td>Material</td><td><code>CastsShadow</code> flag (default for opaque)</td></tr>
-<tr><td>Pipeline</td><td><code>PipelineConfig.withShadows</code> configured</td></tr>
-</table>
-
-#### Required Shaders for Shadows
-
-> **Mibo does not include any shaders.** You must provide your own shader files (`.fx` or `.mgfxb`) in your project and load them via `PipelineConfig.withShader` or content system.
-
-To render shadows, your shader must implement a shadow casting pass. This is a simple depth-only shader:
-
-```hlsl
-// Vertex Shader: Output depth for shadow map
-VS_OUTPUT ShadowVS(VS_INPUT input)
-{
-    VS_OUTPUT output;
-    output.Position = mul(input.Position, WorldViewProjectionMatrix);
-    output.Depth = output.Position.z;  // Store depth for shadow comparison
-    return output;
-}
-
-// Pixel Shader: Output depth to shadow atlas
-float4 ShadowPS(VS_OUTPUT input) : COLOR0
-{
-    return input.Depth;  // Output raw depth value (R = depth)
-}
-```
-
-The pipeline automatically:
-
-- Binds view and projection matrices for each light
-- Clears the shadow atlas to white (far depth)
-- Sets viewport to correct atlas tile
-- Culls geometry to light frustums
-
-Your shader just renders depth to the atlas. No lighting, no textures - just depth.
-
-> **"My meshes use their built-in effects and I want to keep them. If `ShaderBase.PBRForward` is not provided, the pipeline falls back to `mesh.Effect` (the effect your .xnb model was compiled with). No need to write a custom PBR shader - just provide your shadow caster."**
-
-### Level 6: Custom Effects & Escape Hatches
+### Level 7: Custom Effects & Escape Hatches
 
 Sometimes PBR isn't what you need. You might want a custom Toon shader, a special VFX shader, or debug lines.
+// ... (omitting middle)
 
-#### Override Per-Drawable Shader
+### Level 8: Advanced Customization
 
-```fsharp
-let toonEffect = Assets.effect "Effects/Toon" ctx
+For complex engines, you may need to hook into the pipeline execution or radically change how data is fed to shaders.
 
-draw {
-    mesh myMesh
-    at 0f 0f 0f
-    withEffect toonEffect  // Uses your custom shader instead of PBR
-}
-```
+#### PreRender Callback
 
-#### Raw Graphics Device Access
-
-If you need to draw primitives, change render states manually, or do something completely custom:
-
-```fsharp
-buffer |> RenderBuilder.custom (fun device camera ->
-    // You have full access to the GraphicsDevice here
-    device.BlendState <- BlendState.Additive
-    device.DrawUserPrimitives(...)
-)
-```
-
-#### Custom Light-Receiving Shaders
-
-If you write a custom shader but still want it to participate in Mibo's lighting/shadow system, you must declare the pipeline's texture bindings.
-
-```hlsl
-// Mibo Pipeline Bindings
-texture LightDataTexture;
-sampler LightDataSampler = sampler_state { Texture = <LightDataTexture>; ... };
-
-texture ShadowMatrixTexture;
-sampler ShadowMatrixSampler = sampler_state { Texture = <ShadowMatrixTexture>; ... };
-
-texture ShadowAtlas;
-sampler ShadowAtlasSampler = sampler_state { Texture = <ShadowAtlas>; ... };
-
-float LightCount;
-float ShadowAtlasSize;
-float ShadowAtlasTilesX;
-
-// In your Pixel Shader:
-float4 MainPS(VertexShaderOutput input) : COLOR0
-{
-    float3 diffuse = AmbientColor;
-
-    // Iterate lights (see "Shader Contract" below for data layout)
-    for(int i = 0; i < (int)LightCount; i++) {
-        // 1. Fetch Light Data (Pos, Dir, Color, ShadowIndex) from LightDataTexture
-        // 2. Calculate NdotL
-        // 3. If ShadowIndex >= 0, sample ShadowAtlas using ShadowMatrixTexture
-        // 4. Accumulate lighting
-    }
-
-    return float4(diffuse, 1.0);
-}
-```
-
-#### Custom Shader Overrides
-
-You can provide custom implementations for specific pipeline stages:
+Executed **before** the main render pass but **after** command processing. Use this to update global effect parameters, dispatch compute shaders, or perform custom setup that depends on the current camera/lighting state.
 
 ```fsharp
 Program.withPipeline (
     PipelineConfig.defaults
-    |> PipelineConfig.withShader ShaderBase.PBRForward "CustomPBR"
-    |> PipelineConfig.withShader ShaderBase.ShadowCaster "CustomShadowCaster"
-    |> PipelineConfig.withShader ShaderBase.Bloom "CustomBloom"
-    |> PipelineConfig.withShader ShaderBase.PostProcess "CustomPostProcess"
-    |> PipelineConfig.withShader ShaderBase.Unlit "CustomUnlit"
+    |> PipelineConfig.withPreRenderCallback (fun device camera lighting ->
+        // e.g. Update a global "Time" uniform on all effects
+        // or dispatch a Compute Shader for particle updates
+        ()
+    )
 )
 ```
 
-Each shader type expects specific parameters to be bound by the pipeline. See the "Shader Contract" section for details.
+#### Lighting Binder Override
+
+If you strictly use your own shaders and want to replace Mibo's "Texture Buffer" approach, you can override how lighting data is applied to your effects.
+
+```fsharp
+Program.withPipeline (
+    PipelineConfig.defaults
+    |> PipelineConfig.withLightingBinder (fun effect camera lighting ->
+        // Manual binding - completely replaces Mibo's default parameter setting
+        effect.Parameters.["MyLightPos"].SetValue(lighting.Lights.[0].Position)
+        effect.Parameters.["MyLightColor"].SetValue(lighting.Lights.[0].Color.ToVector3())
+    )
+)
+```
+
+> **Warning:** Providing a binder completely disables the automatic `LightDataTexture` binding. You are on your own!
+
+#### Post-Processing
+
+The pipeline supports several post-processing effects that can be enabled via configuration:
+
+**Bloom** - Creates a soft glow around bright areas:
+
+```fsharp
+Program.withPipeline (
+    PipelineConfig.defaults
+    |> PipelineConfig.withPostProcess (
+        PostProcessConfig.defaults
+        |> PostProcessConfig.withBloom {
+            Threshold = 1.0f      // Pixels brighter than this contribute to bloom
+            Intensity = 0.5f      // Overall glow strength
+            Scatter = 0.7f         // How far glow spreads
+        }
+    )
+)
+```
+
+**Tone Mapping** - Controls how HDR values map to displayable range:
+
+```fsharp
+Program.withPipeline (
+    PipelineConfig.defaults
+    |> PipelineConfig.withPostProcess (
+        PostProcessConfig.defaults
+        |> PostProcessConfig.withToneMapping ToneMappingConfig.ACES  // Industry standard
+    )
+)
+```
+
+Available tone mapping options:
+
+- `NoToneMapping` - No processing (may clip)
+- `Reinhard` - Simple classic algorithm
+- `ACES` - Academy Color Encoding System (film standard)
+- `FilMic` - Cinematic look
+- `AgX` - Modern film-inspired transform
+
+**SSAO** - Screen Space Ambient Occlusion for depth perception:
+
+```fsharp
+Program.withPipeline (
+    PipelineConfig.defaults
+    |> PipelineConfig.withPostProcess (
+        PostProcessConfig.defaults
+        |> PostProcessConfig.withSSAO {
+            Radius = 0.5f         // Sampling radius in world units
+            Intensity = 1.0f      // Strength of darkening
+            SampleCount = 16         // Samples per pixel (quality vs performance)
+        }
+    )
+)
+```
+
+**Note:** Post-processing requires custom shader implementations via `PipelineConfig.withShader`. The pipeline provides the `SceneTexture` containing the rendered scene and expects the post-process shader to output the final result.
 
 ---
 
@@ -511,98 +371,11 @@ Each shader type expects specific parameters to be bound by the pipeline. See th
 
 ### Complexity Ladder Overview
 
-* Level 1: Basic Rendering
-  * Mesh on screen
-  * Transforms (position, rotation, scale)
-  * Clear color buffer
-
-* Level 2: Materials & Textures
-  * PBR material system
-  * Albedo, Normal, Metallic, Roughness maps
-  * Material reuse
-
-* Level 3: Scene Organization
-  * RenderBuilder fluent DSL
-  * Batch rendering (drawMany)
-  * Command sequencing
-
-* Level 4: Lighting
-  * Directional, Point, Spot lights
-  * Ambient lighting
-  * Multiple lights per scene
-
-* Level 5: Shadows
-  * Shadow atlas
-  * Cascaded directional shadows
-  * Shadow caster shaders
-
-* Level 6: Custom Effects
-  * Custom shader overrides
-  * Raw GraphicsDevice access
-  * Custom light-receiving shaders
-
-* Level 7: Advanced Customization
-  * PreRender callbacks
-  * Custom Lighting Binders
-  * Performance tuning (TileSize)
-
-### Level 7: Advanced Customization
-
-For complex engines, you may need to hook into the pipeline execution or radically change how data is fed to shaders.
-
-#### PreRender Callback
-
-Executed **before** the main render pass but **after** command processing. Use this to update global effect parameters, dispatch compute shaders, or perform custom setup that depends on the current camera/lighting state.
-
-```fsharp
-Program.withPipeline (
-    PipelineConfig.defaults
-    |> PipelineConfig.withPreRenderCallback (fun device camera lighting ->
-        // e.g. Update a global "Time" uniform on all effects
-        // or dispatch a Compute Shader for particle updates
-        ()
-    )
-)
-```
-
-#### Lighting Binder Override
-
-If you strictly use your own shaders and hate the Mibo "Texture Buffer" approach, you can override how lighting data is applied to your effects.
-
-```fsharp
-Program.withPipeline (
-    PipelineConfig.defaults
-    |> PipelineConfig.withLightingBinder (fun effect camera lighting ->
-        // Manual binding - completely replaces Mibo's default parameter setting
-        effect.Parameters.["MyLightPos"].SetValue(lighting.Lights.[0].Position)
-        effect.Parameters.["MyLightColor"].SetValue(lighting.Lights.[0].Color.ToVector3())
-    )
-)
-```
-
-> **Warning:** Providing a binder completely disables the automatic `LightDataTexture` binding. You are on your own!
+![Complexity Ladder Diagram](./assets/complexity-ladder.svg)
 
 ### Command Flow
 
-* `draw { }` (Create Drawable)
-  * Returns Drawable voption
-  * Skip if ValueNone
-
-* RenderBuilder (Submit Commands)
-  * Stores RenderCommand[]
-
-* RenderBuffer (Command Queue)
-
-* Pipeline (Execute Commands)
-  * Processes:
-    * Culling
-    * Shadow pass
-    * Batching
-    * Sort opaque/transparent
-    * Main pass
-    * Post-process
-
-* Screen
+![Command Flow Diagram](./assets/command-flow.svg)
 
 ### Render Target Management
 
@@ -671,41 +444,154 @@ The atlas is an `R32_Float` texture:
 - **16k Atlas:** ~1 GB VRAM
 - **Resolution Scaling:** If `Resolution * TilesAcross > MaxAtlasSize`, the pipeline silently downscales individual shadow maps to fit the maximum texture size.
 
-### Shader Contract (Custom Shaders)
+### Shader Contract (API Bindings)
 
-If you implement a custom `ShaderBase.PBRForward` override, Mibo provides lighting data via standard texture bindings.
+When Mibo renders a `Drawable` or performs a pipeline pass, it attempts to bind specific parameters to your Effect. Ensure your shader declares these names to receive the data.
 
-#### 1. `LightDataTexture` (Sampler: `LightDataSampler`)
+#### 1. PBR Forward (`ShaderBase.PBRForward`)
 
-A `4 x LightCount` texture containing all light parameters. Each light is one **Row** (4 pixels).
+Used for standard lit geometry.
+
+**Global Uniforms:**
+
+- `World` (Matrix): Object transform.
+- `View` (Matrix): Camera view matrix.
+- `Projection` (Matrix): Camera projection matrix.
+- `AmbientColor` (float3): Scene ambient color \* intensity.
+- `LightCount` (float): Number of active lights.
+- `LightDataTexture` (Texture2D): 4xN texture containing light data (see layout below).
+- `ShadowMatrixTexture` (Texture2D): 4xN texture containing shadow view/proj matrices.
+- `ShadowMatrixCount` (float): Number of shadow matrices.
+- `ShadowAtlas` (Texture2D): The packed shadow depth atlas.
+- `ShadowAtlasSize` (float): Size of the atlas in pixels.
+- `ShadowAtlasTilesX` (float): Number of tiles across the atlas.
+- `ShadowBias` (float): Constant depth bias.
+- `ShadowNormalBias` (float): Normal-offset bias.
+- `Bones` (Matrix[]): Array of bone transforms for skinned meshes.
+
+**Material Properties:**
+
+- `AlbedoColor` (float4): Base color tint.
+- `AlbedoMap` (Texture2D): Diffuse texture.
+- `HasAlbedoMap` (float): 1.0 if texture present, 0.0 otherwise.
+- `NormalMap` (Texture2D): Tangent-space normal map.
+- `MetallicRoughnessMap` (Texture2D): Metallic (B) and Roughness (G) packed texture.
+- `AmbientOcclusionMap` (Texture2D): AO map.
+- `Metallic` (float): Metallic factor (0-1).
+- `Roughness` (float): Roughness factor (0-1).
+- `EmissiveColor` (float4): Emissive color tint.
+- `EmissiveIntensity` (float): Intensity multiplier for emissive color.
+
+#### 2. Unlit / HDR (`ShaderBase.Unlit`)
+
+Used for unlit geometry (UI, skybox, glowing markers).
+
+- `World`, `View`, `Projection`
+- `AlbedoColor` (float4)
+- `AlbedoMap` (Texture2D)
+- `HasAlbedoMap` (float)
+- `Intensity` (float): Multiplier for brightness (binds to `EmissiveIntensity`).
+
+#### 3. Bloom Extraction (`ShaderBase.Bloom`)
+
+Used to extract bright pixels for the bloom pass.
+
+- `SceneTexture` (Texture2D): The full rendered scene.
+- `Threshold` (float): Brightness cutoff (e.g., 0.8).
+- `Intensity` (float): Output multiplier.
+- `TexelSize` (float2): Size of one pixel `(1/Width, 1/Height)` for blur kernels.
+
+#### 4. Post Processing (`ShaderBase.PostProcess`)
+
+The final composition pass (Tone Mapping + Bloom + Grading).
+
+- `SceneTexture` (Texture2D): The main rendered image.
+- `BloomTexture` (Texture2D): The blurry bloom buffer (additive).
+- `ToneMapping` (float): Integer mode (0=None, 1=Reinhard, 2=ACES, 3=Filmic, 4=AgX).
+- `Time` (float): Game time in seconds (useful for animated grain/noise).
+
+#### 5. Shadow Caster (`ShaderBase.ShadowCaster`)
+
+Used to render depth into the shadow atlas.
+
+- `World`, `View`, `Projection`
+- `Bones` (Matrix[]): Bone transforms for animated shadows.
+- **Output:** Returns depth (0.0 - 1.0) in the Red channel.
+
+---
+
+### Light Data Texture Layout
+
+A `4 x LightCount` texture. Each light is one **Row** (4 pixels).
 
 <table>
-<tr><th>Pixel (X)</th><th>Component</th><th>Description</th></tr>
-<tr><td><strong>0</strong></td><td><code>.x</code></td><td><strong>Light Type</strong>: 0.0 (Directional), 1.0 (Point), 2.0 (Spot)</td></tr>
-<tr><td></td><td><code>.y</code></td><td><strong>Intensity</strong></td></tr>
-<tr><td></td><td><code>.z</code></td><td><strong>Range</strong> (0.0 for Directional Lights)</td></tr>
-<tr><td></td><td><code>.w</code></td><td><strong>Shadow Index</strong>: Base index in atlas (-1.0 if no shadow)</td></tr>
-<tr><td><strong>1</strong></td><td><code>.xyz</code></td><td><strong>Position</strong> (World Space)</td></tr>
-<tr><td></td><td><code>.w</code></td><td><strong>Spot Outer Angle</strong>: <code>cos(OuterConeAngle)</code></td></tr>
-<tr><td><strong>2</strong></td><td><code>.xyz</code></td><td><strong>Direction</strong> (Normalized)</td></tr>
-<tr><td></td><td><code>.w</code></td><td><strong>Spot Inner Angle</strong>: <code>cos(InnerConeAngle)</code></td></tr>
-<tr><td><strong>3</strong></td><td><code>.xyz</code></td><td><strong>Color</strong> (RGB)</td></tr>
-<tr><td></td><td><code>.w</code></td><td><strong>SourceRadius</strong>: Physical size of light source (used for PCSS)</td></tr>
+  <thead>
+    <tr>
+      <th>Pixel (X)</th>
+      <th>Component</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>0</strong></td>
+      <td><code>.x</code></td>
+      <td><strong>Light Type</strong>: 0.0 (Directional), 1.0 (Point), 2.0 (Spot)</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td><code>.y</code></td>
+      <td><strong>Intensity</strong></td>
+    </tr>
+    <tr>
+      <td></td>
+      <td><code>.z</code></td>
+      <td><strong>Range</strong> (0.0 for Directional)</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td><code>.w</code></td>
+      <td><strong>Shadow Index</strong>: Base index in the atlas (-1.0 if disabled)</td>
+    </tr>
+    <tr>
+      <td><strong>1</strong></td>
+      <td><code>.xyz</code></td>
+      <td><strong>Position</strong> (World Space)</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td><code>.w</code></td>
+      <td><strong>Spot Outer Angle</strong>: <code>cos(OuterAngle)</code></td>
+    </tr>
+    <tr>
+      <td><strong>2</strong></td>
+      <td><code>.xyz</code></td>
+      <td><strong>Direction</strong> (Normalized)</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td><code>.w</code></td>
+      <td><strong>Spot Inner Angle</strong>: <code>cos(InnerAngle)</code></td>
+    </tr>
+    <tr>
+      <td><strong>3</strong></td>
+      <td><code>.xyz</code></td>
+      <td><strong>Color</strong> (RGB)</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td><code>.w</code></td>
+      <td><strong>SourceRadius</strong>: Physical size for soft shadows</td>
+    </tr>
+  </tbody>
 </table>
 
-#### 2. `ShadowMatrixTexture` (Sampler: `ShadowMatrixSampler`)
+### Shadow Matrix Texture Layout
 
-A `4 x (ShadowCount * 2)` texture. Each shadow map (or cascade/face) provides two matrices:
+A `4 x (ShadowCount * 2)` texture.
 
-- **Row `index * 2`**: View Matrix (4 pixels)
-- **Row `index * 2 + 1`**: Projection Matrix (4 pixels)
-
-#### 3. `ShadowAtlas` (Sampler: `ShadowAtlasSampler`)
-
-The raw depth texture:
-
-- **Uniforms:** `ShadowAtlasSize` (float), `ShadowAtlasTilesX` (float)
-- **Sampling:** To sample a shadow map `i`, calculate UVs based on `i / TilesX` (Row) and `i % TilesX` (Col)
+- **Row `index * 2`**: View Matrix.
+- **Row `index * 2 + 1`**: Projection Matrix.
 
 ### Soft Shadows (PCF & Poisson)
 

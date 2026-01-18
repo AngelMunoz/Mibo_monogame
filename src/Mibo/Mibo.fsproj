@@ -31,6 +31,9 @@
     <Compile Include="Rendering3D/Types.fs" />
     <Compile Include="Rendering3D/Config.fs" />
     <Compile Include="Rendering3D/RenderTargetPool.fs" />
+    <Compile Include="Rendering3D/SpriteQuadBatch.fs" />
+    <Compile Include="Rendering3D/BillboardBatch.fs" />
+    <Compile Include="Rendering3D/LineBatch.fs" />
     <Compile Include="Rendering3D/Pipeline.fs" />
     <Compile Include="Rendering3D/View.fs" />
     <Compile Include="Rendering3D/Program.fs" />

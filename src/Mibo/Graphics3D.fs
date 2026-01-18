@@ -168,7 +168,10 @@ module internal DeviceState =
     gd.DepthStencilState <- states.DepthStencilState
     gd.RasterizerState <- states.RasterizerState
 
-  let inline applyRasterizer (rasterizer: RasterizerState) (gd: GraphicsDevice) =
+  let inline applyRasterizer
+    (rasterizer: RasterizerState)
+    (gd: GraphicsDevice)
+    =
     gd.RasterizerState <- rasterizer
 
   let inline applyMeshPass
@@ -812,14 +815,12 @@ type Batch3DRenderer<'Model>
   // Cached sort comparers to avoid per-frame allocations
   let opaqueComparer =
     { new Collections.Generic.IComparer<struct (float32 * RenderCmd3D)> with
-        member _.Compare(struct (da, _), struct (db, _)) =
-          compare da db
+        member _.Compare(struct (da, _), struct (db, _)) = compare da db
     }
 
   let transparentComparer =
     { new Collections.Generic.IComparer<struct (float32 * RenderCmd3D)> with
-        member _.Compare(struct (da, _), struct (db, _)) =
-          compare db da
+        member _.Compare(struct (da, _), struct (db, _)) = compare db da
     }
 
   // Renderer-lifetime pipeline; Draw just executes.
@@ -862,8 +863,7 @@ type Batch3DRenderer<'Model>
           if config.SortOpaqueFrontToBack then
             opaque.Sort opaqueComparer
 
-        member _.SortTransparent() =
-          transparent.Sort transparentComparer
+        member _.SortTransparent() = transparent.Sort transparentComparer
 
         member _.DrawMesh(cmd) =
           // Uses latest View/Projection from renderState.
@@ -977,6 +977,7 @@ type Batch3DRenderer<'Model>
       if config.RestoreDeviceStates then
         DeviceState.restore ctx.GraphicsDevice prevStates
 
+[<Obsolete("This renderer is deprecated and will be removed in future versions. Please use Mibo.Rendering.Graphics3D.PipelineRenderer instead.")>]
 module Batch3DRenderer =
   /// <summary>Creates a standard 3D renderer.</summary>
   let inline create<'Model>
@@ -1017,6 +1018,7 @@ type Draw3DBuilder = {
 }
 
 /// <summary>Functions for building and submitting 3D draw commands.</summary>
+[<Obsolete("This renderer is deprecated and will be removed in future versions. Please use Mibo.Rendering.Graphics3D.PipelineRenderer instead.")>]
 module Draw3D =
   /// <summary>Starts a mesh drawing command.</summary>
   let inline mesh model transform = {
@@ -1036,7 +1038,11 @@ module Draw3D =
   let inline inPass pass (b: Draw3DBuilder) = { b with Pass = pass }
 
   let inline withColor col (b: Draw3DBuilder) = { b with Color = ValueSome col }
-  let inline withTexture tex (b: Draw3DBuilder) = { b with Texture = ValueSome tex }
+
+  let inline withTexture tex (b: Draw3DBuilder) = {
+    b with
+        Texture = ValueSome tex
+  }
 
   /// <summary>Configure the effect for this draw command.</summary>
   let inline withEffect (setup: EffectSetup) (b: Draw3DBuilder) = {

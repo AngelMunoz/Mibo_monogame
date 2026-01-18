@@ -21,6 +21,34 @@ type DrawState = {
   mutable Material: Material
   mutable Parent: Matrix voption
   mutable EffectOverride: Effect voption
+  mutable Bones: Matrix[] voption
+}
+
+/// <summary>
+/// State for building a Quad3D.
+/// </summary>
+[<Struct>]
+type QuadState = {
+  Center: Vector3
+  Right: Vector3
+  Up: Vector3
+  Color: Color
+  Uv: UvRect
+  Parent: Matrix voption
+}
+
+/// <summary>
+/// State for building a Billboard3D.
+/// </summary>
+[<Struct>]
+type BillboardState = {
+  Position: Vector3
+  Size: Vector2
+  Rotation: float32
+  Color: Color
+  Uv: UvRect
+  Mode: BillboardMode
+  Parent: Matrix voption
 }
 
 module DrawState =
@@ -36,6 +64,7 @@ module DrawState =
     Material = Material.defaultOpaque
     Parent = ValueNone
     EffectOverride = ValueNone
+    Bones = ValueNone
   }
 
   /// Compute final world transform from local components + parent
@@ -61,6 +90,12 @@ module DrawState =
         Material = state.Material
         BoundingSphere = mesh.BoundingSphere.Transform(transform)
         EffectOverride = state.EffectOverride
+        Pass =
+          if state.Material.Flags.HasFlag(MaterialFlags.Transparent) then
+            Transparent
+          else
+            Opaque
+        Bones = state.Bones
       }
     | ValueNone -> ValueNone
 
@@ -294,125 +329,214 @@ type DrawableBuilder() =
   /// Useful for glowing objects (used by Bloom).
   /// </summary>
   [<CustomOperation("withEmissive")>]
-  member inline _.WithEmissive(state: DrawState, color: Color, intensity: float32) = {
+  member inline _.WithEmissive
+    (state: DrawState, color: Color, intensity: float32)
+    =
+    {
+      state with
+          Material = state.Material |> Material.withEmissive color intensity
+    }
+
+  /// <summary>
+  /// Sets the bone matrices for skinned mesh animation.
+  /// </summary>
+  [<CustomOperation("withBones")>]
+  member inline _.WithBones(state: DrawState, bones: Matrix[]) = {
     state with
-        Material = state.Material |> Material.withEmissive color intensity
+        Bones = ValueSome bones
   }
 
-  // === Effect Override (Escape Hatch) ===
-
-
 // ============================================================================
-// RenderBuilder - Scene-level API
+// QuadBuilder
 // ============================================================================
 
 /// <summary>
-/// Internal builder for submitting commands to a 'RenderBuffer'.
-/// While this supports a Computation Expression, the preferred usage is via the 'RenderBuilder' module functions.
+/// Builder for creating individual 'Quad3D' objects.
+/// Used via the 'quad { ... }' computation expression.
 /// </summary>
-type RenderBuilder(_buffer: RenderBuffer<unit, RenderCommand>) =
+type QuadBuilder() =
 
-  member val buffer = _buffer
+  member inline _.Yield(_: unit) : QuadState = {
+    Center = Vector3.Zero
+    Right = Vector3.UnitX
+    Up = Vector3.UnitY
+    Color = Color.White
+    Uv = UvRect.full
+    Parent = ValueNone
+  }
 
-  member inline _.Yield(_: unit) = ()
+  [<CustomOperation("at")>]
+  member inline _.At(s: QuadState, pos) = { s with Center = pos }
 
-  /// Yield for Drawable voption - handles bare `draw { }` expressions
-  member inline this.Yield(drawable: Drawable voption) =
-    drawable |> ValueOption.iter(fun d -> this.buffer.Add((), Draw d))
+  [<CustomOperation("onXZ")>]
+  member inline _.OnXZ(s: QuadState, size: Vector2) = {
+    s with
+        Right = Vector3.UnitX * (size.X * 0.5f)
+        Up = Vector3.UnitZ * (size.Y * 0.5f)
+  }
 
-  member inline _.Zero() = ()
-  member inline _.Delay([<InlineIfLambda>] f: unit -> unit) = f
-  member inline _.Run(f: unit -> unit) = f()
+  [<CustomOperation("onXY")>]
+  member inline _.OnXY(s: QuadState, size: Vector2) = {
+    s with
+        Right = Vector3.UnitX * (size.X * 0.5f)
+        Up = Vector3.UnitY * (size.Y * 0.5f)
+  }
 
-  member inline _.For(source: 'T seq, [<InlineIfLambda>] body: 'T -> unit) =
-    for item in source do
-      body item
+  [<CustomOperation("color")>]
+  member inline _.Color(s: QuadState, c) = { s with Color = c }
 
-  member inline this.For
-    (source: 'T seq, [<InlineIfLambda>] body: 'T -> Drawable voption)
-    =
-    for item in source do
-      body item |> ValueOption.iter(fun d -> this.buffer.Add((), Draw d))
-
-  member inline this.Combine(state, draw: Drawable voption) =
-    draw |> ValueOption.iter(fun d -> this.buffer.Add((), Draw d))
-
-  member inline this.Combine(state, draw: unit -> unit) = draw()
-
-  // === Camera ===
-
-  /// <summary>
-  /// Sets the camera for subsequent draw calls.
-  /// </summary>
-  [<CustomOperation("withCamera")>]
-  member inline this.WithCamera
-    (state, camera: Mibo.Rendering.Graphics3D.Camera)
-    =
-    this.buffer.Add((), SetCamera camera)
-    state
-
-  // === Lighting ===
+  [<CustomOperation("uv")>]
+  member inline _.Uv(s: QuadState, u) = { s with Uv = u }
 
   /// <summary>
-  /// Sets the scene lighting configuration.
+  /// Sets a parent transform matrix.
   /// </summary>
-  [<CustomOperation("withLighting")>]
-  member inline this.WithLighting(state, lighting: LightingState) =
-    this.buffer.Add((), SetLighting lighting)
-    state
+  [<CustomOperation("relativeTo")>]
+  member inline _.RelativeTo(s: QuadState, parent: Matrix) = {
+    s with
+        Parent = ValueSome parent
+  }
 
-  // === Viewport ===
+  member inline _.Run(s: QuadState) : Quad3D =
+    match s.Parent with
+    | ValueSome p -> {
+        Center = Vector3.Transform(s.Center, p)
+        Right = Vector3.TransformNormal(s.Right, p)
+        Up = Vector3.TransformNormal(s.Up, p)
+        Color = s.Color
+        Uv = s.Uv
+      }
+    | ValueNone ->
+        {
+          Center = s.Center
+          Right = s.Right
+          Up = s.Up
+          Color = s.Color
+          Uv = s.Uv
+        }
+
+// ============================================================================
+// BillboardBuilder
+// ============================================================================
+
+/// <summary>
+/// Builder for creating individual 'Billboard3D' objects.
+/// Used via the 'billboard { ... }' computation expression.
+/// </summary>
+type BillboardBuilder() =
+
+  member inline _.Yield(_: unit) : BillboardState = {
+    Position = Vector3.Zero
+    Size = Vector2.One
+    Rotation = 0f
+    Color = Color.White
+    Uv = UvRect.full
+    Mode = Spherical
+    Parent = ValueNone
+  }
+
+  [<CustomOperation("at")>]
+  member inline _.At(s: BillboardState, pos) = { s with Position = pos }
+
+  [<CustomOperation("size")>]
+  member inline _.Size(s: BillboardState, size) = { s with Size = size }
+
+  [<CustomOperation("rotate")>]
+  member inline _.Rotate(s: BillboardState, rot) = { s with Rotation = rot }
+
+  [<CustomOperation("facing")>]
+  member inline _.Facing(s: BillboardState, mode) = { s with Mode = mode }
+
+  [<CustomOperation("color")>]
+  member inline _.Color(s: BillboardState, c) = { s with Color = c }
+
+  [<CustomOperation("uv")>]
+  member inline _.Uv(s: BillboardState, u) = { s with Uv = u }
 
   /// <summary>
-  /// Sets the viewport for subsequent draw calls.
-  /// Useful for split-screen or minimaps.
+  /// Sets a parent transform matrix.
   /// </summary>
-  [<CustomOperation("withViewport")>]
-  member inline this.WithViewport(state, viewport: Viewport) =
-    this.buffer.Add((), SetViewport viewport)
-    state
+  [<CustomOperation("relativeTo")>]
+  member inline _.RelativeTo(s: BillboardState, parent: Matrix) = {
+    s with
+        Parent = ValueSome parent
+  }
 
-  // === Clear ===
+  member inline _.Run(s: BillboardState) : Billboard3D =
+    match s.Parent with
+    | ValueSome p -> {
+        Position = Vector3.Transform(s.Position, p)
+        Size = s.Size
+        Rotation = s.Rotation
+        Color = s.Color
+        Uv = s.Uv
+        Mode = s.Mode
+      }
+    | ValueNone ->
+        {
+          Position = s.Position
+          Size = s.Size
+          Rotation = s.Rotation
+          Color = s.Color
+          Uv = s.Uv
+          Mode = s.Mode
+        }
 
-  /// <summary>
-  /// Clears both Color and Depth buffers.
-  /// </summary>
-  [<CustomOperation("clear")>]
-  member inline this.Clear(state, color: Color) =
-    this.buffer.Add((), ClearTarget(ValueSome color, true))
-    state
+// ============================================================================
+// Sprite3D & Line DSL Helpers
+// ============================================================================
 
-  /// <summary>
-  /// Clears targets with explicit control over Color and Depth.
-  /// </summary>
-  [<CustomOperation("clearTarget")>]
-  member inline this.ClearTarget(state, color: Color, clearDepth: bool) =
-    this.buffer.Add((), ClearTarget(ValueSome color, clearDepth))
-    state
+module SpriteHelpers =
+  /// <summary>Create a quad with sensible defaults (white tint, full UVs).</summary>
+  let inline quad3D (center: Vector3) (right: Vector3) (up: Vector3) : Quad3D = {
+    Center = center
+    Right = right
+    Up = up
+    Color = Color.White
+    Uv = UvRect.full
+  }
 
-  /// <summary>
-  /// Clears only the Depth buffer.
-  /// </summary>
-  [<CustomOperation("clearDepth")>]
-  member inline this.ClearDepth(state) =
-    this.buffer.Add((), ClearTarget(ValueNone, true))
-    state
+  /// <summary>Create a quad on the XZ plane (useful for ground decals).</summary>
+  let inline quadOnXZ (center: Vector3) (size: Vector2) : Quad3D =
+    let right = Vector3(size.X * 0.5f, 0.0f, 0.0f)
+    let up = Vector3(0.0f, 0.0f, size.Y * 0.5f)
+    quad3D center right up
 
-  // === Custom ===
+  /// <summary>Create a quad on the XY plane (useful for in-world UI).</summary>
+  let inline quadOnXY (center: Vector3) (size: Vector2) : Quad3D =
+    let right = Vector3(size.X * 0.5f, 0.0f, 0.0f)
+    let up = Vector3(0.0f, size.Y * 0.5f, 0.0f)
+    quad3D center right up
 
-  /// <summary>
-  /// Submits a custom callback for arbitrary GraphicsDevice operations.
-  /// Note: Breaks batching; use sparingly.
-  /// </summary>
-  [<CustomOperation("custom")>]
-  member inline this.Custom
-    (
-      state,
-      [<InlineIfLambda>] drawFn:
-        GraphicsDevice -> Mibo.Rendering.Graphics3D.Camera -> unit
-    ) =
-    this.buffer.Add((), DrawCustom drawFn)
-    state
+  let inline withQuadColor (color: Color) (q: Quad3D) = { q with Color = color }
+  let inline withQuadUv (uv: UvRect) (q: Quad3D) = { q with Uv = uv }
+
+  /// <summary>Create a billboard with sensible defaults (white tint, full UVs, spherical).</summary>
+  let inline billboard3D (position: Vector3) (size: Vector2) : Billboard3D = {
+    Position = position
+    Size = size
+    Rotation = 0.0f
+    Color = Color.White
+    Uv = UvRect.full
+    Mode = Spherical
+  }
+
+  let inline withBillboardRotation (rotation: float32) (b: Billboard3D) = {
+    b with
+        Rotation = rotation
+  }
+
+  let inline withBillboardColor (color: Color) (b: Billboard3D) = {
+    b with
+        Color = color
+  }
+
+  let inline withBillboardUv (uv: UvRect) (b: Billboard3D) = { b with Uv = uv }
+
+  let inline cylindrical (upAxis: Vector3) (b: Billboard3D) = {
+    b with
+        Mode = Cylindrical upAxis
+  }
 
 /// <summary>
 /// Module for building a 3D frame by submitting commands to a RenderBuffer.
@@ -486,6 +610,143 @@ module RenderBuilder =
     buffer.Add((), DrawCustom drawFn)
     buffer
 
+  // --- Sprite3D / Line Commands ---
+
+  /// <summary>Draw a textured quad using the built-in unlit Sprite3D pipeline.</summary>
+  let inline quad
+    (texture: Texture2D)
+    (quad: Quad3D)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add(
+      (),
+      DrawSpriteQuad {
+        Pass = Opaque
+        Texture = texture
+        Quad = quad
+      }
+    )
+
+    buffer
+
+  /// <summary>Draw a textured quad (transparent) using the built-in unlit Sprite3D pipeline.</summary>
+  let inline quadTransparent
+    (texture: Texture2D)
+    (quad: Quad3D)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add(
+      (),
+      DrawSpriteQuad {
+        Pass = Transparent
+        Texture = texture
+        Quad = quad
+      }
+    )
+
+    buffer
+
+  /// <summary>Draw a camera-facing billboard using the built-in unlit Sprite3D pipeline.</summary>
+  let inline billboard
+    (texture: Texture2D)
+    (billboard: Billboard3D)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add(
+      (),
+      DrawSpriteBillboard {
+        Pass = Transparent
+        Texture = texture
+        Billboard = billboard
+      }
+    )
+
+    buffer
+
+  /// <summary>Draw an opaque billboard using the built-in unlit Sprite3D pipeline.</summary>
+  let inline billboardOpaque
+    (texture: Texture2D)
+    (billboard: Billboard3D)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add(
+      (),
+      DrawSpriteBillboard {
+        Pass = Opaque
+        Texture = texture
+        Billboard = billboard
+      }
+    )
+
+    buffer
+
+  /// <summary>Draw a single line segment using the built-in unlit line pipeline.</summary>
+  let inline line
+    (p1: Vector3)
+    (p2: Vector3)
+    (color: Color)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), DrawLine(p1, p2, color, Opaque))
+    buffer
+
+  /// <summary>Draw multiple line segments using the built-in unlit line pipeline.</summary>
+  let inline lines
+    (verts: VertexPositionColor[])
+    (lineCount: int)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), DrawLines(verts, lineCount, Opaque))
+    buffer
+
+  /// <summary>Draw line segments using a custom effect.</summary>
+  let inline linesEffect
+    (pass: RenderPass)
+    (effect: Effect)
+    (setup: (Effect -> EffectContext -> unit) voption)
+    (verts: VertexPositionColor[])
+    (lineCount: int)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    buffer.Add((), DrawLinesEffect(verts, lineCount, effect, setup, pass))
+    buffer
+
+  /// <summary>Draw multiple billboards using the same texture.</summary>
+  let inline billboards
+    (texture: Texture2D)
+    (billboards: #seq<Billboard3D>)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    for b in billboards do
+      buffer.Add(
+        (),
+        DrawSpriteBillboard {
+          Pass = Transparent
+          Texture = texture
+          Billboard = b
+        }
+      )
+
+    buffer
+
+  /// <summary>Draw multiple textured quads using the same texture.</summary>
+  let inline quads
+    (texture: Texture2D)
+    (quads: #seq<Quad3D>)
+    (buffer: RenderBuffer<unit, RenderCommand>)
+    =
+    for q in quads do
+      buffer.Add(
+        (),
+        DrawSpriteQuad {
+          Pass = Opaque
+          Texture = texture
+          Quad = q
+        }
+      )
+
+    buffer
+
   /// <summary>
   /// Submits a single drawable to the buffer.
   /// </summary>
@@ -500,7 +761,7 @@ module RenderBuilder =
   /// Submits a sequence of drawables to the buffer.
   /// </summary>
   let inline drawMany
-    (drawables: seq<Drawable voption>)
+    (drawables: #seq<Drawable voption>)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
     for drawable in drawables do
@@ -511,7 +772,7 @@ module RenderBuilder =
   /// <summary>
   /// Ends the render command sequence. Currently a no-op used for pipeline readability.
   /// </summary>
-  let inline submit(buffer: RenderBuffer<unit, RenderCommand>) = ()
+  let inline submit(_: RenderBuffer<unit, RenderCommand>) = ()
 
 // ============================================================================
 // Module API
@@ -526,7 +787,13 @@ module View =
   let draw = DrawableBuilder()
 
   /// <summary>
-  /// INTERNAL: CE builder for the RenderBuffer. 
-  /// Preferred usage is via the 'RenderBuilder' module functions.
+  /// Builder for creating individual 'Quad3D' objects.
+  /// Usage: 'quad { at p; onXZ size; ... }'
   /// </summary>
-  let render(buffer: RenderBuffer<unit, RenderCommand>) = RenderBuilder(buffer)
+  let quad = QuadBuilder()
+
+  /// <summary>
+  /// Builder for creating individual 'Billboard3D' objects.
+  /// Usage: 'billboard { at p; size s; ... }'
+  /// </summary>
+  let billboard = BillboardBuilder()

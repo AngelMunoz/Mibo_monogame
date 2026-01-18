@@ -97,6 +97,16 @@ type internal PipelineState = {
   mutable CameraWasSet: bool
   OpaqueDrawables: ResizeArray<struct (float32 * Drawable)>
   TransparentDrawables: ResizeArray<struct (float32 * Drawable)>
+  // Batchers
+  mutable SpriteQuadBatch: SpriteQuadBatch.State
+  mutable BillboardBatch: BillboardBatch.State
+  mutable LineBatch: LineBatch.State
+  // Built-in effects for batching
+  mutable SpriteEffect: BasicEffect
+  mutable LineEffect: BasicEffect
+  // Lists for batched commands
+  OpaqueSpriteCommands: ResizeArray<struct (float32 * RenderCommand)>
+  TransparentSpriteCommands: ResizeArray<struct (float32 * RenderCommand)>
 }
 
 module internal State =
@@ -119,6 +129,13 @@ module internal State =
     CameraWasSet = false
     OpaqueDrawables = ResizeArray<struct (float32 * Drawable)>(256)
     TransparentDrawables = ResizeArray<struct (float32 * Drawable)>(64)
+    SpriteQuadBatch = Unchecked.defaultof<_>
+    BillboardBatch = Unchecked.defaultof<_>
+    LineBatch = Unchecked.defaultof<_>
+    SpriteEffect = Unchecked.defaultof<_>
+    LineEffect = Unchecked.defaultof<_>
+    OpaqueSpriteCommands = ResizeArray<struct (float32 * RenderCommand)>(128)
+    TransparentSpriteCommands = ResizeArray<struct (float32 * RenderCommand)>(64)
   }
 
   let reset(state: PipelineState) =
@@ -130,6 +147,8 @@ module internal State =
     state.CameraWasSet <- false
     state.OpaqueDrawables.Clear()
     state.TransparentDrawables.Clear()
+    state.OpaqueSpriteCommands.Clear()
+    state.TransparentSpriteCommands.Clear()
     state.ShadowViewMatrices.Clear()
     state.ShadowProjectionMatrices.Clear()
     state.MainSceneTarget <- ValueNone
@@ -144,6 +163,20 @@ module internal State =
     state.BasicEffect.PreferPerPixelLighting <- true
     state.BasicEffect.SpecularColor <- Vector3.Zero
     state.BasicEffect.SpecularPower <- 1f
+
+    state.SpriteQuadBatch <- SpriteQuadBatch.create gd
+    state.BillboardBatch <- BillboardBatch.create gd
+    state.LineBatch <- LineBatch.create gd
+
+    state.SpriteEffect <- new BasicEffect(gd)
+    state.SpriteEffect.LightingEnabled <- false
+    state.SpriteEffect.TextureEnabled <- true
+    state.SpriteEffect.VertexColorEnabled <- true
+
+    state.LineEffect <- new BasicEffect(gd)
+    state.LineEffect.LightingEnabled <- false
+    state.LineEffect.TextureEnabled <- false
+    state.LineEffect.VertexColorEnabled <- true
 
     state.CurrentLighting <-
       state.Config.DefaultLighting |> ValueOption.defaultValue Lighting.ambient
@@ -336,6 +369,54 @@ module internal LightPacking =
       tex.SetData(data)
       state.ShadowMatrixTexture <- ValueSome tex
 
+module internal CameraState =
+  type CameraBasis = { Right: Vector3; Up: Vector3 }
+
+  type CameraInfo = {
+    Position: Vector3
+    Basis: CameraBasis
+  }
+
+  let getWorldPosition(view: Matrix) : Vector3 =
+    let inv = Matrix.Invert(view)
+    inv.Translation
+
+  let private calculateBasis(view: Matrix) : CameraBasis =
+    let invView = Matrix.Invert(view)
+
+    {
+      Right = Vector3(invView.M11, invView.M21, invView.M31)
+      Up = Vector3(invView.M12, invView.M22, invView.M32)
+    }
+
+  let createInfo(view: Matrix) : CameraInfo = {
+    Position = getWorldPosition view
+    Basis = calculateBasis view
+  }
+
+  let billboardBasis
+    (mode: BillboardMode)
+    (camInfo: CameraInfo)
+    (position: Vector3)
+    : struct (Vector3 * Vector3) =
+    match mode with
+    | Spherical -> struct (camInfo.Basis.Right, camInfo.Basis.Up)
+    | Cylindrical upAxis ->
+      let viewDir = camInfo.Position - position
+      let mutable right = Vector3.Cross(upAxis, viewDir)
+
+      if right.LengthSquared() < 0.000001f then
+        struct (camInfo.Basis.Right, camInfo.Basis.Up)
+      else
+        right.Normalize()
+        let mutable up = Vector3.Cross(viewDir, right)
+
+        if up.LengthSquared() < 0.000001f then
+          struct (camInfo.Basis.Right, camInfo.Basis.Up)
+        else
+          up.Normalize()
+          struct (right, up)
+
 module internal Culling =
   let isVisible
     (camera: Mibo.Rendering.Graphics3D.Camera)
@@ -365,6 +446,16 @@ module internal Culling =
       else
         state.OpaqueDrawables.Add(struct (distance, drawable))
 
+  let batchSpriteCommand
+    (state: PipelineState)
+    (pass: RenderPass)
+    (distance: float32)
+    (cmd: RenderCommand)
+    =
+    match pass with
+    | Opaque -> state.OpaqueSpriteCommands.Add(struct (distance, cmd))
+    | Transparent -> state.TransparentSpriteCommands.Add(struct (distance, cmd))
+
 module internal Tiling =
   let private projectSphere
     (camera: Mibo.Rendering.Graphics3D.Camera)
@@ -372,30 +463,43 @@ module internal Tiling =
     (center: Vector3)
     (radius: float32)
     =
-    let viewPos = Vector3.Transform(center, camera.View)
+    let frustum = BoundingFrustum(camera.View * camera.Projection)
+    let sphere = BoundingSphere(center, radius)
 
-    let points = [|
-      viewPos + Vector3(-radius, -radius, 0f)
-      viewPos + Vector3(radius, radius, 0f)
-    |]
+    if frustum.Contains(sphere) = ContainmentType.Disjoint then
+      struct (0, 0, -1, -1) // Invalid range
+    else
+      let viewPos = Vector3.Transform(center, camera.View)
 
-    let mutable minX, minY = 1f, 1f
-    let mutable maxX, maxY = -1f, -1f
+      let points = [|
+        viewPos + Vector3(-radius, -radius, 0f)
+        viewPos + Vector3(radius, radius, 0f)
+        viewPos + Vector3(-radius, radius, 0f)
+        viewPos + Vector3(radius, -radius, 0f)
+      |]
 
-    for p in points do
-      let clip = Vector4.Transform(p, camera.Projection)
-      let ndc = Vector2(clip.X / clip.W, clip.Y / clip.W)
-      minX <- min minX ndc.X
-      minY <- min minY ndc.Y
-      maxX <- max maxX ndc.X
-      maxY <- max maxY ndc.Y
+      let mutable minX, minY = 1f, 1f
+      let mutable maxX, maxY = -1f, -1f
 
-    let toScreen x size = (x + 1f) * 0.5f * float32 size
-    let left = toScreen minX viewport.Width |> int |> max 0
-    let right = toScreen maxX viewport.Width |> int |> min viewport.Width
-    let top = toScreen -maxY viewport.Height |> int |> max 0
-    let bottom = toScreen -minY viewport.Height |> int |> min viewport.Height
-    struct (left, top, right, bottom)
+      for p in points do
+        let clip = Vector4.Transform(p, camera.Projection)
+
+        if clip.W > 0.0001f then
+          let ndc = Vector2(clip.X / clip.W, clip.Y / clip.W)
+          minX <- min minX ndc.X
+          minY <- min minY ndc.Y
+          maxX <- max maxX ndc.X
+          maxY <- max maxY ndc.Y
+
+      if maxX < minX || maxY < minY then
+        struct (0, 0, -1, -1)
+      else
+        let toScreen x size = (x + 1f) * 0.5f * float32 size
+        let left = toScreen minX viewport.Width |> int |> max 0
+        let right = toScreen maxX viewport.Width |> int |> min viewport.Width
+        let top = toScreen -maxY viewport.Height |> int |> max 0
+        let bottom = toScreen -minY viewport.Height |> int |> min viewport.Height
+        struct (left, top, right, bottom)
 
   let cullLights(state: PipelineState) =
     let viewport =
@@ -418,22 +522,24 @@ module internal Tiling =
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport pl.Position pl.Range
 
-        for ty = t / tileSize to b / tileSize do
-          if ty >= 0 && ty < tilesY then
-            for tx = l / tileSize to r / tileSize do
-              if tx >= 0 && tx < tilesX then
-                tileMasks.[ty * tilesX + tx] <-
-                  tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
+        if r >= l && b >= t then
+          for ty = t / tileSize to b / tileSize do
+            if ty >= 0 && ty < tilesY then
+              for tx = l / tileSize to r / tileSize do
+                if tx >= 0 && tx < tilesX then
+                  tileMasks.[ty * tilesX + tx] <-
+                    tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
       | Spot sl ->
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport sl.Position sl.Range
 
-        for ty = t / tileSize to b / tileSize do
-          if ty >= 0 && ty < tilesY then
-            for tx = l / tileSize to r / tileSize do
-              if tx >= 0 && tx < tilesX then
-                tileMasks.[ty * tilesX + tx] <-
-                  tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
+        if r >= l && b >= t then
+          for ty = t / tileSize to b / tileSize do
+            if ty >= 0 && ty < tilesY then
+              for tx = l / tileSize to r / tileSize do
+                if tx >= 0 && tx < tilesX then
+                  tileMasks.[ty * tilesX + tx] <-
+                    tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
 
     tileMasks
 
@@ -511,6 +617,12 @@ module internal ShadowPass =
     effect.SafeSetParam("World", drawable.Transform)
     effect.SafeSetParam("View", view)
     effect.SafeSetParam("Projection", projection)
+
+    drawable.Bones
+    |> ValueOption.iter(fun bones ->
+      match effect with
+      | :? SkinnedEffect as se -> se.SetBoneTransforms bones
+      | _ -> effect.SafeSetParam("Bones", bones))
 
     for pass in effect.CurrentTechnique.Passes do
       pass.Apply()
@@ -691,6 +803,12 @@ module internal Drawing =
     effect.SafeSetParam("View", state.CurrentCamera.View)
     effect.SafeSetParam("Projection", state.CurrentCamera.Projection)
 
+    drawable.Bones
+    |> ValueOption.iter(fun bones ->
+      match effect with
+      | :? SkinnedEffect as se -> se.SetBoneTransforms bones
+      | _ -> effect.SafeSetParam("Bones", bones))
+
     if not(drawable.Material.Flags.HasFlag(MaterialFlags.Unlit)) then
       match state.Config.LightingBinder with
       | ValueSome binder ->
@@ -806,6 +924,12 @@ module internal Drawing =
       effect.SafeSetParam("View", state.CurrentCamera.View)
       effect.SafeSetParam("Projection", state.CurrentCamera.Projection)
 
+    drawable.Bones
+    |> ValueOption.iter(fun bones ->
+      match effect with
+      | :? SkinnedEffect as se -> se.SetBoneTransforms bones
+      | _ -> effect.SafeSetParam("Bones", bones))
+
     match effect with
     | :? BasicEffect as be ->
       if not(drawable.Material.Flags.HasFlag(MaterialFlags.Unlit)) then
@@ -838,9 +962,208 @@ module internal Drawing =
         mesh.IndexCount / 3
       )
 
+  let drawSpritesInList
+    (state: PipelineState)
+    (pass: RenderPass)
+    (items: ResizeArray<struct (float32 * RenderCommand)>)
+    =
+    let camInfo = CameraState.createInfo state.CurrentCamera.View
+    let mutable currentSpriteQuadTexture: Texture2D = null
+    let mutable currentSpriteBillboardTexture: Texture2D = null
+
+    // Reset batches
+    SpriteQuadBatch.begin' state.SpriteQuadBatch
+    BillboardBatch.begin' state.BillboardBatch
+
+    let applySpriteStates(pass: RenderPass) =
+      match pass with
+      | Opaque ->
+        state.Device.BlendState <- BlendState.Opaque
+        state.Device.DepthStencilState <- DepthStencilState.Default
+      | Transparent ->
+        state.Device.BlendState <- BlendState.AlphaBlend
+        state.Device.DepthStencilState <- DepthStencilState.DepthRead
+
+      state.Device.RasterizerState <- RasterizerState.CullNone
+      state.Device.SamplerStates.[0] <- SamplerState.LinearClamp
+
+    let flushPendingQuads() =
+      if
+        state.SpriteQuadBatch.QuadCount > 0
+        && not(isNull currentSpriteQuadTexture)
+      then
+        applySpriteStates pass
+        state.SpriteEffect.View <- state.CurrentCamera.View
+        state.SpriteEffect.Projection <- state.CurrentCamera.Projection
+        SpriteQuadBatch.end' state.SpriteEffect state.SpriteQuadBatch
+        SpriteQuadBatch.begin' state.SpriteQuadBatch
+
+    let flushPendingBillboards() =
+      if state.BillboardBatch.SpriteCount > 0 then
+        applySpriteStates pass
+        state.SpriteEffect.View <- state.CurrentCamera.View
+        state.SpriteEffect.Projection <- state.CurrentCamera.Projection
+        BillboardBatch.end' state.SpriteEffect state.BillboardBatch
+        BillboardBatch.begin' state.BillboardBatch
+
+    for i = 0 to items.Count - 1 do
+      let struct (_, cmd) = items[i]
+
+      match cmd with
+      | DrawSpriteQuad s ->
+        flushPendingBillboards()
+
+        if s.Texture <> currentSpriteQuadTexture then
+          flushPendingQuads()
+          currentSpriteQuadTexture <- s.Texture
+          state.SpriteEffect.Texture <- s.Texture
+
+        let q = s.Quad
+
+        SpriteQuadBatch.draw
+          q.Center
+          q.Right
+          q.Up
+          q.Color
+          q.Uv
+          state.SpriteQuadBatch
+
+      | DrawSpriteBillboard s ->
+        flushPendingQuads()
+
+        if s.Texture <> currentSpriteBillboardTexture then
+          flushPendingBillboards()
+          currentSpriteBillboardTexture <- s.Texture
+          state.SpriteEffect.Texture <- s.Texture
+
+        let b = s.Billboard
+
+        let struct (right, up) =
+          CameraState.billboardBasis b.Mode camInfo b.Position
+
+        BillboardBatch.drawUv
+          b.Position
+          b.Size
+          b.Rotation
+          b.Color
+          b.Uv
+          right
+          up
+          state.BillboardBatch
+
+      | DrawQuadEffect e ->
+        flushPendingBillboards()
+        flushPendingQuads()
+
+        let effect = e.Effect
+
+        e.Setup
+        |> ValueOption.iter(fun setup ->
+          setup effect {
+            World = Matrix.Identity
+            View = state.CurrentCamera.View
+            Projection = state.CurrentCamera.Projection
+          })
+
+        applySpriteStates pass
+        SpriteQuadBatch.begin' state.SpriteQuadBatch
+        let q = e.Quad
+
+        SpriteQuadBatch.draw
+          q.Center
+          q.Right
+          q.Up
+          q.Color
+          q.Uv
+          state.SpriteQuadBatch
+
+        SpriteQuadBatch.end' effect state.SpriteQuadBatch
+
+      | DrawBillboardEffect e ->
+        flushPendingQuads()
+        flushPendingBillboards()
+
+        let effect = e.Effect
+
+        e.Setup
+        |> ValueOption.iter(fun setup ->
+          setup effect {
+            World = Matrix.Identity
+            View = state.CurrentCamera.View
+            Projection = state.CurrentCamera.Projection
+          })
+
+        applySpriteStates pass
+        BillboardBatch.begin' state.BillboardBatch
+        let b = e.Billboard
+
+        let struct (right, up) =
+          CameraState.billboardBasis b.Mode camInfo b.Position
+
+        BillboardBatch.drawUv
+          b.Position
+          b.Size
+          b.Rotation
+          b.Color
+          b.Uv
+          right
+          up
+          state.BillboardBatch
+
+        BillboardBatch.end' effect state.BillboardBatch
+
+      | DrawLine(p1, p2, color, _) ->
+        flushPendingQuads()
+        flushPendingBillboards()
+
+        applySpriteStates pass
+        state.LineEffect.View <- state.CurrentCamera.View
+        state.LineEffect.Projection <- state.CurrentCamera.Projection
+
+        LineBatch.begin' state.LineBatch
+        LineBatch.addLine p1 p2 color state.LineBatch
+        LineBatch.end' state.LineEffect state.LineBatch
+
+      | DrawLines(verts, lineCount, _) ->
+        flushPendingQuads()
+        flushPendingBillboards()
+
+        applySpriteStates pass
+        state.LineEffect.View <- state.CurrentCamera.View
+        state.LineEffect.Projection <- state.CurrentCamera.Projection
+
+        LineBatch.begin' state.LineBatch
+        LineBatch.addLines verts lineCount state.LineBatch
+        LineBatch.end' state.LineEffect state.LineBatch
+
+      | DrawLinesEffect(verts, lineCount, effect, setupOpt, _) ->
+        flushPendingQuads()
+        flushPendingBillboards()
+
+        setupOpt
+        |> ValueOption.iter(fun setup ->
+          setup effect {
+            World = Matrix.Identity
+            View = state.CurrentCamera.View
+            Projection = state.CurrentCamera.Projection
+          })
+
+        applySpriteStates pass
+        LineBatch.begin' state.LineBatch
+        LineBatch.addLines verts lineCount state.LineBatch
+        LineBatch.end' effect state.LineBatch
+
+      | _ -> ()
+
+    flushPendingQuads()
+    flushPendingBillboards()
+
   let flush(state: PipelineState) =
     if
-      state.OpaqueDrawables.Count = 0 && state.TransparentDrawables.Count = 0
+      state.OpaqueDrawables.Count = 0 
+      && state.TransparentDrawables.Count = 0
+      && state.OpaqueSpriteCommands.Count = 0
+      && state.TransparentSpriteCommands.Count = 0
     then
       ()
     else
@@ -871,7 +1194,9 @@ module internal Drawing =
         let struct (_, drawable) = state.OpaqueDrawables.[i]
         draw drawable
 
-      if state.TransparentDrawables.Count > 0 then
+      drawSpritesInList state Opaque state.OpaqueSpriteCommands
+
+      if state.TransparentDrawables.Count > 0 || state.TransparentSpriteCommands.Count > 0 then
         state.Device.BlendState <- BlendState.AlphaBlend
         state.Device.DepthStencilState <- DepthStencilState.DepthRead
 
@@ -879,11 +1204,15 @@ module internal Drawing =
           let struct (_, drawable) = state.TransparentDrawables.[i]
           draw drawable
 
+        drawSpritesInList state Transparent state.TransparentSpriteCommands
+
         state.Device.BlendState <- BlendState.Opaque
         state.Device.DepthStencilState <- DepthStencilState.Default
 
       state.OpaqueDrawables.Clear()
       state.TransparentDrawables.Clear()
+      state.OpaqueSpriteCommands.Clear()
+      state.TransparentSpriteCommands.Clear()
 
 module internal PostProcess =
   let render
@@ -1023,6 +1352,24 @@ module internal Orchestrate =
       let color = colorOpt |> ValueOption.defaultValue Color.Black in
       state.Device.Clear(flags, color, 1f, 0)
     | Draw drawable -> Culling.batchDrawable state drawable
+    | DrawSpriteQuad s ->
+      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, s.Quad.Center)
+      Culling.batchSpriteCommand state s.Pass distSq cmd
+    | DrawSpriteBillboard s ->
+      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, s.Billboard.Position)
+      Culling.batchSpriteCommand state s.Pass distSq cmd
+    | DrawQuadEffect e ->
+      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, e.Quad.Center)
+      Culling.batchSpriteCommand state e.Pass distSq cmd
+    | DrawBillboardEffect e ->
+      let distSq = Vector3.DistanceSquared(state.CurrentCamera.Position, e.Billboard.Position)
+      Culling.batchSpriteCommand state e.Pass distSq cmd
+    | DrawLine(_, _, _, pass) ->
+      Culling.batchSpriteCommand state pass 0f cmd
+    | DrawLines(_, _, pass) ->
+      Culling.batchSpriteCommand state pass 0f cmd
+    | DrawLinesEffect(_, _, _, _, pass) ->
+      Culling.batchSpriteCommand state pass 0f cmd
     | DrawCustom drawFn ->
       Drawing.flush state
       drawFn state.Device state.CurrentCamera
@@ -1076,7 +1423,8 @@ module internal Orchestrate =
         sprite.End()
     | _ -> ()
 
-    state.RtPool.ReleaseAll()
+    if not(isNull(box state.RtPool)) then
+      state.RtPool.ReleaseAll()
 
 module RenderPipeline =
   /// <summary>

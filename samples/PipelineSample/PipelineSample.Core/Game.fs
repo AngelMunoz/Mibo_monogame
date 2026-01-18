@@ -272,6 +272,40 @@ module Game =
         state.Assets.PlatformGrid
         state.Assets.PlatformGridLineCount
     )
+    // 1. Target Circle (Relative Quad)
+    |> RenderBuilder.quadTransparent
+      state.Assets.PlatformTexture
+      (quad {
+        onXZ(Vector2(2.0f, 2.0f))
+        relativeTo(Matrix.CreateTranslation(state.PlayerPosition))
+        at(Vector3(0f, -0.48f, 0f))
+        color(Color.White * 0.3f)
+      })
+    |> RenderBuilder.billboards
+      state.Assets.PlatformTexture
+      ([|
+        let sparkCount = 8
+
+        for i in 0 .. sparkCount - 1 do
+          let angle =
+            float32 i / float32 sparkCount * MathHelper.TwoPi
+            + state.Time * 2.0f
+
+          let offset =
+            Vector3(cos angle, sin(state.Time * 5.0f + float32 i), sin angle)
+            * 1.5f
+
+          billboard {
+            at(state.PlayerPosition + offset)
+            size(Vector2(0.2f, 0.2f))
+            color Color.Yellow
+          }
+      |])
+    // 2. Velocity vector (Line)
+    |> RenderBuilder.line
+      state.PlayerPosition
+      (state.PlayerPosition + state.Velocity * 0.5f)
+      Color.Green
     |> RenderBuilder.submit
 
 

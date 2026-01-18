@@ -4,15 +4,16 @@
 
 ### Added
 
-- Rendering: **High-Performance 3D Forward Renderer**. Features CPU-based Tiled Forward culling for efficient management of many lights.
-- Rendering: **PBR Material System**. Full support for Physically Based Rendering including Albedo, Normal, Metallic, Roughness, Ambient Occlusion, and Emissive maps.
-- Rendering: **Declarative DSL**. Introduced `draw { ... }` computation expression for type-safe, composable creation of 3D drawables (Meshes, Materials, Transforms).
-- Rendering: **RenderBuilder API**. Fluent interface for submitting rendering commands (`.camera`, `.lighting`, `.draw`, `.clear`) to the `RenderBuffer`.
-- Lighting: Unified **Lighting System** supporting Directional (Sun), Point, and Spot lights with configurable intensity, range, and color.
-- Shadows: **Shadow Atlas System**. efficiently packs multiple shadow maps into a single texture. Supports Cascaded Shadow Maps (CSM) for sunlight and localized shadows for point/spot lights.
-- Shadows: **Soft Shadows**. Configurable PCF (Percentage Closer Filtering) and penumbra size settings for realistic shadow falloff.
-- Pipeline: **Post-Processing Stack**. Built-in configuration for Bloom, SSAO (Screen Space Ambient Occlusion), and high-quality Tone Mapping (ACES, Filmic, Reinhard).
-- Pipeline: **Advanced Configuration**. Granular control over the pipeline via `PipelineConfig`, including `TileSize` tuning, Shader overrides, and `PreRenderCallback` hooks.
+- Rendering: **Modern Render Pipeline** (Authored in `Mibo.Rendering.Graphics3D`). A high-performance, data-oriented alternative to the legacy 3D system.
+- Rendering: **HDR Rendering Path**. Pipeline now utilizes `Vector4` (128-bit) targets to preserve high-intensity light for bloom and tone mapping.
+- Rendering: **Advanced Post-Processing**. Integrated Bloom (with multi-tap blur) and ACES Tone Mapping.
+- Rendering: **Parity with Legacy System**. Ported optimized batchers for Quads, Billboards, and 3D Lines into the modern pipeline.
+- Rendering: **Skinned Animation**. Full support for Bone matrices in both the PBR forward shader and shadow casting pass.
+- Rendering: **Unlit Routing**. Automatic material-based routing to high-performance unlit or emissive shaders.
+- Rendering: **Flexible Line Rendering**. Added `DrawLinesEffect` for batching 3D lines using custom shaders.
+- DSL: Enhanced `draw { ... }` with `withBones` and `withEmissive` operations.
+- DSL: Enhanced `render { ... }` with `quad`, `billboard`, `line`, and `linesEffect` operations.
+- Assets: Extended `PBR.fx` standard shader with full support for Emissive, Metallic/Roughness, and AO maps.
 
 
 ## [1.2.0] - 2026-01-10

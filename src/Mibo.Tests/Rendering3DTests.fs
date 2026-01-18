@@ -55,6 +55,8 @@ module TestHelpers =
       Material = materialWithFlags flags
       BoundingSphere = mockMesh.BoundingSphere.Transform(transform)
       EffectOverride = ValueNone
+      Pass = if flags.HasFlag(MaterialFlags.Transparent) then Transparent else Opaque
+      Bones = ValueNone
     }
 
   /// Create a camera at a position looking at origin
@@ -228,10 +230,10 @@ let dslTests =
       let buffer = RenderBuffer<unit, RenderCommand>()
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
 
-      render buffer {
-        withCamera cam
-        clear Color.CornflowerBlue
-      }
+      buffer
+      |> RenderBuilder.camera cam
+      |> RenderBuilder.clear Color.CornflowerBlue
+      |> ignore
 
       Expect.equal buffer.Count 2 "Should have 2 commands"
       let struct (_, cmd0) = buffer.[0]
@@ -258,12 +260,13 @@ let dslTests =
       let lighting = Lighting.ambient
       let drawable = TestHelpers.drawableAt Vector3.Zero false
 
-      render buffer {
-        withCamera cam
-        withLighting lighting
-        clear Color.Black
-        clearDepth
-      }
+      buffer
+      |> RenderBuilder.camera cam
+      |> RenderBuilder.lighting lighting
+      |> RenderBuilder.clear Color.Black
+      |> RenderBuilder.clearDepth
+      |> ignore
+
       // Add draw manually since draw { } CE syntax is tricky to test
       buffer.Add((), Draw drawable)
 
@@ -429,12 +432,12 @@ let dslTests =
       let buffer = RenderBuffer<unit, RenderCommand>()
       let testMesh = TestHelpers.mockMesh
 
-      render buffer {
-        draw {
+      buffer
+      |> RenderBuilder.draw (draw {
           mesh testMesh
           at(Vector3(25f, 0f, 0f))
-        }
-      }
+        })
+      |> ignore
 
       Expect.equal buffer.Count 1 "Should have 1 command in buffer"
       let struct (_, cmd) = buffer.[0]
@@ -626,10 +629,8 @@ let pipelineOrchestrationTests =
     testCase "TiledForward renderer doesn't crash on empty buffer"
     <| fun _ ->
       let buffer = RenderBuffer<unit, RenderCommand>()
-
       let state = State.create PipelineConfig.defaults
-
-      Orchestrate.render state buffer
+      Orchestrate.render state buffer (GameTime())
 
     testCase "TiledForward.cullLights excludes lights outside frustum"
     <| fun _ ->
@@ -650,6 +651,7 @@ let pipelineOrchestrationTests =
           Shadow = ValueNone
           CascadeCount = 0
           CascadeSplits = [||]
+          SourceRadius = 0f
         }
 
       // 2. Point light at origin (inside)
@@ -660,6 +662,7 @@ let pipelineOrchestrationTests =
           Intensity = 1f
           Range = 5f
           Shadow = ValueNone
+          SourceRadius = 0f
         }
 
       // 3. Point light far away (outside)
@@ -670,6 +673,7 @@ let pipelineOrchestrationTests =
           Intensity = 1f
           Range = 5f
           Shadow = ValueNone
+          SourceRadius = 0f
         }
 
       state.CurrentLighting <- {
@@ -693,8 +697,7 @@ let pipelineOrchestrationTests =
 
     testCase "TiledForward.cullLights assigns point light to correct tiles"
     <| fun _ ->
-      let config = PipelineConfig.defaults
-
+      let config = { PipelineConfig.defaults with TileSize = 16 }
       let state = State.create config
 
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
@@ -707,6 +710,7 @@ let pipelineOrchestrationTests =
           Intensity = 1f
           Range = 1f
           Shadow = ValueNone
+          SourceRadius = 0f
         }
 
       state.CurrentLighting <- {
