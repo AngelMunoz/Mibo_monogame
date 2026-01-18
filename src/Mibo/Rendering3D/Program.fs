@@ -22,10 +22,10 @@ type internal PipelineRenderer<'Model>
   let buffer = RenderBuffer<unit, RenderCommand>()
 
   interface IRenderer<'Model> with
-    member _.Draw(ctx: GameContext, model: 'Model, _gameTime: GameTime) =
+    member _.Draw(ctx: GameContext, model: 'Model, gameTime: GameTime) =
       buffer.Clear()
       view ctx model buffer
-      pipeline.Render(ctx, buffer)
+      pipeline.Render(ctx, buffer, gameTime)
 
 module PipelineRenderer =
   /// <summary>

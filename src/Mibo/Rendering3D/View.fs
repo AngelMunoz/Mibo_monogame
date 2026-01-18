@@ -289,6 +289,19 @@ type DrawableBuilder() =
         EffectOverride = ValueSome effect
   }
 
+  /// <summary>
+  /// Sets the Emissive color and intensity.
+  /// Useful for glowing objects (used by Bloom).
+  /// </summary>
+  [<CustomOperation("withEmissive")>]
+  member inline _.WithEmissive(state: DrawState, color: Color, intensity: float32) = {
+    state with
+        Material = state.Material |> Material.withEmissive color intensity
+  }
+
+  // === Effect Override (Escape Hatch) ===
+
+
 // ============================================================================
 // RenderBuilder - Scene-level API
 // ============================================================================

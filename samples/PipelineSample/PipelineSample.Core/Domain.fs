@@ -51,6 +51,7 @@ type State = {
   Assets: GameAssets
   Platforms: PlatformData list
   Time: float32
+  EmissivePulse: float32
 }
 
 // ─────────────────────────────────────────────────────────────

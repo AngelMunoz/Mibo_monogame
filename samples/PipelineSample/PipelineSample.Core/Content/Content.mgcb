@@ -481,3 +481,21 @@
 /processorParam:DebugMode=Auto
 /build:Effects/PBR.fx
 
+#begin Effects/Unlit.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/Unlit.fx
+
+#begin Effects/BloomExtract.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/BloomExtract.fx
+
+#begin Effects/PostProcess.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/PostProcess.fx
+

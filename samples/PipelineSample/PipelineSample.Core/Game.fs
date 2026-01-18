@@ -105,6 +105,7 @@ module Game =
       Assets = assets
       Platforms = platforms
       Time = 0f
+      EmissivePulse = 10.0f
     },
     Cmd.none
 
@@ -118,9 +119,13 @@ module Game =
 
     | Tick gt ->
       let dt = float32 gt.ElapsedGameTime.TotalSeconds
+      let newTime = state.Time + dt
+      
+      // Pulse between 2.0 and 5.0 to show color without blowing out to white
+      let pulse = 3.5f + 1.5f * float32(System.Math.Sin(float newTime * 3.0))
 
       // Composable system pipeline using Mibo.Elmish.System
-      System.start { state with Time = state.Time + dt }
+      System.start { state with Time = newTime; EmissivePulse = pulse }
       |> System.pipe(Movement.update dt)
       |> System.pipe(Physics.update dt)
       |> System.pipe(Rotation.update dt)
@@ -253,6 +258,9 @@ module Game =
         mesh state.Assets.PlayerMesh
         at state.PlayerPosition
         rotatedBy state.Rotation
+        withFlags MaterialFlags.Unlit
+        withAlbedo Color.Magenta
+        withEmissive Color.Magenta state.EmissivePulse
       }
     )
     |> RenderBuilder.custom(
@@ -305,8 +313,20 @@ module Game =
          |> ShadowConfig.withBias 0.0015f 0.005f
          |> ShadowConfig.withSoftShadows 1.0f
        )
+       |> PipelineConfig.withPostProcess(
+         PostProcessConfig.defaults
+         |> PostProcessConfig.withBloom {
+           Threshold = 0.9f
+           Intensity = 1.5f
+           Scatter = 0.7f
+         }
+         |> PostProcessConfig.withToneMapping ACES
+       )
        |> PipelineConfig.withShader
          ShaderBase.ShadowCaster
          "Effects/ShadowCaster"
-       |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR")
+       |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
+       |> PipelineConfig.withShader ShaderBase.Unlit "Effects/Unlit"
+       |> PipelineConfig.withShader ShaderBase.Bloom "Effects/BloomExtract"
+       |> PipelineConfig.withShader ShaderBase.PostProcess "Effects/PostProcess")
       view
