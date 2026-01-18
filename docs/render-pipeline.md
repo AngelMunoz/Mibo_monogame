@@ -57,6 +57,36 @@ draw {
 
 **Result:** Returns a `Drawable voption` which can be submitted to the render buffer. The `voption` allows the builder to fail gracefully (e.g., no mesh set), and `RenderBuilder.draw` automatically handles `ValueNone` by skipping it.
 
+#### Advanced Transform Operations
+
+For complex scene hierarchies, use parent-relative transforms:
+
+```fsharp
+// Create a parent transform
+let parentTransform = Matrix.CreateTranslation(10f, 0f, 0f) * Matrix.CreateRotationY(MathHelper.PiOver4)
+
+draw {
+    mesh childObject
+    relativeTo parentTransform    // Position is relative to parent
+    at 2f 0f 0f                 // Local offset from parent position
+    rotatedByYawPitchRoll 0f 0f MathHelper.PiOver2
+}
+```
+
+Or set the complete transform directly:
+
+```fsharp
+let complexTransform =
+    Matrix.CreateScale(2f) *
+    Matrix.CreateRotationX(rotation) *
+    Matrix.CreateTranslation(position)
+
+draw {
+    mesh object
+    withTransform complexTransform  // Completely overrides position/rotation/scale
+}
+```
+
 ### Level 2: Materials & Textures
 
 Mibo uses a PBR (Physically Based Rendering) material model by default. You can configure materials inline within the `draw` builder.
@@ -96,6 +126,36 @@ draw {
     at 5f 0f 0f
 }
 ```
+
+#### Advanced Material Flags
+
+Materials support additional rendering behaviors through flags:
+
+```fsharp
+withFlags (
+    MaterialFlags.CastsShadow |||      // Casts shadows onto other objects
+    MaterialFlags.ReceivesShadow |||   // Receives shadows from other objects
+    MaterialFlags.Transparent |||      // Uses alpha blending
+    MaterialFlags.DoubleSided |||      // Renders both front and back faces
+    MaterialFlags.Unlit |||            // Ignores lighting calculations
+    MaterialFlags.AlphaTest            // Uses alpha threshold for cutout effects
+)
+```
+
+##### Alpha Testing
+
+For materials with cutout patterns (like leaves, chain link fences), use alpha testing:
+
+```fsharp
+draw {
+    mesh foliageMesh
+    withAlbedoMap leafTexture
+    withFlags MaterialFlags.AlphaTest
+    // Alpha values below the threshold will be discarded
+}
+```
+
+The alpha threshold is configurable per material and defaults to 0.5f.
 
 ### Level 3: Scene Organization
 
@@ -302,11 +362,13 @@ Program.mkProgram init update
 ```
 
 **Shadow Requirements Summary:**
-| Component | Requirement |
-|-----------|-------------|
-| Light | `Shadow = ValueSome ShadowSettings.defaults` |
-| Material | `CastsShadow` flag (default for opaque) |
-| Pipeline | `PipelineConfig.withShadows` configured |
+
+<table>
+<tr><th>Component</th><th>Requirement</th></tr>
+<tr><td>Light</td><td><code>Shadow = ValueSome ShadowSettings.defaults</code></td></tr>
+<tr><td>Material</td><td><code>CastsShadow</code> flag (default for opaque)</td></tr>
+<tr><td>Pipeline</td><td><code>PipelineConfig.withShadows</code> configured</td></tr>
+</table>
 
 #### Required Shaders for Shadows
 
@@ -406,6 +468,23 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 }
 ```
 
+#### Custom Shader Overrides
+
+You can provide custom implementations for specific pipeline stages:
+
+```fsharp
+Program.withPipeline (
+    PipelineConfig.defaults
+    |> PipelineConfig.withShader ShaderBase.PBRForward "CustomPBR"
+    |> PipelineConfig.withShader ShaderBase.ShadowCaster "CustomShadowCaster"
+    |> PipelineConfig.withShader ShaderBase.Bloom "CustomBloom"
+    |> PipelineConfig.withShader ShaderBase.PostProcess "CustomPostProcess"
+    |> PipelineConfig.withShader ShaderBase.Unlit "CustomUnlit"
+)
+```
+
+Each shader type expects specific parameters to be bound by the pipeline. See the "Shader Contract" section for details.
+
 ---
 
 ## Part 2: Architecture & Configuration
@@ -432,56 +511,40 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 
 ### Complexity Ladder Overview
 
-```
-┌─────────────────────────────────────────────┐
-│ Level 1: Basic Rendering                    │
-│   • Mesh on screen                          │
-│   • Transforms (position, rotation, scale)  │
-│   • Clear color buffer                      │
-└─────────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────┐
-│ Level 2: Materials & Textures               │
-│   • PBR material system                     │
-│   • Albedo, Normal, Metallic, Roughness maps│
-│   • Material reuse                          │
-└─────────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────┐
-│ Level 3: Scene Organization                 │
-│   • RenderBuilder fluent DSL                │
-│   • Batch rendering (drawMany)              │
-│   • Command sequencing                      │
-└─────────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────┐
-│ Level 4: Lighting                           │
-│   • Directional, Point, Spot lights         │
-│   • Ambient lighting                        │
-│   • Multiple lights per scene               │
-└─────────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────┐
-│ Level 5: Shadows                            │
-│   • Shadow atlas                            │
-│   • Cascaded directional shadows            │
-│   • Shadow caster shaders                   │
-└─────────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────┐
-│ Level 6: Custom Effects                     │
-│   • Custom shader overrides                 │
-│   • Raw GraphicsDevice access               │
-│   • Custom light-receiving shaders          │
-└─────────────────────────────────────────────┘
-                         ▼
-┌─────────────────────────────────────────────┐
-│ Level 7: Advanced Customization             │
-│   • PreRender callbacks                     │
-│   • Custom Lighting Binders                 │
-│   • Performance tuning (TileSize)           │
-└─────────────────────────────────────────────┘
-```
+* Level 1: Basic Rendering
+  * Mesh on screen
+  * Transforms (position, rotation, scale)
+  * Clear color buffer
+
+* Level 2: Materials & Textures
+  * PBR material system
+  * Albedo, Normal, Metallic, Roughness maps
+  * Material reuse
+
+* Level 3: Scene Organization
+  * RenderBuilder fluent DSL
+  * Batch rendering (drawMany)
+  * Command sequencing
+
+* Level 4: Lighting
+  * Directional, Point, Spot lights
+  * Ambient lighting
+  * Multiple lights per scene
+
+* Level 5: Shadows
+  * Shadow atlas
+  * Cascaded directional shadows
+  * Shadow caster shaders
+
+* Level 6: Custom Effects
+  * Custom shader overrides
+  * Raw GraphicsDevice access
+  * Custom light-receiving shaders
+
+* Level 7: Advanced Customization
+  * PreRender callbacks
+  * Custom Lighting Binders
+  * Performance tuning (TileSize)
 
 ### Level 7: Advanced Customization
 
@@ -521,25 +584,31 @@ Program.withPipeline (
 
 ### Command Flow
 
-```
-┌──────────────┐      ┌─────────────┐      ┌──────────────┐      ┌──────────────┐
-│   draw { }   │      │RenderBuilder│      │RenderBuffer  │      │  Pipeline    │
-│  (Create     │─────▶│   (Submit   │─────▶│  (Command    │─────▶│  (Execute    │
-│  Drawable)   │      │  Commands)  │      │   Queue)     │      │  Commands)   │
-└──────────────┘      └─────────────┘      └──────────────┘      └──────────────┘
-       │                                         │                   │
-       │ Returns                                 │ Stores            │ Processes
-       │ Drawable voption                        │ RenderCommand[]   │ - Culling
-       │                                         │                   │ - Shadow pass
-       └──▶ Skip if ValueNone ───────────────────┘                   │ - Batching
-                                                                     │ - Sort opaque/transparent
-                                                                     │ - Main pass
-                                                                     │ - Post-process
-                                                                     ▼
-                                                              ┌──────────────┐
-                                                              │   Screen     │
-                                                              └──────────────┘
-```
+* `draw { }` (Create Drawable)
+  * Returns Drawable voption
+  * Skip if ValueNone
+
+* RenderBuilder (Submit Commands)
+  * Stores RenderCommand[]
+
+* RenderBuffer (Command Queue)
+
+* Pipeline (Execute Commands)
+  * Processes:
+    * Culling
+    * Shadow pass
+    * Batching
+    * Sort opaque/transparent
+    * Main pass
+    * Post-process
+
+* Screen
+
+### Render Target Management
+
+The pipeline uses an internal render target pool to efficiently manage temporary render targets. When post-processing or shadows are enabled, the scene is first rendered to an intermediate target before final presentation.
+
+This system automatically recycles render targets to minimize allocation overhead. The pool is cleared at the end of each frame.
 
 ### Single-Pass Forward Rendering
 
@@ -587,11 +656,12 @@ Program.withPipeline
 
 #### Capacity Planning
 
-| Light Type  | Slots Consumed                       |
-| ----------- | ------------------------------------ |
-| Directional | `CascadeCount` slots (typically 3-4) |
-| Spot        | 1 slot                               |
-| Point       | 6 slots (CubeMap unrolled)           |
+<table>
+<tr><th>Light Type</th><th>Slots Consumed</th></tr>
+<tr><td>Directional</td><td><code>CascadeCount</code> slots (typically 3-4)</td></tr>
+<tr><td>Spot</td><td>1 slot</td></tr>
+<tr><td>Point</td><td>6 slots (CubeMap unrolled)</td></tr>
+</table>
 
 #### VRAM Usage
 
@@ -609,18 +679,19 @@ If you implement a custom `ShaderBase.PBRForward` override, Mibo provides lighti
 
 A `4 x LightCount` texture containing all light parameters. Each light is one **Row** (4 pixels).
 
-| Pixel (X) | Component | Description                                                     |
-| :-------- | :-------- | :-------------------------------------------------------------- |
-| **0**     | `.x`      | **Light Type**: 0.0 (Directional), 1.0 (Point), 2.0 (Spot)      |
-|           | `.y`      | **Intensity**                                                   |
-|           | `.z`      | **Range** (0.0 for Directional Lights)                          |
-|           | `.w`      | **Shadow Index**: Base index in atlas (-1.0 if no shadow)       |
-| **1**     | `.xyz`    | **Position** (World Space)                                      |
-|           | `.w`      | **Spot Outer Angle**: `cos(OuterConeAngle)`                     |
-| **2**     | `.xyz`    | **Direction** (Normalized)                                      |
-|           | `.w`      | **Spot Inner Angle**: `cos(InnerConeAngle)`                     |
-| **3**     | `.xyz`    | **Color** (RGB)                                                 |
-|           | `.w`      | **SourceRadius**: Physical size of light source (used for PCSS) |
+<table>
+<tr><th>Pixel (X)</th><th>Component</th><th>Description</th></tr>
+<tr><td><strong>0</strong></td><td><code>.x</code></td><td><strong>Light Type</strong>: 0.0 (Directional), 1.0 (Point), 2.0 (Spot)</td></tr>
+<tr><td></td><td><code>.y</code></td><td><strong>Intensity</strong></td></tr>
+<tr><td></td><td><code>.z</code></td><td><strong>Range</strong> (0.0 for Directional Lights)</td></tr>
+<tr><td></td><td><code>.w</code></td><td><strong>Shadow Index</strong>: Base index in atlas (-1.0 if no shadow)</td></tr>
+<tr><td><strong>1</strong></td><td><code>.xyz</code></td><td><strong>Position</strong> (World Space)</td></tr>
+<tr><td></td><td><code>.w</code></td><td><strong>Spot Outer Angle</strong>: <code>cos(OuterConeAngle)</code></td></tr>
+<tr><td><strong>2</strong></td><td><code>.xyz</code></td><td><strong>Direction</strong> (Normalized)</td></tr>
+<tr><td></td><td><code>.w</code></td><td><strong>Spot Inner Angle</strong>: <code>cos(InnerConeAngle)</code></td></tr>
+<tr><td><strong>3</strong></td><td><code>.xyz</code></td><td><strong>Color</strong> (RGB)</td></tr>
+<tr><td></td><td><code>.w</code></td><td><strong>SourceRadius</strong>: Physical size of light source (used for PCSS)</td></tr>
+</table>
 
 #### 2. `ShadowMatrixTexture` (Sampler: `ShadowMatrixSampler`)
 

@@ -34,7 +34,17 @@ type Camera = {
 }
 
 module Camera =
-  /// Create a perspective camera
+  /// <summary>
+  /// Create a perspective camera.
+  /// Standard camera type for 3D games with perspective distortion (objects appear smaller with distance).
+  /// </summary>
+  /// <param name="position">Camera position in world space.</param>
+  /// <param name="target">Point the camera should look at.</param>
+  /// <param name="up">Up direction vector (typically Vector3.Up).</param>
+  /// <param name="fov">Field of view in radians (typically MathHelper.PiOver4 = 45 degrees).</param>
+  /// <param name="aspect">Aspect ratio (width / height).</param>
+  /// <param name="near">Near clipping plane distance.</param>
+  /// <param name="far">Far clipping plane distance.</param>
   let perspective
     (position: Vector3)
     (target: Vector3)
@@ -55,7 +65,18 @@ module Camera =
       Far = far
     }
 
-  /// Create an orthographic camera
+  /// <summary>
+  /// Create an orthographic camera.
+  /// No perspective distortion - objects appear same size regardless of distance.
+  /// Useful for UI, isometric games, or technical visualizations.
+  /// </summary>
+  /// <param name="position">Camera position in world space.</param>
+  /// <param name="target">Point camera should look at.</param>
+  /// <param name="up">Up direction vector (typically Vector3.Up).</param>
+  /// <param name="width">View width in world units.</param>
+  /// <param name="height">View height in world units.</param>
+  /// <param name="near">Near clipping plane distance.</param>
+  /// <param name="far">Far clipping plane distance.</param>
   let orthographic
     (position: Vector3)
     (target: Vector3)
@@ -76,7 +97,11 @@ module Camera =
       Far = far
     }
 
-  /// Identity camera (for testing)
+  /// <summary>
+  /// Identity camera (for testing).
+  /// Located at origin, looking forward, with no perspective.
+  /// Useful for unit tests and debugging when you don't want to set up a real camera.
+  /// </summary>
   let identity: Camera = {
     View = Matrix.Identity
     Projection = Matrix.Identity
@@ -98,7 +123,9 @@ type Mesh = {
 }
 
 module Mesh =
-  /// Compute bounding box from a ModelMesh by scanning vertex data
+  /// <summary>
+  /// Compute bounding box from a ModelMesh by scanning vertex data.
+  /// </summary>
   let private computeBox(modelMesh: ModelMesh) : BoundingBox =
     let mutable min = Vector3(infinityf, infinityf, infinityf)
     let mutable max = Vector3(-infinityf, -infinityf, -infinityf)
@@ -116,7 +143,12 @@ module Mesh =
 
     BoundingBox(min, max)
 
-  /// Create a Mesh from a ModelMesh
+  /// <summary>
+  /// Create a Mesh from a ModelMesh.
+  /// Returns a sequence of Mesh objects (one per MeshPart in the ModelMesh).
+  /// Each Mesh is shareable and can be drawn with different transforms and materials.
+  /// </summary>
+  /// <param name="modelMesh">The ModelMesh to extract meshes from.</param>
   let fromModelMesh(modelMesh: ModelMesh) : Mesh seq =
     let box = computeBox modelMesh
     let sphere = modelMesh.BoundingSphere
@@ -131,11 +163,24 @@ module Mesh =
       Effect = part.Effect
     })
 
-  /// Create all meshes from a Model
+  /// <summary>
+  /// Create all meshes from a Model.
+  /// Returns a flattened sequence of all Mesh objects across all ModelMeshes.
+  /// Convenient for loading entire models at once.
+  /// </summary>
+  /// <param name="model">The Model to extract all meshes from.</param>
   let fromModel(model: Model) : Mesh seq =
     model.Meshes |> Seq.collect fromModelMesh
 
-  /// Create a Mesh with explicit bounds
+  /// <summary>
+  /// Create a Mesh with explicit bounds.
+  /// Use this when building procedural geometry or when you have pre-computed bounding volumes.
+  /// </summary>
+  /// <param name="vb">The vertex buffer containing vertex data.</param>
+  /// <param name="ib">The index buffer defining triangles.</param>
+  /// <param name="indexCount">Number of indices (triangles * 3).</param>
+  /// <param name="bounds">Pre-computed bounding box for culling.</param>
+  /// <param name="effect">The effect to use when rendering this mesh.</param>
   let create
     (vb: VertexBuffer)
     (ib: IndexBuffer)
@@ -159,12 +204,39 @@ module Mesh =
 /// Material rendering flags
 [<Flags>]
 type MaterialFlags =
+  /// <summary>
+  /// No special rendering behavior (default).
+  /// </summary>
   | None = 0
-  | CastsShadow = 1
+  /// <summary>
+  /// This material casts shadows when shadow mapping is enabled.
+  /// Opaque objects should typically have this flag.
+  /// </summary>
+  | CastsShadow =1
+  /// <summary>
+  /// This material receives shadows from other objects.
+  /// Most materials should have this flag enabled for proper lighting.
+  /// </summary>
   | ReceivesShadow = 2
+  /// <summary>
+  /// Material uses alpha blending. Rendered after opaque geometry with depth read-only.
+  /// Use for glass, water, foliage, or any semi-transparent object.
+  /// </summary>
   | Transparent = 4
+  /// <summary>
+  /// Material renders both sides of faces (front and back).
+  /// Disables backface culling. Useful for thin geometry (leaves, paper, cloth).
+  /// </summary>
   | DoubleSided = 8
+  /// <summary>
+  /// Material ignores all lighting and renders at full brightness.
+  /// Useful for UI elements, debug visualization, or self-illuminated objects.
+  /// </summary>
   | Unlit = 16
+  /// <summary>
+  /// Material uses alpha test (discarding pixels below threshold) rather than alpha blending.
+  /// Faster than transparency but doesn't support soft edges. Use for foliage, fences, chain-link.
+  /// </summary>
   | AlphaTest = 32
 
 /// PBR material properties
@@ -191,6 +263,10 @@ type Material = {
 }
 
 module Material =
+  /// <summary>
+  /// Default PBR material properties with reasonable defaults.
+  /// White albedo, no textures, non-metallic, medium roughness.
+  /// </summary>
   let defaultPBR: PBRMaterial = {
     AlbedoColor = Color.White
     AlbedoMap = ValueNone
@@ -203,6 +279,10 @@ module Material =
     EmissiveIntensity = 0f
   }
 
+  /// <summary>
+  /// Default opaque material. Casts and receives shadows, standard render queue.
+  /// Good starting point for most solid objects (rocks, walls, floors).
+  /// </summary>
   let defaultOpaque: Material = {
     PBR = defaultPBR
     Flags = MaterialFlags.CastsShadow ||| MaterialFlags.ReceivesShadow
@@ -210,6 +290,10 @@ module Material =
     RenderQueue = 2000
   }
 
+  /// <summary>
+  /// Unlit material that ignores all lighting.
+  /// Useful for UI elements, debug visualization, or emissive objects.
+  /// </summary>
   let unlit: Material = {
     PBR = defaultPBR
     Flags = MaterialFlags.Unlit
@@ -217,6 +301,11 @@ module Material =
     RenderQueue = 2000
   }
 
+  /// <summary>
+  /// Transparent material with alpha blending enabled.
+  /// Receives shadows but does not cast them.
+  /// Use for glass, water, or semi-transparent surfaces.
+  /// </summary>
   let transparent: Material = {
     PBR = defaultPBR
     Flags = MaterialFlags.Transparent ||| MaterialFlags.ReceivesShadow
@@ -317,7 +406,13 @@ type Drawable = {
 }
 
 module Drawable =
-  /// Create a drawable with pre-computed world-space bounding sphere
+  /// <summary>
+  /// Create a drawable with pre-computed world-space bounding sphere.
+  /// Faster than the `draw {}` builder when you already have a computed transform.
+  /// </summary>
+  /// <param name="mesh">The mesh geometry to render.</param>
+  /// <param name="transform">World transform matrix (includes position, rotation, scale).</param>
+  /// <param name="material">Material properties for this instance.</param>
   let create (mesh: Mesh) (transform: Matrix) (material: Material) : Drawable = {
     Mesh = mesh
     Transform = transform

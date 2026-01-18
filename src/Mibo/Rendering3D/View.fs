@@ -24,6 +24,10 @@ type DrawState = {
 }
 
 module DrawState =
+  /// <summary>
+  /// Empty draw state with default values (no mesh, origin position, identity rotation, unit scale).
+  /// Starting point for building a drawable via the `draw {}` CE.
+  /// </summary>
   let empty: DrawState = {
     Mesh = ValueNone
     LocalPosition = Vector3.Zero
@@ -181,8 +185,9 @@ type DrawableBuilder() =
   // === Scale ===
 
   /// <summary>
-  /// Applies a uniform scale factor.
+  /// Applies a uniform scale factor to all axes equally.
   /// </summary>
+  /// <param name="scale">Scale multiplier (1.0 = no change, 2.0 = double size).</param>
   [<CustomOperation("scaledBy")>]
   member inline _.ScaledBy(state: DrawState, scale: float32) = {
     state with
@@ -191,7 +196,10 @@ type DrawableBuilder() =
 
   /// <summary>
   /// Applies a non-uniform scale vector (X, Y, Z).
+  /// Different scaling per axis can stretch or squash geometry.
+  /// Useful for creating flattened objects or stylized effects.
   /// </summary>
+  /// <param name="scale">Per-axis scale vector.</param>
   [<CustomOperation("scaledByVec")>]
   member inline _.ScaledByVec(state: DrawState, scale: Vector3) = {
     state with

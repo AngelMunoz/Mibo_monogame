@@ -9,10 +9,24 @@ open Mibo.Elmish
 // Render Pipeline Implementation
 // ============================================================================
 
-/// Render pipeline interface
+/// <summary>
+/// Render pipeline interface for 3D rendering.
+/// Implementations process render commands and produce final frame output.
+/// </summary>
 type IRenderPipeline =
+  /// <summary>
+  /// Initialize the pipeline with a graphics device.
+  /// Called once during program setup.
+  /// </summary>
+  /// <param name="gd">The GraphicsDevice to use for rendering.</param>
   abstract member Initialize: GraphicsDevice -> unit
 
+  /// <summary>
+  /// Render a frame using the provided render buffer.
+  /// Called every frame to process accumulated render commands.
+  /// </summary>
+  /// <param name="ctx">The game context.</param>
+  /// <param name="buffer">Buffer containing render commands for this frame.</param>
   abstract member Render:
     GameContext * RenderBuffer<unit, RenderCommand> -> unit
 
@@ -984,6 +998,13 @@ module internal Orchestrate =
     state.RtPool.ReleaseAll()
 
 module RenderPipeline =
+  /// <summary>
+  /// Create a 3D render pipeline with the specified configuration.
+  /// The pipeline will be initialized with the game's graphics device when the renderer is created.
+  /// </summary>
+  /// <param name="config">Configuration for shadows, post-processing, lighting, and advanced features.</param>
+  /// <param name="game">The Game instance (used to load custom shaders).</param>
+  /// <returns>A configured IRenderPipeline instance.</returns>
   let create (config: PipelineConfig) (game: Game) : IRenderPipeline =
     let state = State.create config
 

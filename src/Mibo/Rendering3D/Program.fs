@@ -8,7 +8,10 @@ open Mibo.Elmish
 // Program Integration
 // ============================================================================
 
-/// Internal renderer that wraps IRenderPipeline
+/// <summary>
+/// Internal renderer that wraps IRenderPipeline for Elmish-style integration.
+/// Manages render buffer clearing and command submission each frame.
+/// </summary>
 type internal PipelineRenderer<'Model>
   (
     pipeline: IRenderPipeline,
@@ -25,6 +28,14 @@ type internal PipelineRenderer<'Model>
       pipeline.Render(ctx, buffer)
 
 module PipelineRenderer =
+  /// <summary>
+  /// Create a pipeline-based renderer that integrates with Mibo's Elmish-style game loop.
+  /// The renderer calls your view function each frame to populate a render buffer.
+  /// </summary>
+  /// <param name="game">The Game instance (used for device initialization).</param>
+  /// <param name="view">Function that transforms model into render commands.</param>
+  /// <param name="pipeline">The 3D render pipeline to use.</param>
+  /// <returns>An IRenderer implementation for use with Program.withRenderer.</returns>
   let create
     (game: Game)
     (view: GameContext -> 'Model -> RenderBuffer<unit, RenderCommand> -> unit)

@@ -164,15 +164,31 @@ module ShadowConfig =
 
 /// <summary>
 /// Configuration for Screen Space Ambient Occlusion (SSAO).
+/// Adds depth perception by darkening corners and crevices where geometry is close together.
 /// </summary>
 [<Struct>]
 type SSAOConfig = {
+  /// <summary>
+  /// Sampling radius in world units. Larger values cover more area but may include distant geometry.
+  /// Typical values: 0.3f - 1.0f
+  /// </summary>
   Radius: float32
+  /// <summary>
+  /// Strength of the ambient occlusion effect. Higher values create darker, more pronounced shadows.
+  /// Typical values: 0.5f - 2.0f
+  /// </summary>
   Intensity: float32
+  /// <summary>
+  /// Number of samples to take per pixel for occlusion calculation. More samples = better quality but higher GPU cost.
+  /// Typical values: 8 - 32
+  /// </summary>
   SampleCount: int
 }
 
 module SSAOConfig =
+  /// <summary>
+  /// Default SSAO settings: 0.5 radius, 1.0 intensity, 16 samples.
+  /// </summary>
   let defaults: SSAOConfig = {
     Radius = 0.5f
     Intensity = 1f
@@ -181,27 +197,61 @@ module SSAOConfig =
 
 /// <summary>
 /// Configuration for Bloom post-process effect.
+/// Creates a soft glow around pixels that exceed the threshold brightness.
 /// </summary>
 [<Struct>]
 type BloomConfig = {
+  /// <summary>
+  /// Minimum brightness level for pixels to contribute to bloom. Pixels below this threshold are not blurred.
+  /// Typical values: 0.8f - 1.2f (in linear HDR space)
+  /// </summary>
   Threshold: float32
+  /// <summary>
+  /// Overall brightness of the bloom effect. Higher values make the glow more visible.
+  /// Typical values: 0.1f - 1.5f
+  /// </summary>
   Intensity: float32
+  /// <summary>
+  /// How far the bloom effect spreads from bright pixels. Higher values create wider, softer glow.
+  /// Typical values: 0.5f - 1.0f
+  /// </summary>
   Scatter: float32
 }
 
 module BloomConfig =
+  /// <summary>
+  /// Default bloom settings: 1.0 threshold, 0.5 intensity, 0.7 scatter.
+  /// </summary>
   let defaults: BloomConfig = {
     Threshold = 1f
     Intensity = 0.5f
     Scatter = 0.7f
   }
 
+/// <summary>
 /// Tone mapping algorithms for HDR -> LDR conversion.
+/// Controls how high dynamic range values are compressed to fit within displayable range.
+/// </summary>
 type ToneMappingConfig =
+  /// <summary>
+  /// No tone mapping applied. Values may clip at white.
+  /// </summary>
   | NoToneMapping
+  /// <summary>
+  /// Reinhard tone mapping. Simple, classic algorithm with good contrast rolloff.
+  /// </summary>
   | Reinhard
+  /// <summary>
+  /// Academy Color Encoding System (ACES). Industry standard for film and games, excellent color reproduction.
+  /// </summary>
   | ACES
+  /// <summary>
+  /// Filmic tone mapping. Cinematic look with good highlight rolloff and shadow detail.
+  /// </summary>
   | Filmic
+  /// <summary>
+  /// AgX tone mapping. Modern film-inspired transform with pleasing color grading.
+  /// </summary>
   | AgX
 
 /// <summary>
@@ -215,6 +265,9 @@ type PostProcessConfig = {
 }
 
 module PostProcessConfig =
+  /// <summary>
+  /// Default post-process configuration: No SSAO, No Bloom, ACES tone mapping.
+  /// </summary>
   let defaults: PostProcessConfig = {
     SSAO = ValueNone
     Bloom = ValueNone
@@ -275,6 +328,9 @@ type PipelineConfig = {
 }
 
 module PipelineConfig =
+  /// <summary>
+  /// Default pipeline configuration: No shadows, no post-process, no default lighting.
+  /// </summary>
   let defaults: PipelineConfig = {
     Shadows = ValueNone
     PostProcess = ValueNone
