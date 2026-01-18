@@ -27,7 +27,7 @@ module internal ShadowAtlas =
   }
 
   let create (device: GraphicsDevice) (config: ShadowConfig) =
-    let tilesAcross = 4
+    let tilesAcross = config.AtlasTiles
     let maxShadows = tilesAcross * tilesAcross
     let atlasSize = config.Resolution * tilesAcross
 

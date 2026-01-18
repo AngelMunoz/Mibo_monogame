@@ -158,11 +158,21 @@ module Game =
       yield Lighting.defaultSunlight.Lights.[0]
 
       // Spot Lights above each platform
-      let spotColors = [| Color.Cyan; Color.Magenta; Color.Yellow; Color.Orange; Color.Lime; Color.DeepPink |]
+      let spotColors = [|
+        Color.Cyan
+        Color.Magenta
+        Color.Yellow
+        Color.Orange
+        Color.Lime
+        Color.DeepPink
+      |]
+
       for i in 0 .. state.Platforms.Length - 1 do
         let plat = state.Platforms.[i]
         let color = spotColors.[i % spotColors.Length]
-        yield Light.Spot {
+
+        yield
+          Light.Spot {
             Position = plat.Position + Vector3(0f, 5f, 0f) // 5 units above platform
             Direction = Vector3.Down
             Color = color
@@ -171,7 +181,7 @@ module Game =
             InnerConeAngle = MathHelper.ToRadians(20f)
             OuterConeAngle = MathHelper.ToRadians(30f)
             Shadow = ValueSome ShadowSettings.defaults
-        }
+          }
 
       // Add 16 colorful moving point lights
       for i in 0..15 do
@@ -196,7 +206,7 @@ module Game =
             Color = color
             Intensity = 1.0f
             Range = 8.0f
-            Shadow = if i < 4 then ValueSome ShadowSettings.defaults else ValueNone
+            Shadow = ValueSome ShadowSettings.defaults
           }
     |]
 
@@ -280,6 +290,8 @@ module Game =
          ShadowConfig.defaults
          |> ShadowConfig.withResolution 2048
          |> ShadowConfig.withCascades 3
+         |> ShadowConfig.withAtlasTiles 8
+         |> ShadowConfig.withBias 0.0015f 0.005f
        )
        |> PipelineConfig.withShader
          ShaderBase.ShadowCaster

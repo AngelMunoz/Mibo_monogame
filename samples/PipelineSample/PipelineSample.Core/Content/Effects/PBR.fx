@@ -66,7 +66,7 @@ float4 FetchData(sampler s, float2 pixelCoord, float width, float height) {
 }
 
 matrix FetchMatrix(int index) {
-    float startRow = (float)index * 4.0;
+    float startRow = (float)index;
     float4 r1 = FetchData(ShadowMatrixSampler, float2(0, startRow), 4.0, ShadowMatrixCount);
     float4 r2 = FetchData(ShadowMatrixSampler, float2(1, startRow), 4.0, ShadowMatrixCount);
     float4 r3 = FetchData(ShadowMatrixSampler, float2(2, startRow), 4.0, ShadowMatrixCount);
@@ -143,7 +143,19 @@ float4 MainPS(VertexShaderOutput input) : COLOR0
 
         float ndotl = max(dot(normal, lightDir), 0.0);
         float shadow = 1.0;
-        if (shadowIdx >= 0) shadow = CalculateShadow(shadowIdx, input.WorldPos, normal);
+
+        if (shadowIdx >= 0) {
+            int finalShadowIdx = shadowIdx;
+            if (type == 1.0) { 
+                 float3 dirFromLight = input.WorldPos - p1.xyz;
+                 float3 absDir = abs(dirFromLight);
+                 float maxC = max(max(absDir.x, absDir.y), absDir.z);
+                 if (maxC == absDir.x) finalShadowIdx += (dirFromLight.x > 0) ? 0 : 1;
+                 else if (maxC == absDir.y) finalShadowIdx += (dirFromLight.y > 0) ? 2 : 3;
+                 else finalShadowIdx += (dirFromLight.z > 0) ? 5 : 4;
+            }
+            shadow = CalculateShadow(finalShadowIdx, input.WorldPos, normal);
+        }
         
         diffuse += ndotl * p3.rgb * intensity * atten * shadow;
     }

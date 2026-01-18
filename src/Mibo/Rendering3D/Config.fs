@@ -20,6 +20,7 @@ type ShadowConfig = {
   Bias: float32
   NormalBias: float32
   MaxPointShadows: int
+  AtlasTiles: int
 }
 
 module ShadowConfig =
@@ -31,6 +32,7 @@ module ShadowConfig =
     Bias = 0.005f
     NormalBias = 0.01f
     MaxPointShadows = 4
+    AtlasTiles = 4
   }
 
   let withResolution (res: int) (cfg: ShadowConfig) = {
@@ -55,6 +57,11 @@ module ShadowConfig =
   let withMaxPointShadows (n: int) (cfg: ShadowConfig) = {
     cfg with
         MaxPointShadows = n
+  }
+
+  let withAtlasTiles (n: int) (cfg: ShadowConfig) = {
+    cfg with
+        AtlasTiles = n
   }
 
 /// SSAO configuration
