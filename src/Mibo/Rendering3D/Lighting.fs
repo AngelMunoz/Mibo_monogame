@@ -22,6 +22,7 @@ type DirectionalLight = {
   Shadow: ShadowSettings voption
   CascadeCount: int
   CascadeSplits: float32[]
+  SourceRadius: float32
 }
 
 /// Point light (omni-directional)
@@ -32,6 +33,7 @@ type PointLight = {
   Intensity: float32
   Range: float32
   Shadow: ShadowSettings voption
+  SourceRadius: float32
 }
 
 /// Spot light (cone)
@@ -45,6 +47,7 @@ type SpotLight = {
   InnerConeAngle: float32
   OuterConeAngle: float32
   Shadow: ShadowSettings voption
+  SourceRadius: float32
 }
 
 /// Light type union
@@ -81,6 +84,7 @@ module Lighting =
         Shadow = ValueSome ShadowSettings.defaults
         CascadeCount = 3
         CascadeSplits = [| 0.1f; 0.3f; 1f |]
+        SourceRadius = 0.05f
       }
     |]
   }
@@ -103,6 +107,7 @@ module Lighting =
           Shadow = ValueNone
           CascadeCount = 0
           CascadeSplits = [||]
+          SourceRadius = 0.0f
         }
       |]
     }

@@ -60,6 +60,30 @@ struct VertexShaderOutput {
     float3 WorldPos : TEXCOORD4;
 };
 
+// Poisson Disk Samples (16 points)
+static const float2 poissonDisk[16] = {
+    float2( -0.94201624, -0.39906216 ),
+    float2( 0.94558609, -0.76890725 ),
+    float2( -0.094184101, -0.92938870 ),
+    float2( 0.34495938, 0.29387760 ),
+    float2( -0.91588581, 0.45771432 ),
+    float2( -0.81544232, -0.87912464 ),
+    float2( -0.38277543, 0.27676845 ),
+    float2( 0.97484398, 0.75648379 ),
+    float2( 0.44323325, -0.97511554 ),
+    float2( 0.53742981, -0.47371075 ),
+    float2( -0.26496911, -0.41893023 ),
+    float2( 0.79197514, 0.19090188 ),
+    float2( -0.24188840, 0.99706507 ),
+    float2( -0.81409955, 0.91437590 ),
+    float2( 0.19984126, 0.78641367 ),
+    float2( 0.14383161, -0.14100790 )
+};
+
+float rand(float2 co) {
+    return frac(sin(dot(co.xy, float2(12.9898, 78.233))) * 43758.5453);
+}
+
 float4 FetchData(sampler s, float2 pixelCoord, float width, float height) {
     float2 uv = (pixelCoord + 0.5) / float2(width, height);
     return tex2Dlod(s, float4(uv, 0, 0));
@@ -93,12 +117,26 @@ float CalculateShadow(int shadowIdx, float3 worldPos, float3 normal) {
     float row = floor((float)shadowIdx / ShadowAtlasTilesX);
     
     float tileSize = 1.0 / ShadowAtlasTilesX;
-    float2 atlasUV = (uv * tileSize) + float2(col * tileSize, row * tileSize);
+    float2 baseUV = (uv * tileSize) + float2(col * tileSize, row * tileSize);
 
-    // PCF or simple sample
-    float pcfDepth = tex2Dlod(ShadowAtlasSampler, float4(atlasUV, 0, 0)).r;
+    // Random rotation
+    float randomAngle = rand(worldPos.xy) * 6.28318530718; // Random angle 0-2PI
+    float s = sin(randomAngle);
+    float c = cos(randomAngle);
+    float2x2 rot = float2x2(c, -s, s, c);
+
+    float shadowSum = 0.0;
+    // Scale the disk based on texture size (softness radius)
+    // 2.0 / Size is roughly 2 texel radius
+    float radius = 2.0 / ShadowAtlasSize; 
+
+    for (int i = 0; i < 16; i++) {
+        float2 offset = mul(poissonDisk[i], rot) * radius;
+        float pcfDepth = tex2Dlod(ShadowAtlasSampler, float4(baseUV + offset, 0, 0)).r;
+        shadowSum += (z > pcfDepth + ShadowBias) ? 0.0 : 1.0;
+    }
     
-    return (z > pcfDepth + ShadowBias) ? 0.1 : 1.0;
+    return shadowSum / 16.0;
 }
 
 float4 MainPS(VertexShaderOutput input) : COLOR0

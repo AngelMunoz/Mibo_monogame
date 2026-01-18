@@ -21,6 +21,7 @@ type ShadowConfig = {
   NormalBias: float32
   MaxPointShadows: int
   AtlasTiles: int
+  MaxAtlasSize: int
 }
 
 module ShadowConfig =
@@ -33,6 +34,7 @@ module ShadowConfig =
     NormalBias = 0.01f
     MaxPointShadows = 4
     AtlasTiles = 4
+    MaxAtlasSize = 8192
   }
 
   let withResolution (res: int) (cfg: ShadowConfig) = {
@@ -62,6 +64,11 @@ module ShadowConfig =
   let withAtlasTiles (n: int) (cfg: ShadowConfig) = {
     cfg with
         AtlasTiles = n
+  }
+
+  let withMaxAtlasSize (n: int) (cfg: ShadowConfig) = {
+    cfg with
+        MaxAtlasSize = n
   }
 
 /// SSAO configuration
@@ -144,6 +151,8 @@ type PipelineConfig = {
   PreRenderCallback: (GraphicsDevice -> Camera -> LightingState -> unit) voption
   /// Optional override for binding light data to shaders
   LightingBinder: (Effect -> Camera -> LightingState -> unit) voption
+  /// Screen-space tile size for light culling (default: 32)
+  TileSize: int
 }
 
 module PipelineConfig =
@@ -155,6 +164,7 @@ module PipelineConfig =
     ShaderOverrides = Map.empty
     PreRenderCallback = ValueNone
     LightingBinder = ValueNone
+    TileSize = 32
   }
 
   let withShadowPath (path: ShadowPath) (pc: PipelineConfig) = {
@@ -186,3 +196,5 @@ module PipelineConfig =
       pc with
           ShaderOverrides = pc.ShaderOverrides.Add(shaderBase, assetName)
     }
+
+  let withTileSize (size: int) (pc: PipelineConfig) = { pc with TileSize = size }

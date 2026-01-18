@@ -154,8 +154,25 @@ module Game =
 
     // Setup rendering environment with directional sunlight + rotating colored point lights
     let lights = [|
-      // Primary Sunlight (White)
-      yield Lighting.defaultSunlight.Lights.[0]
+      // Primary Sunlight (White) - Manually configured for crisp near-field shadows
+      Light.Directional {
+        Direction = Vector3.Normalize(Vector3.Down + Vector3.Forward * 0.5f)
+        Color = Color.LightYellow
+        Intensity = 1.0f
+        Shadow = ValueSome ShadowSettings.defaults
+        CascadeCount = 4
+        CascadeSplits = [| 0.05f; 0.15f; 0.4f; 1.0f |]
+      }
+
+      // Secondary Directional Light (Navy Blue, Angled)
+      Light.Directional {
+        Direction = Vector3.Normalize(Vector3(-1f, -1f, -0.5f))
+        Color = Color.Navy
+        Intensity = 1.0f
+        Shadow = ValueSome ShadowSettings.defaults
+        CascadeCount = 0
+        CascadeSplits = [||]
+      }
 
       // Spot Lights above each platform
       let spotColors = [|
@@ -171,17 +188,16 @@ module Game =
         let plat = state.Platforms.[i]
         let color = spotColors.[i % spotColors.Length]
 
-        yield
-          Light.Spot {
-            Position = plat.Position + Vector3(0f, 5f, 0f) // 5 units above platform
-            Direction = Vector3.Down
-            Color = color
-            Intensity = 1.2f
-            Range = 15.0f
-            InnerConeAngle = MathHelper.ToRadians(20f)
-            OuterConeAngle = MathHelper.ToRadians(30f)
-            Shadow = ValueSome ShadowSettings.defaults
-          }
+        Light.Spot {
+          Position = plat.Position + Vector3(0f, 8f, 0f) // Raised to 8 units to cast broader shadows
+          Direction = Vector3.Down
+          Color = color
+          Intensity = 1.2f
+          Range = 25.0f
+          InnerConeAngle = MathHelper.ToRadians(20f)
+          OuterConeAngle = MathHelper.ToRadians(40f) // Widened to 40 degrees
+          Shadow = ValueSome ShadowSettings.defaults
+        }
 
       // Add 16 colorful moving point lights
       for i in 0..15 do
@@ -200,14 +216,13 @@ module Game =
           elif h < 0.83f then Color.Cyan
           else Color.Magenta
 
-        yield
-          Light.Point {
-            Position = Vector3(x, 3f, z)
-            Color = color
-            Intensity = 1.0f
-            Range = 8.0f
-            Shadow = ValueSome ShadowSettings.defaults
-          }
+        Light.Point {
+          Position = Vector3(x, 3f, z)
+          Color = color
+          Intensity = 1.0f
+          Range = 8.0f
+          Shadow = ValueSome ShadowSettings.defaults
+        }
     |]
 
     let lighting = {
@@ -288,10 +303,8 @@ module Game =
 #endif
        |> PipelineConfig.withShadows(
          ShadowConfig.defaults
-         |> ShadowConfig.withResolution 2048
-         |> ShadowConfig.withCascades 3
-         |> ShadowConfig.withAtlasTiles 8
          |> ShadowConfig.withBias 0.0015f 0.005f
+         |> ShadowConfig.withSoftShadows 1.0f
        )
        |> PipelineConfig.withShader
          ShaderBase.ShadowCaster

@@ -31,7 +31,7 @@ module internal ShadowAtlas =
     let maxShadows = tilesAcross * tilesAcross
     let atlasSize = config.Resolution * tilesAcross
 
-    let maxTextureSize = 8192
+    let maxTextureSize = config.MaxAtlasSize
     let actualAtlasSize = min atlasSize maxTextureSize
     let actualTileSize = actualAtlasSize / tilesAcross
 
@@ -238,7 +238,7 @@ module internal LightPacking =
           data.[offset + 2] <-
             Vector4(dl.Direction.X, dl.Direction.Y, dl.Direction.Z, 0.0f)
 
-          data.[offset + 3] <- Vector4(dl.Color.ToVector3(), 0.0f)
+          data.[offset + 3] <- Vector4(dl.Color.ToVector3(), dl.SourceRadius)
         | Point pl ->
           let shadowIdx =
             if ValueOption.isSome pl.Shadow then
@@ -254,7 +254,7 @@ module internal LightPacking =
             Vector4(pl.Position.X, pl.Position.Y, pl.Position.Z, 0.0f)
 
           data.[offset + 2] <- Vector4.Zero
-          data.[offset + 3] <- Vector4(pl.Color.ToVector3(), 0.0f)
+          data.[offset + 3] <- Vector4(pl.Color.ToVector3(), pl.SourceRadius)
         | Spot sl ->
           let shadowIdx =
             if ValueOption.isSome sl.Shadow then
@@ -282,7 +282,7 @@ module internal LightPacking =
               float32(System.Math.Cos(float sl.InnerConeAngle))
             )
 
-          data.[offset + 3] <- Vector4(sl.Color.ToVector3(), 0.0f)
+          data.[offset + 3] <- Vector4(sl.Color.ToVector3(), sl.SourceRadius)
 
       let tex =
         new Texture2D(
@@ -352,8 +352,6 @@ module internal Culling =
         state.OpaqueDrawables.Add(struct (distance, drawable))
 
 module internal Tiling =
-  let TileSize = 16
-
   let private projectSphere
     (camera: Mibo.Rendering.Graphics3D.Camera)
     (viewport: Viewport)
@@ -391,8 +389,9 @@ module internal Tiling =
       | null -> Viewport(0, 0, 1280, 720)
       | _ -> state.Device.Viewport
 
-    let tilesX = (viewport.Width + TileSize - 1) / TileSize
-    let tilesY = (viewport.Height + TileSize - 1) / TileSize
+    let tileSize = state.Config.TileSize
+    let tilesX = (viewport.Width + tileSize - 1) / tileSize
+    let tilesY = (viewport.Height + tileSize - 1) / tileSize
     let tileMasks = Array.zeroCreate<uint32>(tilesX * tilesY)
     let lights = state.CurrentLighting.Lights
 
@@ -405,9 +404,9 @@ module internal Tiling =
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport pl.Position pl.Range
 
-        for ty = t / TileSize to b / TileSize do
+        for ty = t / tileSize to b / tileSize do
           if ty >= 0 && ty < tilesY then
-            for tx = l / TileSize to r / TileSize do
+            for tx = l / tileSize to r / tileSize do
               if tx >= 0 && tx < tilesX then
                 tileMasks.[ty * tilesX + tx] <-
                   tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
@@ -415,9 +414,9 @@ module internal Tiling =
         let struct (l, t, r, b) =
           projectSphere state.CurrentCamera viewport sl.Position sl.Range
 
-        for ty = t / TileSize to b / TileSize do
+        for ty = t / tileSize to b / tileSize do
           if ty >= 0 && ty < tilesY then
-            for tx = l / TileSize to r / TileSize do
+            for tx = l / tileSize to r / tileSize do
               if tx >= 0 && tx < tilesX then
                 tileMasks.[ty * tilesX + tx] <-
                   tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
