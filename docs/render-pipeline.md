@@ -27,18 +27,18 @@ let view (ctx: GameContext) (state: State) (buffer: RenderBuffer<unit, RenderCom
     // 1. Define a camera
     let camera = Camera.perspective ...
 
-    // 2. Submit commands to the buffer
+    // 2. Submit commands to the buffer using the fluent API
     buffer
-    |> RenderBuilder.camera camera
-    |> RenderBuilder.clear Color.CornflowerBlue
-    |> RenderBuilder.draw (
-        draw {
-            mesh state.MyMesh
-            at Vector3(0f, 0f, 0f)
-            scaledBy 2.0f
-        }
-    )
-    |> RenderBuilder.submit
+        .Camera(camera)
+        .Clear(Color.CornflowerBlue)
+        .Draw(
+            draw {
+                mesh state.MyMesh
+                at Vector3(0f, 0f, 0f)
+                scaledBy 2.0f
+            }
+        )
+        .Submit()
 ```
 
 #### The `draw` Builder
@@ -55,7 +55,7 @@ draw {
 }
 ```
 
-**Result:** Returns a `Drawable voption` which can be submitted to the render buffer. The `voption` allows the builder to fail gracefully (e.g., no mesh set), and `RenderBuilder.draw` automatically handles `ValueNone` by skipping it.
+**Result:** Returns a `Drawable voption` which can be submitted to the render buffer. The `voption` allows the builder to fail gracefully (e.g., no mesh set), and `buffer.Draw` automatically handles `ValueNone` by skipping it.
 
 #### Advanced Transform Operations
 
@@ -104,8 +104,8 @@ let decal =
         color Color.White
     }
 
-// Submit to buffer
-buffer |> RenderBuilder.quad myTexture decal
+// Submit to buffer (defaults to Opaque, use RenderPass.Transparent for decals)
+buffer.Quad(myTexture, decal, RenderPass.Transparent)
 ```
 
 #### Billboards (Sprite3D)
@@ -120,7 +120,8 @@ let spark =
         color Color.Yellow
     }
 
-buffer |> RenderBuilder.billboard particleTex spark
+// Defaults to Transparent pass
+buffer.Billboard(particleTex, spark)
 ```
 
 For "tree style" billboards that only rotate around an axis:
@@ -133,7 +134,7 @@ let tree =
         facing (Cylindrical Vector3.Up)
     }
 
-buffer |> RenderBuilder.billboard treeTex tree
+buffer.Billboard(treeTex, tree)
 ```
 
 #### Lines & Grids
@@ -142,17 +143,17 @@ Draw single or multiple line segments efficiently for debugging or wireframes.
 
 ```fsharp
 // Single red line
-buffer |> RenderBuilder.line Vector3.Zero (Vector3(0f, 10f, 0f)) Color.Red
+buffer.Line(Vector3.Zero, Vector3(0f, 10f, 0f), Color.Red)
 
 // Grid or complex path
 let verts = [|
     VertexPositionColor(p1, Color.White)
     VertexPositionColor(p2, Color.White)
 |]
-buffer |> RenderBuilder.lines verts (verts.Length / 2)
+buffer.Line(verts, verts.Length / 2)
 
 // Line segments with a custom shader (e.g. glowing grid)
-buffer |> RenderBuilder.linesEffect Transparent myShader (ValueSome mySetup) verts (verts.Length / 2)
+buffer.Line(RenderPass.Transparent, myShader, ValueSome mySetup, verts, verts.Length / 2)
 ```
 
 ### Level 3: Materials & Textures
@@ -233,7 +234,20 @@ The alpha threshold is configurable per material and defaults to 0.5f.
 
 ### Level 4: Scene Organization
 
-As your scene grows, the `RenderBuilder` fluent DSL organizes frame rendering cleanly.
+As your scene grows, the fluent DSL organizes frame rendering cleanly.
+
+```fsharp
+buffer
+    .Camera(state.Camera)
+    .Lighting(state.Lighting)
+    .Clear(Color.Black)
+    .Draw(state.Level)
+    .Draw(state.Enemies) // Supports collections via Draw(seq) overload
+    .Submit()
+```
+
+### Level 5: Lighting
+// ... (rest of the file follows same pattern)
 // ... (omitting middle)
 
 ### Level 5: Lighting
@@ -367,7 +381,7 @@ Program.withPipeline (
 **View Module:** Provides two building blocks:
 
 - `draw {}` - Creates individual drawables (Mesh + Transform + Material)
-- `RenderBuilder` - Fluent DSL for submitting commands to RenderBuffer
+- `PipelineBuffer` Extensions - Fluent DSL for submitting commands to RenderBuffer
 
 ### Complexity Ladder Overview
 

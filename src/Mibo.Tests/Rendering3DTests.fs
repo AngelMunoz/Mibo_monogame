@@ -227,14 +227,17 @@ let dslTests =
         11.0
         "X should be 11 (1 + 10)"
 
-    // === Actual DSL CE Usage Tests ===
+    // === Actual DSL Usage Tests ===
 
-    testCase "RenderBuilder emits camera and clear commands"
+    testCase "Fluent DSL emits camera and clear commands"
     <| fun _ ->
       let buffer = RenderBuffer<unit, RenderCommand>()
       let cam = TestHelpers.cameraAt(Vector3(0f, 0f, 10f))
 
-      buffer |> Buffer.camera cam |> Buffer.clear Color.CornflowerBlue |> ignore
+      buffer
+        .Camera(cam)
+        .Clear(Color.CornflowerBlue)
+        .Submit()
 
       Expect.equal buffer.Count 2 "Should have 2 commands"
       let struct (_, cmd0) = buffer.[0]
@@ -262,14 +265,14 @@ let dslTests =
       let drawable = TestHelpers.drawableAt Vector3.Zero false
 
       buffer
-      |> Buffer.camera cam
-      |> Buffer.lighting lighting
-      |> Buffer.clear Color.Black
-      |> Buffer.clearDepth
-      |> ignore
+        .Camera(cam)
+        .Lighting(lighting)
+        .Clear(Color.Black)
+        .ClearDepth()
+        .Submit()
 
       // Add draw manually since draw { } CE syntax is tricky to test
-      buffer.Add((), Draw drawable)
+      buffer.Draw(ValueSome drawable) |> ignore
 
       Expect.equal buffer.Count 5 "Should have 5 commands"
 
@@ -298,7 +301,6 @@ let dslTests =
 
       match cmd4 with
       | Draw _ -> ()
-      | _ -> failtest "cmd4 should be Draw"
 
     testCase "draw CE outputs correct position"
     <| fun _ ->

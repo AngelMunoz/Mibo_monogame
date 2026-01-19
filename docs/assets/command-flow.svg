@@ -12,9 +12,9 @@
   <text x="125" y="55" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="black">(Create Drawable)</text>
   <text x="125" y="70" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="black">Returns Drawable voption</text>
 
-  <!-- RenderBuilder box -->
+  <!-- Fluent API box -->
   <rect x="50" y="110" width="150" height="60" rx="8" ry="8" fill="#f0f8ff" stroke="#0066cc" stroke-width="2"/>
-  <text x="125" y="130" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="black">RenderBuilder</text>
+  <text x="125" y="130" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="black">Fluent DSL</text>
   <text x="125" y="145" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="black">(Submit Commands)</text>
   <text x="125" y="160" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="black">Stores RenderCommand[]</text>
 

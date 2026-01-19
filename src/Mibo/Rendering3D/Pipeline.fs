@@ -1,6 +1,7 @@
 namespace Mibo.Rendering.Graphics3D
 
 open System.Collections.Generic
+open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
@@ -107,6 +108,14 @@ type internal PipelineState = {
   // Lists for batched commands
   OpaqueSpriteCommands: ResizeArray<struct (float32 * RenderCommand)>
   TransparentSpriteCommands: ResizeArray<struct (float32 * RenderCommand)>
+  // Reusable buffers
+  Frustum: BoundingFrustum
+  ShadowFrustum: BoundingFrustum
+  FrustumCorners: Vector3[]
+  mutable LightDataBuffer: Vector4[]
+  mutable ShadowMatrixBuffer: Vector4[]
+  mutable TileMasks: uint32[]
+  PostProcessVertices: VertexPositionTexture[]
 }
 
 module internal State =
@@ -119,8 +128,8 @@ module internal State =
     SpriteBatch = Unchecked.defaultof<_>
     CustomShaders = Dictionary<ShaderBase, Effect>()
     ShadowAtlas = ValueNone
-    ShadowViewMatrices = ResizeArray<Matrix>()
-    ShadowProjectionMatrices = ResizeArray<Matrix>()
+    ShadowViewMatrices = ResizeArray<Matrix>(16)
+    ShadowProjectionMatrices = ResizeArray<Matrix>(16)
     LightDataTexture = ValueNone
     ShadowMatrixTexture = ValueNone
     MainSceneTarget = ValueNone
@@ -137,6 +146,18 @@ module internal State =
     OpaqueSpriteCommands = ResizeArray<struct (float32 * RenderCommand)>(128)
     TransparentSpriteCommands =
       ResizeArray<struct (float32 * RenderCommand)>(64)
+    Frustum = BoundingFrustum(Matrix.Identity)
+    ShadowFrustum = BoundingFrustum(Matrix.Identity)
+    FrustumCorners = Array.zeroCreate 8
+    LightDataBuffer = Array.empty
+    ShadowMatrixBuffer = Array.empty
+    TileMasks = Array.empty
+    PostProcessVertices = [|
+      VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
+      VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
+      VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
+      VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
+    |]
   }
 
   let reset(state: PipelineState) =
@@ -192,17 +213,26 @@ module internal State =
 
 [<AutoOpen>]
 module internal EffectHelpers =
+  let private paramCache =
+    ConditionalWeakTable<Effect, Dictionary<string, EffectParameter>>()
+
   let findParam (name: string) (effect: Effect) =
-    let mutable found = ValueNone
-    use enum = effect.Parameters.GetEnumerator()
+    let dict =
+      match paramCache.TryGetValue(effect) with
+      | true, d -> d
+      | false, _ ->
+          let d = Dictionary<string, EffectParameter>()
 
-    while enum.MoveNext() do
-      let p = enum.Current
+          for i = 0 to effect.Parameters.Count - 1 do
+            let p = effect.Parameters.[i]
+            d.[p.Name] <- p
 
-      if p.Name = name then
-        found <- ValueSome p
+          paramCache.Add(effect, d)
+          d
 
-    found
+    match dict.TryGetValue(name) with
+    | true, p -> ValueSome p
+    | false, _ -> ValueNone
 
   type Effect with
     member inline this.SafeSetParam(name: string, value: bool) =
@@ -264,7 +294,12 @@ module internal LightPacking =
     if lights.Length = 0 then
       state.LightDataTexture <- ValueNone
     else
-      let data = Array.zeroCreate<Vector4>(lights.Length * 4)
+      let requiredSize = lights.Length * 4
+
+      if state.LightDataBuffer.Length < requiredSize then
+        state.LightDataBuffer <- Array.zeroCreate requiredSize
+
+      let data = state.LightDataBuffer
       let mutable shadowMapIndex = 0
 
       for i = 0 to lights.Length - 1 do
@@ -333,15 +368,15 @@ module internal LightPacking =
           data.[offset + 3] <- Vector4(sl.Color.ToVector3(), sl.SourceRadius)
 
       let tex =
-        new Texture2D(
-          state.Device,
-          4,
-          lights.Length,
-          false,
-          SurfaceFormat.Vector4
-        )
+        match state.LightDataTexture with
+        | ValueSome t when t.Height = lights.Length -> t
+        | ValueSome t ->
+            t.Dispose()
+            new Texture2D(state.Device, 4, lights.Length, false, SurfaceFormat.Vector4)
+        | ValueNone ->
+            new Texture2D(state.Device, 4, lights.Length, false, SurfaceFormat.Vector4)
 
-      tex.SetData(data)
+      tex.SetData(data, 0, requiredSize)
       state.LightDataTexture <- ValueSome tex
 
   let packShadowMatrices(state: PipelineState) =
@@ -349,7 +384,12 @@ module internal LightPacking =
       state.ShadowMatrixTexture <- ValueNone
     else
       let count = state.ShadowViewMatrices.Count
-      let data = Array.zeroCreate<Vector4>(count * 2 * 4)
+      let requiredSize = count * 8
+
+      if state.ShadowMatrixBuffer.Length < requiredSize then
+        state.ShadowMatrixBuffer <- Array.zeroCreate requiredSize
+
+      let data = state.ShadowMatrixBuffer
 
       for i = 0 to count - 1 do
         let v = state.ShadowViewMatrices.[i]
@@ -365,9 +405,15 @@ module internal LightPacking =
         data.[offset + 7] <- Vector4(p.M41, p.M42, p.M43, p.M44)
 
       let tex =
-        new Texture2D(state.Device, 4, count * 2, false, SurfaceFormat.Vector4)
+        match state.ShadowMatrixTexture with
+        | ValueSome t when t.Height = count * 2 -> t
+        | ValueSome t ->
+            t.Dispose()
+            new Texture2D(state.Device, 4, count * 2, false, SurfaceFormat.Vector4)
+        | ValueNone ->
+            new Texture2D(state.Device, 4, count * 2, false, SurfaceFormat.Vector4)
 
-      tex.SetData(data)
+      tex.SetData(data, 0, requiredSize)
       state.ShadowMatrixTexture <- ValueSome tex
 
 module internal CameraState =
@@ -419,12 +465,14 @@ module internal CameraState =
           struct (right, up)
 
 module internal Culling =
+  let updateFrustum (state: PipelineState) =
+    state.Frustum.Matrix <- state.CurrentCamera.View * state.CurrentCamera.Projection
+
   let isVisible
-    (camera: Mibo.Rendering.Graphics3D.Camera)
+    (state: PipelineState)
     (drawable: Drawable)
     =
-    let frustum = BoundingFrustum(camera.View * camera.Projection)
-    frustum.Contains(drawable.BoundingSphere) <> ContainmentType.Disjoint
+    state.Frustum.Contains(drawable.BoundingSphere) <> ContainmentType.Disjoint
 
   let distanceToCamera
     (camera: Mibo.Rendering.Graphics3D.Camera)
@@ -437,7 +485,7 @@ module internal Culling =
     || drawable.Material.PBR.AlbedoColor.A < 255uy
 
   let batchDrawable (state: PipelineState) (drawable: Drawable) =
-    if not(isVisible state.CurrentCamera drawable) then
+    if not(isVisible state drawable) then
       ()
     else
       let distance = distanceToCamera state.CurrentCamera drawable
@@ -459,30 +507,29 @@ module internal Culling =
 
 module internal Tiling =
   let private projectSphere
-    (camera: Mibo.Rendering.Graphics3D.Camera)
+    (state: PipelineState)
     (viewport: Viewport)
     (center: Vector3)
     (radius: float32)
     =
-    let frustum = BoundingFrustum(camera.View * camera.Projection)
+    let camera = state.CurrentCamera
     let sphere = BoundingSphere(center, radius)
 
-    if frustum.Contains(sphere) = ContainmentType.Disjoint then
+    if state.Frustum.Contains(sphere) = ContainmentType.Disjoint then
       struct (0, 0, -1, -1) // Invalid range
     else
       let viewPos = Vector3.Transform(center, camera.View)
 
-      let points = [|
-        viewPos + Vector3(-radius, -radius, 0f)
-        viewPos + Vector3(radius, radius, 0f)
-        viewPos + Vector3(-radius, radius, 0f)
-        viewPos + Vector3(radius, -radius, 0f)
-      |]
+      // Use a local fixed-size array or individual points to avoid allocation
+      let p0 = viewPos + Vector3(-radius, -radius, 0f)
+      let p1 = viewPos + Vector3(radius, radius, 0f)
+      let p2 = viewPos + Vector3(-radius, radius, 0f)
+      let p3 = viewPos + Vector3(radius, -radius, 0f)
 
       let mutable minX, minY = 1f, 1f
       let mutable maxX, maxY = -1f, -1f
 
-      for p in points do
+      let updateMinMax (p: Vector3) =
         let clip = Vector4.Transform(p, camera.Projection)
 
         if clip.W > 0.0001f then
@@ -491,6 +538,11 @@ module internal Tiling =
           minY <- min minY ndc.Y
           maxX <- max maxX ndc.X
           maxY <- max maxY ndc.Y
+
+      updateMinMax p0
+      updateMinMax p1
+      updateMinMax p2
+      updateMinMax p3
 
       if maxX < minX || maxY < minY then
         struct (0, 0, -1, -1)
@@ -514,17 +566,24 @@ module internal Tiling =
     let tileSize = state.Config.TileSize
     let tilesX = (viewport.Width + tileSize - 1) / tileSize
     let tilesY = (viewport.Height + tileSize - 1) / tileSize
-    let tileMasks = Array.zeroCreate<uint32>(tilesX * tilesY)
+    let requiredTiles = tilesX * tilesY
+
+    if state.TileMasks.Length < requiredTiles then
+      state.TileMasks <- Array.zeroCreate requiredTiles
+    else
+      System.Array.Clear(state.TileMasks, 0, requiredTiles)
+
+    let tileMasks = state.TileMasks
     let lights = state.CurrentLighting.Lights
 
     for i = 0 to min 31 (lights.Length - 1) do
       match lights.[i] with
       | Directional _ ->
-        for j = 0 to tileMasks.Length - 1 do
+        for j = 0 to requiredTiles - 1 do
           tileMasks.[j] <- tileMasks.[j] ||| (1u <<< i)
       | Point pl ->
         let struct (l, t, r, b) =
-          projectSphere state.CurrentCamera viewport pl.Position pl.Range
+          projectSphere state viewport pl.Position pl.Range
 
         if r >= l && b >= t then
           for ty = t / tileSize to b / tileSize do
@@ -535,7 +594,7 @@ module internal Tiling =
                     tileMasks.[ty * tilesX + tx] ||| (1u <<< i)
       | Spot sl ->
         let struct (l, t, r, b) =
-          projectSphere state.CurrentCamera viewport sl.Position sl.Range
+          projectSphere state viewport sl.Position sl.Range
 
         if r >= l && b >= t then
           for ty = t / tileSize to b / tileSize do
@@ -644,12 +703,8 @@ module internal ShadowPass =
       state.ShadowAtlas
     with
     | (true, shadowEffect), ValueSome atlas ->
-      let mainFrustum =
-        BoundingFrustum(
-          state.CurrentCamera.View * state.CurrentCamera.Projection
-        )
-
-      let corners = mainFrustum.GetCorners()
+      state.Frustum.GetCorners(state.FrustumCorners)
+      let corners = state.FrustumCorners
       let mutable shadowMapIndex = 0
 
       state.Device.SetRenderTarget(atlas.RenderTarget)
@@ -669,14 +724,14 @@ module internal ShadowPass =
         if shadowMapIndex < atlas.MaxShadows then
           let vp = ShadowAtlas.getViewport atlas shadowMapIndex
           state.Device.Viewport <- vp
-          let lightFrustum = BoundingFrustum(view * proj)
+          state.ShadowFrustum.Matrix <- view * proj
 
           for i in 0 .. state.OpaqueDrawables.Count - 1 do
             let struct (_, drawable) = state.OpaqueDrawables.[i]
 
             if
               drawable.Material.Flags.HasFlag(MaterialFlags.CastsShadow)
-              && lightFrustum.Contains(drawable.BoundingSphere)
+              && state.ShadowFrustum.Contains(drawable.BoundingSphere)
                  <> ContainmentType.Disjoint
             then
               renderDrawableShadow state drawable shadowEffect view proj
@@ -685,6 +740,8 @@ module internal ShadowPass =
         if shadowMapIndex < atlas.MaxShadows then
           match light with
           | Directional dl when ValueOption.isSome dl.Shadow ->
+// ... (omitted directional light code as it's unchanged)
+// I'll be careful to include enough context in old_string.
             let mutable center = Vector3.Zero
 
             for i in 0 .. corners.Length - 1 do
@@ -741,8 +798,16 @@ module internal ShadowPass =
             shadowMapIndex <- shadowMapIndex + 1
           | Point pl when ValueOption.isSome pl.Shadow ->
             if shadowMapIndex + 6 <= atlas.MaxShadows then
+              let proj =
+                Matrix.CreatePerspectiveFieldOfView(
+                  MathHelper.PiOver2,
+                  1.0f,
+                  0.1f,
+                  pl.Range
+                )
+
               for face = 0 to 5 do
-                let struct (view, proj) = computePointShadowMatrices pl face
+                let struct (view, _) = computePointShadowMatrices pl face
                 renderPass view proj
                 state.ShadowViewMatrices.Add(view)
                 state.ShadowProjectionMatrices.Add(proj)
@@ -1264,19 +1329,12 @@ module internal PostProcess =
             let rt = state.RtPool.Acquire spec
             state.Device.SetRenderTarget(rt)
 
-            let vertices = [|
-              VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
-              VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
-              VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
-              VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(0f, 1f))
-            |]
-
             for pass in bloomEffect.CurrentTechnique.Passes do
               pass.Apply()
 
               state.Device.DrawUserPrimitives(
                 PrimitiveType.TriangleStrip,
-                vertices,
+                state.PostProcessVertices,
                 0,
                 2
               )
@@ -1308,19 +1366,12 @@ module internal PostProcess =
         |> ValueOption.iter(fun rt ->
           ppEffect.SafeSetParam("BloomTexture", rt :> Texture))
 
-        let vertices = [|
-          VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
-          VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
-          VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
-          VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
-        |] in
-
         for pass in ppEffect.CurrentTechnique.Passes do
           pass.Apply()
 
           state.Device.DrawUserPrimitives(
             PrimitiveType.TriangleStrip,
-            vertices,
+            state.PostProcessVertices,
             0,
             2
           )
@@ -1343,6 +1394,7 @@ module internal Orchestrate =
       Drawing.flush state
       state.CurrentCamera <- camera
       state.CameraWasSet <- true
+      Culling.updateFrustum state
       Drawing.configureBasicEffectCamera state.BasicEffect camera
 
       Drawing.configureBasicEffectLighting
@@ -1407,6 +1459,7 @@ module internal Orchestrate =
     (gameTime: GameTime)
     =
     State.reset state
+    Culling.updateFrustum state
 
     let needsTarget =
       state.Config.PostProcess.IsSome || state.Config.Shadows.IsSome

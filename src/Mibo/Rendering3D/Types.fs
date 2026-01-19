@@ -404,11 +404,12 @@ type EffectBillboardCmd = {
 // ============================================================================
 
 /// Render commands that the pipeline processes in order
+[<Struct>]
 type RenderCommand =
   | SetCamera of camera: Camera
   | SetLighting of lighting: LightingState
   | SetViewport of Viewport
-  | ClearTarget of color: Color voption * clearDepth: bool
+  | ClearTarget of ctColor: Color voption * clearDepth: bool
   | Draw of drawable: Drawable
   | DrawSpriteQuad of spriteQuad: SpriteQuadCmd
   | DrawSpriteBillboard of spriteBillboard: SpriteBillboardCmd
