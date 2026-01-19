@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-01-18
+
 ### Added
 
 - Rendering: **Modern Render Pipeline** (Authored in `Mibo.Rendering.Graphics3D`). A high-performance, data-oriented alternative to the legacy 3D system.
@@ -15,6 +17,9 @@
 - DSL: Enhanced `render { ... }` with `quad`, `billboard`, `line`, and `linesEffect` operations.
 - Assets: Extended `PBR.fx` standard shader with full support for Emissive, Metallic/Roughness, and AO maps.
 
+### Changed
+
+- Rendering: Legacy 3D pipeline is now deprecated in favor of the modern system. It remains available under `Mibo.Rendering.Legacy3D` but it now shows a warning.
 
 ## [1.2.0] - 2026-01-10
 
