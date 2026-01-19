@@ -373,3 +373,31 @@ let withInputMapper<'Model, 'Msg, 'Action when 'Action: comparison>
     originalInit ctx
 
   { program with Init = wrappedInit }
+
+// ============================================================================
+// Mibo.Rendering.Graphics3D Integration
+// ============================================================================
+
+open Mibo.Rendering.Graphics3D
+
+/// <summary>
+/// Adds the advanced 3D rendering pipeline to the program.
+/// </summary>
+/// <remarks>
+/// This replaces the basic Batch3DRenderer with a full forward rendering pipeline
+/// that supports PBR materials, lighting, shadows, and post-processing.
+/// The pipeline uses BasicEffect as fallback if no custom shaders are provided.
+/// </remarks>
+/// <example>
+/// <code>
+/// program |> Program.withPipeline PipelineConfig.forward view
+/// </code>
+/// </example>
+let withPipeline
+  (config: PipelineConfig)
+  (view: GameContext -> 'Model -> RenderBuffer<unit, RenderCommand> -> unit)
+  (program: Program<'Model, 'Msg>)
+  : Program<'Model, 'Msg> =
+  program
+  |> withRenderer(fun game ->
+    RenderPipeline.create config game |> PipelineRenderer.create game view)

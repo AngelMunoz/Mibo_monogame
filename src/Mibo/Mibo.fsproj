@@ -27,6 +27,16 @@
     <Compile Include="QuadBatch.fs" />
     <Compile Include="BillboardBatch.fs" />
     <Compile Include="LineBatch.fs" />
+    <Compile Include="Rendering3D/Lighting.fs" />
+    <Compile Include="Rendering3D/Types.fs" />
+    <Compile Include="Rendering3D/Config.fs" />
+    <Compile Include="Rendering3D/RenderTargetPool.fs" />
+    <Compile Include="Rendering3D/SpriteQuadBatch.fs" />
+    <Compile Include="Rendering3D/BillboardBatch.fs" />
+    <Compile Include="Rendering3D/LineBatch.fs" />
+    <Compile Include="Rendering3D/Pipeline.fs" />
+    <Compile Include="Rendering3D/View.fs" />
+    <Compile Include="Rendering3D/Program.fs" />
     <Compile Include="Graphics3D.fs" />
     <Compile Include="System.fs" />
     <Compile Include="Program.fs" />
@@ -39,7 +49,7 @@
   <ItemGroup>
     <PackageReference Include="FSharp.UMX" Version="1.1.0" />
     <PackageReference Include="JDeck" Version="1.0.0" />
-    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" PrivateAssets="all" />
+    <PackageReference Include="MonoGame.Framework.Native" Version="3.8.*" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

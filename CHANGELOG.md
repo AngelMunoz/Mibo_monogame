@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Added
+
+- Rendering: **Modern Render Pipeline** (Authored in `Mibo.Rendering.Graphics3D`). A high-performance, data-oriented alternative to the legacy 3D system.
+- Rendering: **HDR Rendering Path**. Pipeline now utilizes `Vector4` (128-bit) targets to preserve high-intensity light for bloom and tone mapping.
+- Rendering: **Advanced Post-Processing**. Integrated Bloom (with multi-tap blur) and ACES Tone Mapping.
+- Rendering: **Parity with Legacy System**. Ported optimized batchers for Quads, Billboards, and 3D Lines into the modern pipeline.
+- Rendering: **Skinned Animation**. Full support for Bone matrices in both the PBR forward shader and shadow casting pass.
+- Rendering: **Unlit Routing**. Automatic material-based routing to high-performance unlit or emissive shaders.
+- Rendering: **Flexible Line Rendering**. Added `DrawLinesEffect` for batching 3D lines using custom shaders.
+- DSL: Enhanced `draw { ... }` with `withBones` and `withEmissive` operations.
+- DSL: Enhanced `render { ... }` with `quad`, `billboard`, `line`, and `linesEffect` operations.
+- Assets: Extended `PBR.fx` standard shader with full support for Emissive, Metallic/Roughness, and AO maps.
+
+
 ## [1.2.0] - 2026-01-10
 
 ### Added

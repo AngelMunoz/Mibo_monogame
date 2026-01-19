@@ -1,10 +1,20 @@
 ---
-title: Rendering 3D
+title: Rendering 3D (Legacy)
 category: Rendering
-index: 12
+index: 15
 ---
 
-# Rendering 3D
+# Rendering 3D (Legacy)
+
+> **⚠️ DEPRECATION NOTICE**
+>
+> This document describes the **Legacy 3D System** (`Mibo.Elmish.Graphics3D`).
+>
+> For all new projects, please use the modern **[Render Pipeline](./render-pipeline.html)** (`Mibo.Rendering.Graphics3D`), which supports **Shadows, PBR, Bloom, and Tiled Forward Lighting**.
+>
+> The legacy system is retained only for backward compatibility and extremely simple prototypes.
+
+---
 
 3D rendering in Mibo lives in `Mibo.Elmish.Graphics3D`.
 

@@ -1,0 +1,368 @@
+namespace PipelineSample.Core
+
+open Microsoft.Xna.Framework
+open Microsoft.Xna.Framework.Graphics
+open Microsoft.Xna.Framework.Input
+open Mibo
+open Mibo.Elmish
+open Mibo.Rendering.Graphics3D
+open Mibo.Input
+
+module Game =
+
+  // ─────────────────────────────────────────────────────────────
+  // Messages
+  // ─────────────────────────────────────────────────────────────
+
+  type Msg =
+    | InputMapped of ActionState<GameAction>
+    | Tick of GameTime
+    | Noop
+
+  // Shared ref for input map (allows dynamic remapping)
+  let private inputMapRef: InputMap<GameAction> ref = ref InputMap.empty
+
+  // ─────────────────────────────────────────────────────────────
+  // Init
+  // ─────────────────────────────────────────────────────────────
+
+  let init(ctx: GameContext) : struct (State * Cmd<Msg>) =
+    let inputMap =
+      InputMap.empty
+      // Keyboard controls
+      |> InputMap.key MoveLeft Keys.A
+      |> InputMap.key MoveLeft Keys.Left
+      |> InputMap.key MoveRight Keys.D
+      |> InputMap.key MoveRight Keys.Right
+      |> InputMap.key MoveForward Keys.W
+      |> InputMap.key MoveForward Keys.Up
+      |> InputMap.key MoveBackward Keys.S
+      |> InputMap.key MoveBackward Keys.Down
+      |> InputMap.key Jump Keys.Space
+      // Player 1 gamepad controls
+      |> InputMap.gamepadButton MoveLeft PlayerIndex.One Buttons.DPadLeft
+      |> InputMap.gamepadButton MoveRight PlayerIndex.One Buttons.DPadRight
+      |> InputMap.gamepadButton MoveForward PlayerIndex.One Buttons.DPadUp
+      |> InputMap.gamepadButton MoveBackward PlayerIndex.One Buttons.DPadDown
+      |> InputMap.gamepadButton
+        MoveLeft
+        PlayerIndex.One
+        Buttons.LeftThumbstickLeft
+      |> InputMap.gamepadButton
+        MoveRight
+        PlayerIndex.One
+        Buttons.LeftThumbstickRight
+      |> InputMap.gamepadButton
+        MoveForward
+        PlayerIndex.One
+        Buttons.LeftThumbstickUp
+      |> InputMap.gamepadButton
+        MoveBackward
+        PlayerIndex.One
+        Buttons.LeftThumbstickDown
+      |> InputMap.gamepadButton Jump PlayerIndex.One Buttons.A
+
+    inputMapRef.Value <- inputMap
+
+    // Load models and convert to Mesh
+    let playerModel = Assets.model "Models/Platform/ball_blue" ctx
+    let playerMesh = Mesh.fromModel playerModel |> Seq.head
+    let playerBounds = Platform.computeBounds playerMesh
+
+    let platformModel = Assets.model "Models/Platform/platform_4x4x1_blue" ctx
+    let platformMesh = Mesh.fromModel platformModel |> Seq.head
+    let platformBounds = Platform.computeBounds platformMesh
+
+    // Create platforms with computed bounds
+    let platforms =
+      Platform.positions |> List.map(Platform.create platformBounds)
+
+    let gridVerts, gridLineCount = Grid.create platforms 3.0f Color.White
+    let gridEffect = Assets.effect "Effects/Grid" ctx
+
+    // Load texture
+    let platformTexture =
+      Assets.texture "Models/Platform/platformer_texture_0" ctx
+
+    let assets = {
+      PlayerMesh = playerMesh
+      PlayerBounds = playerBounds
+      PlatformMesh = platformMesh
+      PlatformTexture = platformTexture
+      PlatformBounds = platformBounds
+      PlatformGrid = gridVerts
+      PlatformGridLineCount = gridLineCount
+      GridEffect = gridEffect
+    }
+
+    {
+      PlayerPosition = Vector3(0f, 2f, 0f)
+      Velocity = Vector3.Zero
+      Rotation = Quaternion.Identity
+      IsGrounded = false
+      Actions = ActionState.empty
+      InputMap = inputMap
+      Assets = assets
+      Platforms = platforms
+      Time = 0f
+      EmissivePulse = 10.0f
+    },
+    Cmd.none
+
+  // ─────────────────────────────────────────────────────────────
+  // Update: Composable System Pipeline
+  // ─────────────────────────────────────────────────────────────
+
+  let update (msg: Msg) (state: State) : struct (State * Cmd<Msg>) =
+    match msg with
+    | InputMapped actions -> { state with Actions = actions }, Cmd.none
+
+    | Tick gt ->
+      let dt = float32 gt.ElapsedGameTime.TotalSeconds
+      let newTime = state.Time + dt
+
+      // Pulse between 0.0 (Normal Lit) and 8.0 (Super Bright Glow)
+      // Slower pulse (speed 2.0) to appreciate the transition
+      let s = float32(System.Math.Sin(float newTime * 2.0)) // -1 to 1
+      let t = (s + 1.0f) * 0.5f // 0 to 1
+      let pulse = t * 8.0f
+
+      // Composable system pipeline using Mibo.Elmish.System
+      System.start {
+        state with
+            Time = newTime
+            EmissivePulse = pulse
+      }
+      |> System.pipe(Movement.update dt)
+      |> System.pipe(Physics.update dt)
+      |> System.pipe(Rotation.update dt)
+      |> System.pipe Player.checkRespawn
+      |> System.finish id
+
+    | Noop -> state, Cmd.none
+
+  // ─────────────────────────────────────────────────────────────
+  // View: Render the 3D scene
+  // ─────────────────────────────────────────────────────────────
+
+  let view
+    (ctx: GameContext)
+    (state: State)
+    (buffer: PipelineBuffer<RenderCommand>)
+    =
+    // Camera follows player
+    let cameraOffset = Vector3(8f, 8f, 8f)
+    let cameraPos = state.PlayerPosition + cameraOffset
+
+    let camera =
+      Camera.perspective
+        cameraPos
+        state.PlayerPosition
+        Vector3.Up
+        (MathHelper.ToRadians 45f)
+        (1280f / 720f)
+        0.1f
+        200f
+
+    // Setup rendering environment with directional sunlight + rotating colored point lights
+    let lights = [|
+      // Primary Sunlight (White) - Manually configured for crisp near-field shadows
+      Light.Directional {
+        Direction = Vector3.Normalize(Vector3.Down + Vector3.Forward * 0.5f)
+        Color = Color.LightYellow
+        Intensity = 0.5f
+        Shadow = ValueSome ShadowSettings.defaults
+        CascadeCount = 4
+        CascadeSplits = [| 0.05f; 0.15f; 0.4f; 1.0f |]
+        SourceRadius = 0.1f
+      }
+
+      // Secondary Directional Light (Navy Blue, Angled)
+      Light.Directional {
+        Direction = Vector3.Normalize(Vector3(-1f, -1f, -0.5f))
+        Color = Color.Brown
+        Intensity = 0.5f
+        Shadow = ValueSome ShadowSettings.defaults
+        CascadeCount = 0
+        CascadeSplits = [||]
+        SourceRadius = 0.1f
+      }
+
+      // Spot Lights above each platform
+      let spotColors = [| Color.Orange; Color.DeepPink |]
+
+      for i in 0 .. state.Platforms.Length - 1 do
+        let plat = state.Platforms.[i]
+        let color = spotColors.[i % spotColors.Length]
+
+        Light.Spot {
+          Position = plat.Position + Vector3(0f, 8f, 0f) // Raised to 8 units to cast broader shadows
+          Direction = Vector3.Down
+          Color = color
+          Intensity = 1.2f
+          Range = 25.0f
+          InnerConeAngle = MathHelper.ToRadians(20f)
+          OuterConeAngle = MathHelper.ToRadians(40f) // Widened to 40 degrees
+          Shadow = ValueSome ShadowSettings.defaults
+          SourceRadius = 0.2f
+        }
+
+      // Add 16 colorful moving point lights
+      for i in 0..5 do
+        let angle = (float32 i / 16.0f) * MathHelper.TwoPi + state.Time
+        let radius = 10.0f
+        let x = cos(angle) * radius
+        let z = sin(angle) * radius
+        let h = (float32 i / 16.0f) // Hue
+
+        // Improved Hue-based color selection
+        let color =
+          if h < 0.16f then Color.Red
+          elif h < 0.33f then Color.Purple
+          elif h < 0.5f then Color.GreenYellow
+          elif h < 0.66f then Color.Tomato
+          elif h < 0.83f then Color.SlateGray
+          else Color.Magenta
+
+        Light.Point {
+          Position = Vector3(x, 3f, z)
+          Color = color
+          Intensity = 1.0f
+          Range = 8.0f
+          Shadow = ValueSome ShadowSettings.defaults
+          SourceRadius = 0.1f
+        }
+    |]
+
+    let lighting = {
+      Lighting.defaultSunlight with
+          Lights = lights
+    }
+
+    buffer
+    |> Buffer.camera camera
+    |> Buffer.lighting lighting
+    |> Buffer.clear Color.CornflowerBlue
+    |> Buffer.clearDepth
+    |> Buffer.drawMany(
+      [|
+        for plat in state.Platforms do
+          draw {
+            mesh state.Assets.PlatformMesh
+            at plat.Position
+          }
+      |]
+    )
+    |> Buffer.draw(
+      draw {
+        mesh state.Assets.PlayerMesh
+        at state.PlayerPosition
+        rotatedBy state.Rotation
+        // Remove Unlit flag to enable normal lighting/shadows
+        // withFlags MaterialFlags.Unlit
+        withAlbedo Color.White
+        withEmissive Color.Magenta state.EmissivePulse
+      }
+    )
+    |> Buffer.custom(
+      Grid.draw
+        state.PlayerPosition
+        7.0f
+        state.Assets.GridEffect
+        state.Assets.PlatformGrid
+        state.Assets.PlatformGridLineCount
+    )
+    // 1. Target Circle (Relative Quad)
+    |> Buffer.quadTransparent
+      state.Assets.PlatformTexture
+      (quad {
+        onXZ(Vector2(2.0f, 2.0f))
+        relativeTo(Matrix.CreateTranslation(state.PlayerPosition))
+        at(Vector3(0f, -0.48f, 0f))
+        color(Color.White * 0.3f)
+      })
+    |> Buffer.billboards
+      state.Assets.PlatformTexture
+      ([|
+        let sparkCount = 8
+
+        for i in 0 .. sparkCount - 1 do
+          let angle =
+            float32 i / float32 sparkCount * MathHelper.TwoPi
+            + state.Time * 2.0f
+
+          let offset =
+            Vector3(cos angle, sin(state.Time * 5.0f + float32 i), sin angle)
+            * 1.5f
+
+          billboard {
+            at(state.PlayerPosition + offset)
+            size(Vector2(0.2f, 0.2f))
+            color Color.Yellow
+          }
+      |])
+    // 2. Velocity vector (Line)
+    |> Buffer.line
+      state.PlayerPosition
+      (state.PlayerPosition + state.Velocity * 0.5f)
+      Color.Green
+    |> Buffer.submit
+
+
+  // ─────────────────────────────────────────────────────────────
+  // Subscribe
+  // ─────────────────────────────────────────────────────────────
+
+  let subscribe (ctx: GameContext) (state: State) =
+    Sub.batch [
+      InputMapper.subscribe (fun () -> inputMapRef.Value) InputMapped ctx
+      Keyboard.onPressed
+        (fun key ->
+          match key with
+          | _ -> Noop)
+        ctx
+    ]
+
+  // ─────────────────────────────────────────────────────────────
+  // Program Factory
+  // ─────────────────────────────────────────────────────────────
+
+  /// Creates the program for the platform-specific game to use
+  let create() =
+    Program.mkProgram init update
+    |> Program.withConfig(fun (game, graphics) ->
+      game.Content.RootDirectory <- "Content"
+      game.Window.Title <- "Mibo Render Pipeline Sample"
+      graphics.PreferredBackBufferWidth <- 1280
+      graphics.PreferredBackBufferHeight <- 720
+      graphics.GraphicsProfile <- GraphicsProfile.HiDef
+      game.IsMouseVisible <- true)
+    |> Program.withInput
+    |> Program.withAssets
+    |> Program.withTick Tick
+    |> Program.withSubscription subscribe
+    |> Program.withPipeline
+      (PipelineConfig.defaults
+       |> PipelineConfig.withShadows(
+         ShadowConfig.defaults
+         |> ShadowConfig.withBias 0.0015f 0.005f
+         |> ShadowConfig.withSoftShadows 1.0f
+       )
+       |> PipelineConfig.withPostProcess(
+         PostProcessConfig.defaults
+         |> PostProcessConfig.withBloom {
+           Threshold = 0.9f
+           Intensity = 1.5f
+           Scatter = 0.7f
+         }
+         |> PostProcessConfig.withToneMapping ACES
+       )
+       |> PipelineConfig.withShader
+         ShaderBase.ShadowCaster
+         "Effects/ShadowCaster"
+       |> PipelineConfig.withShader ShaderBase.PBRForward "Effects/PBR"
+       |> PipelineConfig.withShader ShaderBase.Unlit "Effects/Unlit"
+       |> PipelineConfig.withShader ShaderBase.Bloom "Effects/BloomExtract"
+      //  |> PipelineConfig.withShader ShaderBase.PostProcess "Effects/PostProcess"
+      )
+      view
