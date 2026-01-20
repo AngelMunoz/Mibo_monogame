@@ -62,14 +62,52 @@ type Camera = {
   View: Matrix
   Projection: Matrix
   Position: Vector3
-  Forward: Vector3
+  Target: Vector3
+  Up: Vector3
+  Fov: float32
+  Aspect: float32
   Near: float32
   Far: float32
-}
+} with
+  member this.Forward = Vector3.Normalize(this.Target - this.Position)
 
 module Camera =
   /// <summary>
-  /// Create a perspective camera.
+  /// Recomputes the view matrix based on Position, Target, and Up.
+  /// </summary>
+  let rebuildView (c: Camera) =
+    Matrix.CreateLookAt(c.Position, c.Target, c.Up)
+
+  /// <summary>
+  /// Recomputes the projection matrix based on Fov, Aspect, Near, and Far.
+  /// </summary>
+  let rebuildProjection (c: Camera) =
+    Matrix.CreatePerspectiveFieldOfView(c.Fov, c.Aspect, c.Near, c.Far)
+
+  /// <summary>
+  /// Standard perspective camera with sensible defaults.
+  /// </summary>
+  let perspectiveDefaults: Camera =
+    let c = {
+      Position = Vector3(0f, 0f, 10f)
+      Target = Vector3.Zero
+      Up = Vector3.Up
+      Fov = MathHelper.ToRadians 45f
+      Aspect = 16f / 9f
+      Near = 0.1f
+      Far = 1000f
+      View = Matrix.Identity
+      Projection = Matrix.Identity
+    }
+
+    {
+      c with
+          View = rebuildView c
+          Projection = rebuildProjection c
+    }
+
+  /// <summary>
+  /// Create a perspective camera. (Backward compatibility)
   /// </summary>
   let perspective
     (position: Vector3)
@@ -80,19 +118,21 @@ module Camera =
     (near: float32)
     (far: float32)
     : Camera =
-    let forward = Vector3.Normalize(target - position)
-
-    {
-      View = Matrix.CreateLookAt(position, target, up)
-      Projection = Matrix.CreatePerspectiveFieldOfView(fov, aspect, near, far)
+    let c = {
       Position = position
-      Forward = forward
+      Target = target
+      Up = up
+      Fov = fov
+      Aspect = aspect
       Near = near
       Far = far
+      View = Matrix.Identity
+      Projection = Matrix.Identity
     }
+    { c with View = rebuildView c; Projection = rebuildProjection c }
 
   /// <summary>
-  /// Create an orthographic camera.
+  /// Create an orthographic camera. (Backward compatibility)
   /// </summary>
   let orthographic
     (position: Vector3)
@@ -103,28 +143,185 @@ module Camera =
     (near: float32)
     (far: float32)
     : Camera =
-    let forward = Vector3.Normalize(target - position)
-
-    {
-      View = Matrix.CreateLookAt(position, target, up)
-      Projection = Matrix.CreateOrthographic(width, height, near, far)
+    let c = {
       Position = position
-      Forward = forward
+      Target = target
+      Up = up
+      Fov = 0f // Not used for orthographic but keeping struct consistent
+      Aspect = width / height
       Near = near
       Far = far
+      View = Matrix.Identity
+      Projection = Matrix.CreateOrthographic(width, height, near, far)
     }
+    { c with View = rebuildView c }
+
+  /// <summary>Sets the Field of View in radians.</summary>
+  let inline withFov fov (c: Camera) =
+    let next = { c with Fov = fov }
+
+    {
+      next with
+          Projection = rebuildProjection next
+    }
+
+  /// <summary>Sets the aspect ratio (Width / Height).</summary>
+  let inline withAspect aspect (c: Camera) =
+    let next = { c with Aspect = aspect }
+
+    {
+      next with
+          Projection = rebuildProjection next
+    }
+
+  /// <summary>Sets the near and far clipping planes.</summary>
+  let inline withRange (near: float32) (far: float32) (c: Camera) =
+    let next = { c with Near = near; Far = far }
+
+    {
+      next with
+          Projection = rebuildProjection next
+    }
+
+  /// <summary>Sets the world-space position of the camera.</summary>
+  let inline at pos (c: Camera) =
+    let next = { c with Position = pos }
+    { next with View = rebuildView next }
+
+  /// <summary>Sets the target point the camera is looking at.</summary>
+  let inline lookingAt target (c: Camera) =
+    let next = { c with Target = target }
+    { next with View = rebuildView next }
+
+  /// <summary>Sets the world-space "up" vector (typically Vector3.Up).</summary>
+  let inline withUp up (c: Camera) =
+    let next = { c with Up = up }
+    { next with View = rebuildView next }
+
+  /// <summary>
+  /// Positions the camera to look at a target from a specific position.
+  /// </summary>
+  let lookAt position target (c: Camera) =
+    let next = {
+      c with
+          Position = position
+          Target = target
+    }
+
+    { next with View = rebuildView next }
+
+  /// <summary>
+  /// Offsets the camera position along its current forward axis by a distance from the target.
+  /// Useful for zooming or maintaining distance in an orbit.
+  /// </summary>
+  let withDistance distance (c: Camera) =
+    let dir = Vector3.Normalize(c.Position - c.Target)
+
+    let next = {
+      c with
+          Position = c.Target + dir * distance
+    }
+
+    { next with View = rebuildView next }
+
+  /// <summary>
+  /// Orbits the camera around its current target using spherical angles.
+  /// </summary>
+  /// <param name="yaw">Horizontal rotation in radians.</param>
+  /// <param name="pitch">Vertical rotation in radians.</param>
+  let withAngles (yaw: float32) (pitch: float32) (c: Camera) =
+    let distance = Vector3.Distance(c.Position, c.Target)
+
+    let pos =
+      Vector3(
+        distance * float32(Math.Sin(float yaw)) * float32(Math.Cos(float pitch)),
+        distance * float32(Math.Sin(float pitch)),
+        distance * float32(Math.Cos(float yaw)) * float32(Math.Cos(float pitch))
+      )
+      + c.Target
+
+    let next = { c with Position = pos }
+    { next with View = rebuildView next }
+
+  /// <summary>
+  /// Full orbit configuration around a target.
+  /// </summary>
+  let orbit target (yaw: float32) (pitch: float32) distance (c: Camera) =
+    let pos =
+      Vector3(
+        distance * float32(Math.Sin(float yaw)) * float32(Math.Cos(float pitch)),
+        distance * float32(Math.Sin(float pitch)),
+        distance * float32(Math.Cos(float yaw)) * float32(Math.Cos(float pitch))
+      )
+      + target
+
+    let next = {
+      c with
+          Position = pos
+          Target = target
+    }
+
+    { next with View = rebuildView next }
+
+  /// <summary>
+  /// Creates a ray from screen coordinates for mouse/touch picking.
+  /// </summary>
+  let screenPointToRay
+    (camera: Camera)
+    (screenPos: Vector2)
+    (viewport: Viewport)
+    : Ray =
+    let nearPoint = Vector3(screenPos.X, screenPos.Y, 0.0f)
+    let farPoint = Vector3(screenPos.X, screenPos.Y, 1.0f)
+
+    let nearSource =
+      viewport.Unproject(
+        nearPoint,
+        camera.Projection,
+        camera.View,
+        Matrix.Identity
+      )
+
+    let farSource =
+      viewport.Unproject(
+        farPoint,
+        camera.Projection,
+        camera.View,
+        Matrix.Identity
+      )
+
+    let direction = farSource - nearSource
+    direction.Normalize()
+
+    Ray(nearSource, direction)
+
+  /// <summary>
+  /// Calculates the BoundingFrustum for the camera.
+  /// </summary>
+  let boundingFrustum(camera: Camera) : BoundingFrustum =
+    BoundingFrustum(camera.View * camera.Projection)
 
   /// <summary>
   /// Identity camera (for testing).
   /// </summary>
-  let identity: Camera = {
-    View = Matrix.Identity
-    Projection = Matrix.Identity
-    Position = Vector3.Zero
-    Forward = Vector3.Forward
-    Near = 0.1f
-    Far = 1000f
-  }
+  let identity: Camera =
+    let c = {
+      Position = Vector3.Zero
+      Target = Vector3.Forward
+      Up = Vector3.Up
+      Fov = MathHelper.ToRadians 45f
+      Aspect = 1f
+      Near = 0.1f
+      Far = 1000f
+      View = Matrix.Identity
+      Projection = Matrix.Identity
+    }
+
+    {
+      c with
+          View = rebuildView c
+          Projection = rebuildProjection c
+    }
 
 /// Mesh geometry reference
 [<Struct>]

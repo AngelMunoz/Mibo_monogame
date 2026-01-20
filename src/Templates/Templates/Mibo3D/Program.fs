@@ -5,7 +5,7 @@ open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open Mibo.Elmish
-open Mibo.Elmish.Graphics3D
+open Mibo.Rendering.Graphics3D
 open Mibo.Input
 
 // ─────────────────────────────────────────────────────────────
@@ -125,28 +125,31 @@ let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
 // View
 // ─────────────────────────────────────────────────────────────
 
-let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd3D>) =
-  // Static Camera to see the whole bounds
+let view
+  (ctx: GameContext)
+  (model: Model)
+  (buffer: RenderBuffer<unit, RenderCommand>)
+  =
+  // Setup camera using the property-driven API
   let camera =
-    Camera3D.lookAt
-      (Vector3(12.f, 12.f, 12.f))
-      Vector3.Zero
-      Vector3.Up
-      (MathHelper.ToRadians 45.f)
-      (800.f / 600.f)
-      0.1f
-      100.f
+    Camera.perspectiveDefaults
+    |> Camera.withAspect(800.f / 600.f)
+    |> Camera.lookAt (Vector3(12.f, 12.f, 12.f)) Vector3.Zero
 
-  Draw3D.camera camera buffer
+  buffer |> Buffer.clear Color.CornflowerBlue |> Buffer.camera camera |> ignore
 
-  // Load the cube model
-  let cube = Assets.model "cube" ctx
+  // Load the cube model mesh
+  let cubeModel = Assets.model "cube" ctx
+  let cubeMesh = Mesh.fromModel cubeModel |> Seq.head
 
-  // Draw cube player
-  Draw3D.mesh cube (Matrix.CreateTranslation model.Position)
-  |> Draw3D.withColor Color.Red
-  |> Draw3D.withBasicEffect
-  |> Draw3D.submit buffer
+  // Build and draw the player cube using the declarative DSL
+  draw {
+    mesh cubeMesh
+    at model.Position
+    withAlbedo Color.Red
+  }
+  |> buffer.Draw
+  |> ignore
 
 // ─────────────────────────────────────────────────────────────
 // Program
@@ -157,14 +160,9 @@ let main _ =
   let program =
     Program.mkProgram init update
     |> Program.withAssets
-    |> Program.withRenderer(
-      Batch3DRenderer.createWithConfig
-        {
-          Batch3DConfig.defaults with
-              ClearColor = ValueSome Color.CornflowerBlue
-        }
-        view
-    )
+    |> Program.withRenderer(fun game ->
+      let pipeline = RenderPipeline.create PipelineConfig.defaults game
+      PipelineRenderer.create game view pipeline)
     |> Program.withInput
     |> Program.withSubscription(fun ctx _ ->
       InputMapper.subscribeStatic inputMap InputChanged ctx)

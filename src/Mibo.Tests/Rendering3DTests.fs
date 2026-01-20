@@ -64,20 +64,8 @@ module TestHelpers =
     }
 
   /// Create a camera at a position looking at origin
-  let cameraAt(pos: Vector3) : Camera = {
-    View = Matrix.CreateLookAt(pos, Vector3.Zero, Vector3.Up)
-    Projection =
-      Matrix.CreatePerspectiveFieldOfView(
-        MathHelper.PiOver4,
-        16f / 9f,
-        0.1f,
-        1000f
-      )
-    Position = pos
-    Forward = Vector3.Normalize(-pos)
-    Near = 0.1f
-    Far = 1000f
-  }
+  let cameraAt(pos: Vector3) : Camera =
+    Camera.perspective pos Vector3.Zero Vector3.Up MathHelper.PiOver4 (16f / 9f) 0.1f 1000f
 
 // ============================================================================
 // Buffer Ordering Tests
@@ -469,10 +457,10 @@ let cameraTests =
       let cam = Camera.identity
       Expect.equal cam.View Matrix.Identity "View should be identity"
 
-      Expect.equal
-        cam.Projection
-        Matrix.Identity
-        "Projection should be identity"
+      // Projection should not be identity now because it's recomputed with defaults
+      Expect.isFalse
+        (cam.Projection = Matrix.Identity)
+        "Projection should be valid perspective"
 
       Expect.equal cam.Position Vector3.Zero "Position should be zero"
 
