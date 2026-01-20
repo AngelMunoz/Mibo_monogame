@@ -2,14 +2,23 @@
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-01-19
+
 ### Added
 
+- Rendering: **Property-Driven Camera API**. Refactored `Camera` struct to preserve projection and view parameters, enabling a self-documenting DSL for camera configuration.
+- Rendering: **Composable Camera DSL**. Introduced pipeline-friendly helpers including `withFov`, `withAspect`, `withRange`, `at`, `lookingAt`, `lookAt`, `withDistance`, `withAngles`, and `orbit` for ergonomic camera manipulation.
 - Rendering: **Aggregate Dynamic Lighting**. Introduced `AddLight` command and `withDefaultLighting` configuration to support modular, additive lighting contributions. Modules can now independently contribute lights (point, spot, directional) to the scene aggregate without destructive overrides of global lighting state.
+
+### Changed
+
+- Rendering: **Performance Optimization**. Consolidated `PreRenderCallback` and lighting updates into `Drawing.flush` to eliminate redundant array allocations every frame.
+- Templates: **Modern 3D Template**. Migrated the `Mibo3D` project template to utilize the high-performance `Mibo.Rendering.Graphics3D` engine and the new composable Camera API.
 
 ### Fixed
 
 - Rendering: Removed CPU-side vertex data scanning for mesh bounding box computation. This prevents crashes on Android and other platforms where GPU vertex buffers are often allocated as write-only. Bounding boxes are now derived safely from bounding spheres.
-
+- Rendering: Eliminated redundant null checks and boxing in `configureBasicEffectLighting` for better error visibility and performance.
 
 ## [1.3.0] - 2026-01-18
 
