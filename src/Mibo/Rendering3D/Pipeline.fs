@@ -96,6 +96,7 @@ type internal PipelineState = {
   mutable CurrentCamera: Mibo.Rendering.Graphics3D.Camera
   mutable CurrentLighting: LightingState
   mutable CameraWasSet: bool
+  AccumulatedLights: ResizeArray<Light>
   OpaqueDrawables: ResizeArray<struct (float32 * Drawable)>
   TransparentDrawables: ResizeArray<struct (float32 * Drawable)>
   // Batchers
@@ -136,6 +137,7 @@ module internal State =
     CurrentCamera = Camera.identity
     CurrentLighting = Lighting.ambient
     CameraWasSet = false
+    AccumulatedLights = ResizeArray<Light>(32)
     OpaqueDrawables = ResizeArray<struct (float32 * Drawable)>(256)
     TransparentDrawables = ResizeArray<struct (float32 * Drawable)>(64)
     SpriteQuadBatch = Unchecked.defaultof<_>
@@ -165,6 +167,11 @@ module internal State =
 
     state.CurrentLighting <-
       state.Config.DefaultLighting |> ValueOption.defaultValue Lighting.ambient
+
+    state.AccumulatedLights.Clear()
+
+    state.CurrentLighting.Lights
+    |> Array.iter state.AccumulatedLights.Add
 
     state.CameraWasSet <- false
     state.OpaqueDrawables.Clear()
@@ -289,12 +296,12 @@ module internal EffectHelpers =
 
 module internal LightPacking =
   let packLightData(state: PipelineState) =
-    let lights = state.CurrentLighting.Lights
+    let lights = state.AccumulatedLights
 
-    if lights.Length = 0 then
+    if lights.Count = 0 then
       state.LightDataTexture <- ValueNone
     else
-      let requiredSize = lights.Length * 4
+      let requiredSize = lights.Count * 4
 
       if state.LightDataBuffer.Length < requiredSize then
         state.LightDataBuffer <- Array.zeroCreate requiredSize
@@ -302,7 +309,7 @@ module internal LightPacking =
       let data = state.LightDataBuffer
       let mutable shadowMapIndex = 0
 
-      for i = 0 to lights.Length - 1 do
+      for i = 0 to lights.Count - 1 do
         let offset = i * 4
 
         match lights.[i] with
@@ -369,12 +376,12 @@ module internal LightPacking =
 
       let tex =
         match state.LightDataTexture with
-        | ValueSome t when t.Height = lights.Length -> t
+        | ValueSome t when t.Height = lights.Count -> t
         | ValueSome t ->
             t.Dispose()
-            new Texture2D(state.Device, 4, lights.Length, false, SurfaceFormat.Vector4)
+            new Texture2D(state.Device, 4, lights.Count, false, SurfaceFormat.Vector4)
         | ValueNone ->
-            new Texture2D(state.Device, 4, lights.Length, false, SurfaceFormat.Vector4)
+            new Texture2D(state.Device, 4, lights.Count, false, SurfaceFormat.Vector4)
 
       tex.SetData(data, 0, requiredSize)
       state.LightDataTexture <- ValueSome tex
@@ -574,9 +581,9 @@ module internal Tiling =
       System.Array.Clear(state.TileMasks, 0, requiredTiles)
 
     let tileMasks = state.TileMasks
-    let lights = state.CurrentLighting.Lights
+    let lights = state.AccumulatedLights
 
-    for i = 0 to min 31 (lights.Length - 1) do
+    for i = 0 to min 31 (lights.Count - 1) do
       match lights.[i] with
       | Directional _ ->
         for j = 0 to requiredTiles - 1 do
@@ -736,7 +743,7 @@ module internal ShadowPass =
             then
               renderDrawableShadow state drawable shadowEffect view proj
 
-      for light in state.CurrentLighting.Lights do
+      for light in state.AccumulatedLights do
         if shadowMapIndex < atlas.MaxShadows then
           match light with
           | Directional dl when ValueOption.isSome dl.Shadow ->
@@ -824,34 +831,38 @@ module internal ShadowPass =
 module internal Drawing =
   let configureBasicEffectLighting
     (effect: BasicEffect)
-    (lighting: LightingState)
+    (ambientColor: Color)
+    (ambientIntensity: float32)
+    (lights: seq<Light>)
     =
-    effect.LightingEnabled <- true
+    if isNull (box effect) then ()
+    else
+      effect.LightingEnabled <- true
 
-    effect.AmbientLightColor <-
-      lighting.AmbientColor.ToVector3() * lighting.AmbientIntensity
+      effect.AmbientLightColor <-
+        ambientColor.ToVector3() * ambientIntensity
 
-    effect.DirectionalLight0.Enabled <- false
-    effect.DirectionalLight1.Enabled <- false
-    effect.DirectionalLight2.Enabled <- false
-    let mutable lightIndex = 0
+      effect.DirectionalLight0.Enabled <- false
+      effect.DirectionalLight1.Enabled <- false
+      effect.DirectionalLight2.Enabled <- false
+      let mutable lightIndex = 0
 
-    for light in lighting.Lights do
-      if lightIndex < 3 then
-        match light with
-        | Directional dl ->
-          let beLight =
-            match lightIndex with
-            | 0 -> effect.DirectionalLight0
-            | 1 -> effect.DirectionalLight1
-            | _ -> effect.DirectionalLight2
+      for light in lights do
+        if lightIndex < 3 then
+          match light with
+          | Directional dl ->
+            let beLight =
+              match lightIndex with
+              | 0 -> effect.DirectionalLight0
+              | 1 -> effect.DirectionalLight1
+              | _ -> effect.DirectionalLight2
 
-          beLight.Enabled <- true
-          beLight.Direction <- dl.Direction
-          beLight.DiffuseColor <- dl.Color.ToVector3() * dl.Intensity
-          beLight.SpecularColor <- Vector3.Zero
-          lightIndex <- lightIndex + 1
-        | _ -> ()
+            beLight.Enabled <- true
+            beLight.Direction <- dl.Direction
+            beLight.DiffuseColor <- dl.Color.ToVector3() * dl.Intensity
+            beLight.SpecularColor <- Vector3.Zero
+            lightIndex <- lightIndex + 1
+          | _ -> ()
 
   let configureBasicEffectCamera
     (effect: BasicEffect)
@@ -895,7 +906,7 @@ module internal Drawing =
 
           effect.SafeSetParam(
             "LightCount",
-            float32 state.CurrentLighting.Lights.Length
+            float32 state.AccumulatedLights.Count
           )
         | ValueNone -> effect.SafeSetParam("LightCount", 0.0f)
 
@@ -1010,7 +1021,11 @@ module internal Drawing =
     match effect with
     | :? BasicEffect as be ->
       if not(drawable.Material.Flags.HasFlag(MaterialFlags.Unlit)) then
-        configureBasicEffectLighting be state.CurrentLighting
+        configureBasicEffectLighting 
+          be 
+          state.CurrentLighting.AmbientColor 
+          state.CurrentLighting.AmbientIntensity 
+          state.AccumulatedLights
       else
         be.LightingEnabled <- false
         be.AmbientLightColor <- Vector3.One
@@ -1250,6 +1265,11 @@ module internal Drawing =
       state.TransparentDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
         d2.CompareTo(d1))
 
+      state.CurrentLighting <- {
+        state.CurrentLighting with
+            Lights = state.AccumulatedLights.ToArray()
+      }
+
       ShadowPass.render state
       LightPacking.packLightData state
       LightPacking.packShadowMatrices state
@@ -1399,10 +1419,34 @@ module internal Orchestrate =
 
       Drawing.configureBasicEffectLighting
         state.BasicEffect
-        state.CurrentLighting
+        state.CurrentLighting.AmbientColor
+        state.CurrentLighting.AmbientIntensity
+        state.AccumulatedLights
     | SetLighting lighting ->
       state.CurrentLighting <- lighting
-      Drawing.configureBasicEffectLighting state.BasicEffect lighting
+      state.AccumulatedLights.Clear()
+
+      lighting.Lights
+      |> Array.iter state.AccumulatedLights.Add
+
+      Drawing.configureBasicEffectLighting 
+        state.BasicEffect 
+        state.CurrentLighting.AmbientColor 
+        state.CurrentLighting.AmbientIntensity 
+        state.AccumulatedLights
+    | AddLight light ->
+      state.AccumulatedLights.Add(light)
+
+      // BasicEffect only supports 3 directional lights, so we only reconfigure if it's directional
+      match light with
+      | Directional _ ->
+        // This is a bit inefficient as it reconfigures the whole state, but BasicEffect is fallback
+        Drawing.configureBasicEffectLighting 
+            state.BasicEffect 
+            state.CurrentLighting.AmbientColor 
+            state.CurrentLighting.AmbientIntensity 
+            state.AccumulatedLights
+      | _ -> ()
     | SetViewport viewport ->
       Drawing.flush state
       state.Device.Viewport <- viewport
@@ -1482,6 +1526,11 @@ module internal Orchestrate =
 
     for i in 0 .. buffer.Count - 1 do
       let struct (_, cmd) = buffer.[i] in processCommand state cmd
+
+    state.CurrentLighting <- {
+      state.CurrentLighting with
+          Lights = state.AccumulatedLights.ToArray()
+    }
 
     state.Config.PreRenderCallback
     |> ValueOption.iter(fun cb ->

@@ -150,7 +150,7 @@ module Game =
     (state: State)
     (buffer: PipelineBuffer<RenderCommand>)
     =
-    // Camera follows player
+    // 1. Camera
     let cameraOffset = Vector3(8f, 8f, 8f)
     let cameraPos = state.PlayerPosition + cameraOffset
 
@@ -164,149 +164,26 @@ module Game =
         0.1f
         200f
 
-    // Setup rendering environment with directional sunlight + rotating colored point lights
-    let lights = [|
-      // Primary Sunlight (White) - Manually configured for crisp near-field shadows
-      Light.Directional {
-        Direction = Vector3.Normalize(Vector3.Down + Vector3.Forward * 0.5f)
-        Color = Color.LightYellow
-        Intensity = 0.5f
-        Shadow = ValueSome ShadowSettings.defaults
-        CascadeCount = 4
-        CascadeSplits = [| 0.05f; 0.15f; 0.4f; 1.0f |]
-        SourceRadius = 0.1f
-      }
+    buffer.Camera(camera).Clear(Color.CornflowerBlue).ClearDepth() |> ignore
 
-      // Secondary Directional Light (Navy Blue, Angled)
-      Light.Directional {
-        Direction = Vector3.Normalize(Vector3(-1f, -1f, -0.5f))
-        Color = Color.Brown
-        Intensity = 0.5f
-        Shadow = ValueSome ShadowSettings.defaults
-        CascadeCount = 0
-        CascadeSplits = [||]
-        SourceRadius = 0.1f
-      }
+    // 2. Global Lighting & Environment
+    Environment.viewPlatforms state buffer
+    Environment.viewDynamicLights state buffer
 
-      // Spot Lights above each platform
-      let spotColors = [| Color.Orange; Color.DeepPink |]
+    // 3. Player & Logic
+    Player.view state buffer
 
-      for i in 0 .. state.Platforms.Length - 1 do
-        let plat = state.Platforms.[i]
-        let color = spotColors.[i % spotColors.Length]
-
-        Light.Spot {
-          Position = plat.Position + Vector3(0f, 8f, 0f) // Raised to 8 units to cast broader shadows
-          Direction = Vector3.Down
-          Color = color
-          Intensity = 1.2f
-          Range = 25.0f
-          InnerConeAngle = MathHelper.ToRadians(20f)
-          OuterConeAngle = MathHelper.ToRadians(40f) // Widened to 40 degrees
-          Shadow = ValueSome ShadowSettings.defaults
-          SourceRadius = 0.2f
-        }
-
-      // Add 16 colorful moving point lights
-      for i in 0..5 do
-        let angle = (float32 i / 16.0f) * MathHelper.TwoPi + state.Time
-        let radius = 10.0f
-        let x = cos(angle) * radius
-        let z = sin(angle) * radius
-        let h = (float32 i / 16.0f) // Hue
-
-        // Improved Hue-based color selection
-        let color =
-          if h < 0.16f then Color.Red
-          elif h < 0.33f then Color.Purple
-          elif h < 0.5f then Color.GreenYellow
-          elif h < 0.66f then Color.Tomato
-          elif h < 0.83f then Color.SlateGray
-          else Color.Magenta
-
-        Light.Point {
-          Position = Vector3(x, 3f, z)
-          Color = color
-          Intensity = 1.0f
-          Range = 8.0f
-          Shadow = ValueSome ShadowSettings.defaults
-          SourceRadius = 0.1f
-        }
-    |]
-
-    let lighting = {
-      Lighting.defaultSunlight with
-          Lights = lights
-    }
-
+    // 4. Custom Grid & UI
     buffer
-    |> Buffer.camera camera
-    |> Buffer.lighting lighting
-    |> Buffer.clear Color.CornflowerBlue
-    |> Buffer.clearDepth
-    |> Buffer.drawMany(
-      [|
-        for plat in state.Platforms do
-          draw {
-            mesh state.Assets.PlatformMesh
-            at plat.Position
-          }
-      |]
-    )
-    |> Buffer.draw(
-      draw {
-        mesh state.Assets.PlayerMesh
-        at state.PlayerPosition
-        rotatedBy state.Rotation
-        // Remove Unlit flag to enable normal lighting/shadows
-        // withFlags MaterialFlags.Unlit
-        withAlbedo Color.White
-        withEmissive Color.Magenta state.EmissivePulse
-      }
-    )
-    |> Buffer.custom(
-      Grid.draw
-        state.PlayerPosition
-        7.0f
-        state.Assets.GridEffect
-        state.Assets.PlatformGrid
-        state.Assets.PlatformGridLineCount
-    )
-    // 1. Target Circle (Relative Quad)
-    |> Buffer.quadTransparent
-      state.Assets.PlatformTexture
-      (quad {
-        onXZ(Vector2(2.0f, 2.0f))
-        relativeTo(Matrix.CreateTranslation(state.PlayerPosition))
-        at(Vector3(0f, -0.48f, 0f))
-        color(Color.White * 0.3f)
-      })
-    |> Buffer.billboards
-      state.Assets.PlatformTexture
-      ([|
-        let sparkCount = 8
-
-        for i in 0 .. sparkCount - 1 do
-          let angle =
-            float32 i / float32 sparkCount * MathHelper.TwoPi
-            + state.Time * 2.0f
-
-          let offset =
-            Vector3(cos angle, sin(state.Time * 5.0f + float32 i), sin angle)
-            * 1.5f
-
-          billboard {
-            at(state.PlayerPosition + offset)
-            size(Vector2(0.2f, 0.2f))
-            color Color.Yellow
-          }
-      |])
-    // 2. Velocity vector (Line)
-    |> Buffer.line
-      state.PlayerPosition
-      (state.PlayerPosition + state.Velocity * 0.5f)
-      Color.Green
-    |> Buffer.submit
+      .Custom(
+        Grid.draw
+          state.PlayerPosition
+          7.0f
+          state.Assets.GridEffect
+          state.Assets.PlatformGrid
+          state.Assets.PlatformGridLineCount
+      )
+      .Submit()
 
 
   // ─────────────────────────────────────────────────────────────
@@ -357,6 +234,22 @@ module Game =
          }
          |> PostProcessConfig.withToneMapping ACES
        )
+       |> PipelineConfig.withDefaultLighting {
+         AmbientColor = Color(20, 20, 30)
+         AmbientIntensity = 0.5f
+         Lights = [|
+           // Primary Sunlight
+           Light.Directional {
+             Direction = Vector3.Normalize(Vector3.Down + Vector3.Down * 0.5f)
+             Color = Color.White
+             Intensity = 1f
+             Shadow = ValueSome ShadowSettings.defaults
+             CascadeCount = 4
+             CascadeSplits = [| 0.05f; 0.15f; 0.4f; 1.0f |]
+             SourceRadius = 0.1f
+           }
+         |]
+       }
        |> PipelineConfig.withShader
          ShaderBase.ShadowCaster
          "Effects/ShadowCaster"

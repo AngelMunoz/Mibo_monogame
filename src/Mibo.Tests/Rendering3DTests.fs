@@ -289,7 +289,8 @@ let dslTests =
 
       match cmd1 with
       | SetLighting _ -> ()
-      | _ -> failtest "cmd1 should be SetLighting"
+      | AddLight _ -> ()
+      | _ -> failtest "cmd1 should be SetLighting or AddLight"
 
       match cmd2 with
       | ClearTarget(ValueSome _, true) -> ()
@@ -301,6 +302,7 @@ let dslTests =
 
       match cmd4 with
       | Draw _ -> ()
+      | _ -> failtest "cmd4 should be Draw"
 
     testCase "draw CE outputs correct position"
     <| fun _ ->
@@ -681,11 +683,10 @@ let pipelineOrchestrationTests =
           SourceRadius = 0f
         }
 
-      state.CurrentLighting <- {
-        AmbientColor = Color.Black
-        AmbientIntensity = 0f
-        Lights = [| dirLight; pointInside; pointOutside |]
-      }
+      state.AccumulatedLights.Clear()
+      state.AccumulatedLights.Add(dirLight)
+      state.AccumulatedLights.Add(pointInside)
+      state.AccumulatedLights.Add(pointOutside)
 
       let tileMasks = Tiling.cullLights state
 
@@ -722,11 +723,8 @@ let pipelineOrchestrationTests =
           SourceRadius = 0f
         }
 
-      state.CurrentLighting <- {
-        AmbientColor = Color.Black
-        AmbientIntensity = 0f
-        Lights = [| pointLight |]
-      }
+      state.AccumulatedLights.Clear()
+      state.AccumulatedLights.Add(pointLight)
 
       let tileMasks = Tiling.cullLights state
 
@@ -776,4 +774,78 @@ let meshTests =
       Expect.isTrue
         (mesh.BoundingSphere.Radius > 3f)
         "BoundingSphere radius should be > 3"
+  ]
+
+// ============================================================================
+// Aggregate Lighting Tests
+// ============================================================================
+
+[<Tests>]
+let aggregateLightingTests =
+  testList "Aggregate Lighting" [
+    testCase "AddLight appends to accumulated lights"
+    <| fun _ ->
+      let config = PipelineConfig.defaults
+      let state = State.create config
+      
+      let light1 = Light.Directional { 
+        Direction = Vector3.Down; Color = Color.White; Intensity = 1f; 
+        Shadow = ValueNone; CascadeCount = 0; CascadeSplits = [||]; SourceRadius = 0f 
+      }
+      let light2 = Light.Point { 
+        Position = Vector3.One; Color = Color.Red; Intensity = 0.5f; 
+        Range = 10f; Shadow = ValueNone; SourceRadius = 0f 
+      }
+
+      Orchestrate.processCommand state (SetLighting { AmbientColor = Color.Black; AmbientIntensity = 1f; Lights = [| light1 |] })
+      Expect.equal state.AccumulatedLights.Count 1 "Should have 1 light after SetLighting"
+      
+      Orchestrate.processCommand state (AddLight light2)
+      Expect.equal state.AccumulatedLights.Count 2 "Should have 2 lights after AddLight"
+      Expect.equal state.AccumulatedLights.[0] light1 "First light should be light1"
+      Expect.equal state.AccumulatedLights.[1] light2 "Second light should be light2"
+
+    testCase "SetLighting clears accumulated lights"
+    <| fun _ ->
+      let config = PipelineConfig.defaults
+      let state = State.create config
+      
+      let light1 = Light.Directional { 
+        Direction = Vector3.Down; Color = Color.White; Intensity = 1f; 
+        Shadow = ValueNone; CascadeCount = 0; CascadeSplits = [||]; SourceRadius = 0f 
+      }
+      let light2 = Light.Point { 
+        Position = Vector3.One; Color = Color.Red; Intensity = 0.5f; 
+        Range = 10f; Shadow = ValueNone; SourceRadius = 0f 
+      }
+
+      Orchestrate.processCommand state (AddLight light1)
+      Orchestrate.processCommand state (SetLighting { AmbientColor = Color.Black; AmbientIntensity = 1f; Lights = [| light2 |] })
+      
+      Expect.equal state.AccumulatedLights.Count 1 "Should only have 1 light after SetLighting"
+      Expect.equal state.AccumulatedLights.[0] light2 "The light should be light2"
+
+    testCase "Render pass aggregates lights before flush"
+    <| fun _ ->
+      let buffer = RenderBuffer<unit, RenderCommand>()
+      let config = PipelineConfig.defaults
+      let state = State.create config
+      
+      let light1 = Light.Directional { 
+        Direction = Vector3.Down; Color = Color.White; Intensity = 1f; 
+        Shadow = ValueNone; CascadeCount = 0; CascadeSplits = [||]; SourceRadius = 0f 
+      }
+      let light2 = Light.Point { 
+        Position = Vector3.One; Color = Color.Red; Intensity = 0.5f; 
+        Range = 10f; Shadow = ValueNone; SourceRadius = 0f 
+      }
+
+      buffer.Add((), SetLighting { AmbientColor = Color.Black; AmbientIntensity = 1f; Lights = [| light1 |] })
+      buffer.Add((), AddLight light2)
+      
+      Orchestrate.render state buffer (GameTime())
+      
+      Expect.equal state.CurrentLighting.Lights.Length 2 "CurrentLighting should have 2 lights after render"
+      Expect.equal state.CurrentLighting.Lights.[0] light1 "First light should be light1"
+      Expect.equal state.CurrentLighting.Lights.[1] light2 "Second light should be light2"
   ]

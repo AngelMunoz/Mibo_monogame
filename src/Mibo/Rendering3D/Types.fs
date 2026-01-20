@@ -139,21 +139,7 @@ type Mesh = {
 
 module Mesh =
   let private computeBox(modelMesh: ModelMesh) : BoundingBox =
-    let mutable min = Vector3(infinityf, infinityf, infinityf)
-    let mutable max = Vector3(-infinityf, -infinityf, -infinityf)
-
-    for part in modelMesh.MeshParts do
-      let vertexSize = part.VertexBuffer.VertexDeclaration.VertexStride / 4
-      let data = Array.zeroCreate<float32>(part.NumVertices * vertexSize)
-      part.VertexBuffer.GetData(data)
-
-      for i in 0 .. part.NumVertices - 1 do
-        let idx = i * vertexSize
-        let pos = Vector3(data.[idx], data.[idx + 1], data.[idx + 2])
-        min <- Vector3.Min(min, pos)
-        max <- Vector3.Max(max, pos)
-
-    BoundingBox(min, max)
+    BoundingBox.CreateFromSphere(modelMesh.BoundingSphere)
 
   let fromModelMesh(modelMesh: ModelMesh) : Mesh seq =
     let box = computeBox modelMesh
@@ -408,6 +394,7 @@ type EffectBillboardCmd = {
 type RenderCommand =
   | SetCamera of camera: Camera
   | SetLighting of lighting: LightingState
+  | AddLight of light: Light
   | SetViewport of Viewport
   | ClearTarget of ctColor: Color voption * clearDepth: bool
   | Draw of drawable: Drawable

@@ -7,22 +7,15 @@ open Microsoft.Xna.Framework.Graphics
 // Platform System: Bounds computation and collision detection
 // ─────────────────────────────────────────────────────────────
 
-/// Compute bounding box from a 3D Model by scanning vertex data
+/// Compute bounding box from a 3D Model using its bounding sphere
 let computeBounds(model: Model) : BoundingBox =
   let mutable min = Vector3(infinityf, infinityf, infinityf)
   let mutable max = Vector3(-infinityf, -infinityf, -infinityf)
 
   for mesh in model.Meshes do
-    for part in mesh.MeshParts do
-      let vertexSize = part.VertexBuffer.VertexDeclaration.VertexStride / 4
-      let data = Array.zeroCreate<float32>(part.NumVertices * vertexSize)
-      part.VertexBuffer.GetData(data)
-
-      for i in 0 .. part.NumVertices - 1 do
-        let idx = i * vertexSize
-        let pos = Vector3(data.[idx], data.[idx + 1], data.[idx + 2])
-        min <- Vector3.Min(min, pos)
-        max <- Vector3.Max(max, pos)
+    let box = BoundingBox.CreateFromSphere(mesh.BoundingSphere)
+    min <- Vector3.Min(min, box.Min)
+    max <- Vector3.Max(max, box.Max)
 
   BoundingBox(min, max)
 
