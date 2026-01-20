@@ -695,6 +695,20 @@ type PipelineBufferExtensions =
     this
 
   /// <summary>
+  /// Adds a single dynamic light to the current lighting environment.
+  /// </summary>
+  /// <remarks>
+  /// Unlike 'Lighting', this does not replace existing lights. It appends the new light
+  /// to the collection for the current frame. Useful for lights attached to dynamic objects.
+  /// </remarks>
+  [<Extension>]
+  static member inline AddLight
+    (this: PipelineBuffer<RenderCommand>, light: Light)
+    =
+    this.Add((), AddLight light)
+    this
+
+  /// <summary>
   /// Restricts rendering to a specific sub-region of the screen.
   /// </summary>
   /// <remarks>
@@ -954,6 +968,9 @@ module Buffer =
 
   let inline lighting lighting (buffer: PipelineBuffer<RenderCommand>) =
     buffer.Lighting(lighting)
+
+  let inline addLight light (buffer: PipelineBuffer<RenderCommand>) =
+    buffer.AddLight(light)
 
   let inline viewport viewport (buffer: PipelineBuffer<RenderCommand>) =
     buffer.Viewport(viewport)

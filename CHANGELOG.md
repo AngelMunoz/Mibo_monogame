@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Rendering: **Aggregate Dynamic Lighting**. Introduced `AddLight` command and `withDefaultLighting` configuration to support modular, additive lighting contributions. Modules can now independently contribute lights (point, spot, directional) to the scene aggregate without destructive overrides of global lighting state.
+
+### Fixed
+
+- Rendering: Removed CPU-side vertex data scanning for mesh bounding box computation. This prevents crashes on Android and other platforms where GPU vertex buffers are often allocated as write-only. Bounding boxes are now derived safely from bounding spheres.
+
 
 ## [1.3.0] - 2026-01-18
 
