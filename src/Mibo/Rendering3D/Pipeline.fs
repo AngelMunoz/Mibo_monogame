@@ -835,19 +835,17 @@ module internal Drawing =
     (ambientIntensity: float32)
     (lights: seq<Light>)
     =
-    if isNull (box effect) then ()
-    else
-      effect.LightingEnabled <- true
+    effect.LightingEnabled <- true
 
-      effect.AmbientLightColor <-
-        ambientColor.ToVector3() * ambientIntensity
+    effect.AmbientLightColor <-
+      ambientColor.ToVector3() * ambientIntensity
 
-      effect.DirectionalLight0.Enabled <- false
-      effect.DirectionalLight1.Enabled <- false
-      effect.DirectionalLight2.Enabled <- false
-      let mutable lightIndex = 0
+    effect.DirectionalLight0.Enabled <- false
+    effect.DirectionalLight1.Enabled <- false
+    effect.DirectionalLight2.Enabled <- false
+    let mutable lightIndex = 0
 
-      for light in lights do
+    for light in lights do
         if lightIndex < 3 then
           match light with
           | Directional dl ->
@@ -1270,6 +1268,10 @@ module internal Drawing =
             Lights = state.AccumulatedLights.ToArray()
       }
 
+      state.Config.PreRenderCallback
+      |> ValueOption.iter(fun cb ->
+        cb state.Device state.CurrentCamera state.CurrentLighting)
+
       ShadowPass.render state
       LightPacking.packLightData state
       LightPacking.packShadowMatrices state
@@ -1526,15 +1528,6 @@ module internal Orchestrate =
 
     for i in 0 .. buffer.Count - 1 do
       let struct (_, cmd) = buffer.[i] in processCommand state cmd
-
-    state.CurrentLighting <- {
-      state.CurrentLighting with
-          Lights = state.AccumulatedLights.ToArray()
-    }
-
-    state.Config.PreRenderCallback
-    |> ValueOption.iter(fun cb ->
-      cb state.Device state.CurrentCamera state.CurrentLighting)
 
     Drawing.flush state
     sceneTarget |> ValueOption.iter(PostProcess.render state gameTime)
