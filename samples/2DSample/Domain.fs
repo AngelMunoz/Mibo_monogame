@@ -3,6 +3,7 @@ module MiboSample.Domain
 open System
 open System.Collections.Generic
 open Microsoft.Xna.Framework
+open Microsoft.Xna.Framework.Graphics
 open FSharp.UMX
 open Mibo.Input
 open Mibo.Animation
@@ -78,6 +79,9 @@ type Model = {
   Decoration: AnimatedSprite
   CrateSprite: AnimatedSprite
   ItemSprite: AnimatedSprite
+  // Phase 2: Post-processing effects
+  VignetteEffect: Effect
+  GrayscaleEffect: Effect
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -102,6 +106,8 @@ type ModelSnapshot = {
   Decoration: AnimatedSprite
   CrateSprite: AnimatedSprite
   ItemSprite: AnimatedSprite
+  VignetteEffect: Effect
+  GrayscaleEffect: Effect
 }
 
 module Model =
@@ -123,6 +129,8 @@ module Model =
     Decoration = model.Decoration
     CrateSprite = model.CrateSprite
     ItemSprite = model.ItemSprite
+    VignetteEffect = model.VignetteEffect
+    GrayscaleEffect = model.GrayscaleEffect
   }
 
   let fromSnapshot(snapshot: ModelSnapshot) : Model = {
@@ -142,4 +150,6 @@ module Model =
     Decoration = snapshot.Decoration
     CrateSprite = snapshot.CrateSprite
     ItemSprite = snapshot.ItemSprite
+    VignetteEffect = snapshot.VignetteEffect
+    GrayscaleEffect = snapshot.GrayscaleEffect
   }

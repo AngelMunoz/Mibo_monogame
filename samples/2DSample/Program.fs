@@ -77,6 +77,8 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     Decoration = animations.ChestSprite
     CrateSprite = animations.CrateSprite
     ItemSprite = animations.ItemSprite
+    VignetteEffect = Assets.effect "Shaders/vignette" ctx
+    GrayscaleEffect = Assets.effect "Shaders/grayscale" ctx
   },
   Cmd.none
 
@@ -171,7 +173,7 @@ let update
 // View
 // ─────────────────────────────────────────────────────────────
 
-let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
+let view(ctx: GameContext, model: Model, buffer: RenderBuffer<RenderCmd2D>) =
   let uiFont = ctx |> Assets.font "Fonts/monogram"
   let snapshot = Model.toSnapshot model
 
@@ -182,7 +184,12 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
 
   // Draw player sprite with camera setup and color tint
   Player.view ctx pos model.PlayerSprite color buffer
+
+  // Apply grayscale only to crates to demonstrate selective effects
+  buffer.Effect(ValueSome model.GrayscaleEffect) |> ignore
   Crates.view ctx snapshot buffer
+  buffer.Effect(ValueNone) |> ignore
+
   Particles.view ctx model.Particles buffer
 
   // Draw chest at a fixed WORLD position (stays in place in the world)
@@ -233,7 +240,27 @@ let main argv =
   let program =
     Program.mkProgram init (update interactiveBoxRef)
     |> Program.withAssets
-    |> Program.withRenderer(Batch2DRenderer.create view)
+    |> Program.withRenderer(fun game ->
+      let gd = game.GraphicsDevice
+      let vignetteFx = game.Content.Load<Effect>("Shaders/vignette")
+      let grayscaleFx = game.Content.Load<Effect>("Shaders/grayscale")
+
+      let ppConfig =
+        PostProcess2D.none
+        |> PostProcess2D.withVignette {
+          Effect = vignetteFx
+          Radius = 0.8f
+          Softness = 0.4f
+        }
+      // Removed global grayscale to demonstrate selective application in the view function
+
+
+      let config = {
+        Batch2DConfig.defaults with
+            PostProcess = ValueSome ppConfig
+      }
+
+      Batch2DRenderer(game, config, view) :> IRenderer<_>)
     |> Program.withInputMapper inputMapRef.Value
     |> Program.withTick Tick
     |> Program.withSubscription(subscribe interactiveBoxRef)

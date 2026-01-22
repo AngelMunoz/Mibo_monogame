@@ -487,3 +487,13 @@
 /processorParam:PremultiplyAlpha=True
 /processorParam:TextureFormat=Compressed
 /build:Fonts/monogram.spritefont
+
+#begin Shaders/vignette.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/build:Shaders/vignette.fx
+
+#begin Shaders/grayscale.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/build:Shaders/grayscale.fx

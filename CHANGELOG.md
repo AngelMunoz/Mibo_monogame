@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- Rendering: **Enhanced 2D Render Pipeline**. Integrated a multi-pass post-processing system in `Batch2DRenderer` supporting global effects: **Vignette**, **Bloom**, and **Color Grading (3D LUT)**.
+- Rendering: **Selective 2D Effects**. Added support for per-batch shader effects using the `SetEffect` command, enabling targeted effects like grayscale on specific entity groups.
+- Rendering: **Render Target Pooling**. Introduced `IRenderTargetPool` to efficiently manage intermediate buffers during complex 2D post-processing passes, reducing allocation overhead.
+- Rendering: **Layered Compositing**. Added `FinalBlendState` to `Batch2DConfig` to allow 2D layers (including post-processed ones) to composite cleanly over previous 3D or 2D scenes.
+- DSL: Updated `sprite` and `text` computation expressions for Improved performance via direct struct-based command submission.
+
+### Fixed
+
+- Rendering: Corrected rendering state management in `Batch2DRenderer` to fix "accumulation trails" by ensuring render targets are set before clearing.
+- Rendering: Improved `Batch2DRenderer` to always clear internal pooled targets to `Transparent`, preventing garbage data from persisting across frames while still allowing background preservation via `ClearColor: ValueNone`.
+
 ## [1.4.0] - 2026-01-19
 
 ### Added

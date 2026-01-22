@@ -5,6 +5,7 @@ open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
+open Mibo.Rendering
 
 // ============================================================================
 // Render Pipeline Implementation
@@ -216,82 +217,6 @@ module internal State =
       state.Config.Shadows
       |> ValueOption.iter(fun cfg ->
         state.ShadowAtlas <- ValueSome(ShadowAtlas.create gd cfg))
-
-[<AutoOpen>]
-module internal EffectHelpers =
-  let private paramCache =
-    ConditionalWeakTable<Effect, Dictionary<string, EffectParameter>>()
-
-  let findParam (name: string) (effect: Effect) =
-    let dict =
-      match paramCache.TryGetValue(effect) with
-      | true, d -> d
-      | false, _ ->
-        let d = Dictionary<string, EffectParameter>()
-
-        for i = 0 to effect.Parameters.Count - 1 do
-          let p = effect.Parameters.[i]
-          d.[p.Name] <- p
-
-        paramCache.Add(effect, d)
-        d
-
-    match dict.TryGetValue(name) with
-    | true, p -> ValueSome p
-    | false, _ -> ValueNone
-
-  type Effect with
-    member inline this.SafeSetParam(name: string, value: bool) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: int) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Matrix) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Matrix[]) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Quaternion) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: float32) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: float32[]) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Texture) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Texture[]) =
-      findParam name this
-      |> ValueOption.iter(fun p ->
-        for i = 0 to min (value.Length - 1) (p.Elements.Count - 1) do
-          p.Elements.[i].SetValue(value.[i]))
-
-    member inline this.SafeSetParam(name: string, value: Vector2) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Vector2[]) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Vector3) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Vector3[]) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Vector4) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Vector4[]) =
-      findParam name this |> ValueOption.iter(fun p -> p.SetValue(value))
-
-    member inline this.SafeSetParam(name: string, value: Color) =
-      findParam name this
-      |> ValueOption.iter(fun p -> p.SetValue(value.ToVector4()))
 
 module internal LightPacking =
   let packLightData(state: PipelineState) =
