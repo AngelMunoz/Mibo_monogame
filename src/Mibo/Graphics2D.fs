@@ -15,6 +15,20 @@ type RenderLayer
 /// <remarks>This preserves the simple <c>RenderBuffer&lt;'Cmd&gt;</c> API at call sites while the core buffer remains generic (<see cref="T:Mibo.Elmish.RenderBuffer`2"/>).</remarks>
 type RenderBuffer<'Cmd> = RenderBuffer<int<RenderLayer>, 'Cmd>
 
+/// <summary>Struct for text draw command parameters.</summary>
+[<Struct>]
+type TextDrawCmd = {
+  Font: SpriteFont
+  Text: string
+  Position: Vector2
+  Color: Color
+  Rotation: float32
+  Origin: Vector2
+  Scale: float32
+  Effects: SpriteEffects
+  Depth: float32
+}
+
 /// <summary>A 2D render command.</summary>
 /// <remarks>These commands are queued to a <see cref="T:Mibo.Elmish.RenderBuffer`1"/> and executed by <see cref="T:Mibo.Elmish.Graphics2D.Batch2DRenderer`1"/>.</remarks>
 [<Struct>]
@@ -60,6 +74,9 @@ type RenderCmd2D =
     origin: Vector2 *
     effects: SpriteEffects *
     depth: float32
+
+  /// Draws text using a SpriteFont.
+  | DrawText of textCmd: TextDrawCmd
 
 /// <summary>Configuration for <see cref="T:Mibo.Elmish.Graphics2D.Batch2DRenderer`1"/>.</summary>
 /// <remarks>These settings configure the *rendering pass* (Clear + SpriteBatch.Begin parameters), not individual sprites (those are controlled by <see cref="T:Mibo.Elmish.Graphics2D.RenderCmd2D"/> / <see cref="T:Mibo.Elmish.Graphics2D.Draw2DBuilder"/>).</remarks>
@@ -286,6 +303,23 @@ type Batch2DRenderer<'Model>
           else
             spriteBatch.Draw(tex, dest, color)
 
+        | DrawText cmd ->
+          if not isBatching then
+            beginBatch()
+            isBatching <- true
+
+          spriteBatch.DrawString(
+            cmd.Font,
+            cmd.Text,
+            cmd.Position,
+            cmd.Color,
+            cmd.Rotation,
+            cmd.Origin,
+            cmd.Scale,
+            cmd.Effects,
+            cmd.Depth
+          )
+
       if isBatching then
         endBatch()
 
@@ -441,3 +475,448 @@ module Draw2D =
     (buffer: RenderBuffer<RenderCmd2D>)
     =
     buffer.Add(layer, DrawCustom draw)
+
+// ============================================================================
+// Phase 1 DSL Module
+// ============================================================================
+
+/// <summary>
+/// DSL for building 2D sprites and text with computation expressions and pipeline-style functions.
+/// </summary>
+/// <remarks>
+/// This module contains all types, builders, and utilities for the declarative 2D rendering DSL.
+/// Use the View2D module for global access to the computation expression builders.
+/// </remarks>
+module DSL =
+
+  open System.Runtime.CompilerServices
+
+  // --------------------------------------------------------------------------
+  // Sprite Types and Builder
+  // --------------------------------------------------------------------------
+
+  /// <summary>Intermediate state for building a 2D sprite.</summary>
+  [<Struct>]
+  type SpriteState = {
+    Texture: Texture2D voption
+    DestX: int
+    DestY: int
+    Width: int
+    Height: int
+    SourceRect: Rectangle voption
+    Color: Color
+    Rotation: float32
+    Origin: Vector2
+    Effects: SpriteEffects
+    Depth: float32
+    Layer: int<RenderLayer>
+  }
+
+  /// <summary>Helper functions for SpriteState.</summary>
+  module Sprite =
+    /// <summary>Creates a default empty sprite state.</summary>
+    let empty: SpriteState = {
+      Texture = ValueNone
+      DestX = 0
+      DestY = 0
+      Width = 0
+      Height = 0
+      SourceRect = ValueNone
+      Color = Color.White
+      Rotation = 0f
+      Origin = Vector2.Zero
+      Effects = SpriteEffects.None
+      Depth = 0f
+      Layer = 0<RenderLayer>
+    }
+
+    /// <summary>Creates a sprite state from a texture.</summary>
+    let inline fromTexture(tex: Texture2D) : SpriteState = {
+      empty with
+          Texture = ValueSome tex
+          Width = tex.Width
+          Height = tex.Height
+    }
+
+    let inline at x y (s: SpriteState) = { s with DestX = x; DestY = y }
+    let inline size w h (s: SpriteState) = { s with Width = w; Height = h }
+    let inline color c (s: SpriteState) = { s with Color = c }
+    let inline layer l (s: SpriteState) = { s with Layer = l }
+
+    let inline sourceRect r (s: SpriteState) = {
+      s with
+          SourceRect = ValueSome r
+    }
+
+    let inline rotatedBy r (s: SpriteState) = { s with Rotation = r }
+    let inline depth d (s: SpriteState) = { s with Depth = d }
+    let inline origin o (s: SpriteState) = { s with Origin = o }
+
+    let inline centered(s: SpriteState) = {
+      s with
+          Origin = Vector2(float32 s.Width / 2f, float32 s.Height / 2f)
+    }
+
+    let inline flippedH(s: SpriteState) = {
+      s with
+          Effects = s.Effects ||| SpriteEffects.FlipHorizontally
+    }
+
+    let inline flippedV(s: SpriteState) = {
+      s with
+          Effects = s.Effects ||| SpriteEffects.FlipVertically
+    }
+
+  /// <summary>Computation expression builder for sprites.</summary>
+  type SpriteBuilder() =
+    member inline _.Yield(_: unit) : SpriteState = Sprite.empty
+
+    [<CustomOperation("texture")>]
+    member inline _.Texture(s: SpriteState, tex: Texture2D) = {
+      s with
+          Texture = ValueSome tex
+          Width = tex.Width
+          Height = tex.Height
+    }
+
+    [<CustomOperation("at")>]
+    member inline _.At(s: SpriteState, x: int, y: int) = {
+      s with
+          DestX = x
+          DestY = y
+    }
+
+    [<CustomOperation("at")>]
+    member inline _.At(s: SpriteState, v: Vector2) = {
+      s with
+          DestX = int v.X
+          DestY = int v.Y
+    }
+
+    [<CustomOperation("at")>]
+    member inline _.At(s: SpriteState, x: float32, y: float32) = {
+      s with
+          DestX = int x
+          DestY = int y
+    }
+
+    [<CustomOperation("size")>]
+    member inline _.Size(s: SpriteState, w: int, h: int) = {
+      s with
+          Width = w
+          Height = h
+    }
+
+    [<CustomOperation("sourceRect")>]
+    member inline _.SourceRect(s: SpriteState, r: Rectangle) = {
+      s with
+          SourceRect = ValueSome r
+    }
+
+    [<CustomOperation("color")>]
+    member inline _.Color(s: SpriteState, c: Color) = { s with Color = c }
+
+    [<CustomOperation("rotatedBy")>]
+    member inline _.RotatedBy(s: SpriteState, radians: float32) = {
+      s with
+          Rotation = radians
+    }
+
+    [<CustomOperation("centered")>]
+    member inline _.Centered(s: SpriteState) = {
+      s with
+          Origin = Vector2(float32 s.Width / 2f, float32 s.Height / 2f)
+    }
+
+    [<CustomOperation("origin")>]
+    member inline _.Origin(s: SpriteState, o: Vector2) = { s with Origin = o }
+
+    [<CustomOperation("flippedH")>]
+    member inline _.FlippedH(s: SpriteState) = {
+      s with
+          Effects = s.Effects ||| SpriteEffects.FlipHorizontally
+    }
+
+    [<CustomOperation("flippedV")>]
+    member inline _.FlippedV(s: SpriteState) = {
+      s with
+          Effects = s.Effects ||| SpriteEffects.FlipVertically
+    }
+
+    [<CustomOperation("depth")>]
+    member inline _.Depth(s: SpriteState, d: float32) = { s with Depth = d }
+
+    [<CustomOperation("layer")>]
+    member inline _.Layer(s: SpriteState, l: int<RenderLayer>) = {
+      s with
+          Layer = l
+    }
+
+    member inline _.Run(s: SpriteState) : SpriteState = s
+
+  // --------------------------------------------------------------------------
+  // Text Types and Builder
+  // --------------------------------------------------------------------------
+
+  /// <summary>Intermediate state for building text.</summary>
+  [<Struct>]
+  type TextState = {
+    Font: SpriteFont voption
+    Text: string
+    DestX: int
+    DestY: int
+    Color: Color
+    Scale: float32
+    Rotation: float32
+    Origin: Vector2
+    Effects: SpriteEffects
+    Layer: int<RenderLayer>
+  }
+
+  /// <summary>Helper functions for TextState.</summary>
+  module Text =
+    /// <summary>Creates a default empty text state.</summary>
+    let empty: TextState = {
+      Font = ValueNone
+      Text = ""
+      DestX = 0
+      DestY = 0
+      Color = Color.White
+      Scale = 1f
+      Rotation = 0f
+      Origin = Vector2.Zero
+      Effects = SpriteEffects.None
+      Layer = 0<RenderLayer>
+    }
+
+    let inline at x y (s: TextState) = { s with DestX = x; DestY = y }
+    let inline color c (s: TextState) = { s with Color = c }
+    let inline scale sc (s: TextState) = { s with Scale = sc }
+    let inline layer l (s: TextState) = { s with Layer = l }
+
+  /// <summary>Computation expression builder for text.</summary>
+  type TextBuilder() =
+    member inline _.Yield(_: unit) : TextState = Text.empty
+
+    [<CustomOperation("font")>]
+    member inline _.Font(s: TextState, f: SpriteFont) = {
+      s with
+          Font = ValueSome f
+    }
+
+    [<CustomOperation("content")>]
+    member inline _.Content(s: TextState, t: string) = { s with Text = t }
+
+    [<CustomOperation("at")>]
+    member inline _.At(s: TextState, x: float32, y: float32) = {
+      s with
+          DestX = int x
+          DestY = int y
+    }
+
+    [<CustomOperation("at")>]
+    member inline _.At(s: TextState, x: int, y: int) = {
+      s with
+          DestX = x
+          DestY = y
+    }
+
+    [<CustomOperation("at")>]
+    member inline _.At(s: TextState, v: Vector2) = {
+      s with
+          DestX = int v.X
+          DestY = int v.Y
+    }
+
+    [<CustomOperation("color")>]
+    member inline _.Color(s: TextState, c: Color) = { s with Color = c }
+
+    [<CustomOperation("scale")>]
+    member inline _.Scale(s: TextState, sc: float32) = { s with Scale = sc }
+
+    [<CustomOperation("rotatedBy")>]
+    member inline _.RotatedBy(s: TextState, radians: float32) = {
+      s with
+          Rotation = radians
+    }
+
+    [<CustomOperation("origin")>]
+    member inline _.Origin(s: TextState, o: Vector2) = { s with Origin = o }
+
+    [<CustomOperation("layer")>]
+    member inline _.Layer(s: TextState, l: int<RenderLayer>) = {
+      s with
+          Layer = l
+    }
+
+    member inline _.Run(s: TextState) : TextState = s
+
+  // --------------------------------------------------------------------------
+  // Buffer Extensions
+  // --------------------------------------------------------------------------
+
+  /// <summary>Fluent extension methods for RenderBuffer.</summary>
+  [<Extension>]
+  type RenderBuffer2DExtensions =
+
+    [<Extension>]
+    static member inline Sprite
+      (this: RenderBuffer<RenderCmd2D>, s: SpriteState)
+      =
+      s.Texture
+      |> ValueOption.iter(fun tex ->
+        let dest = Rectangle(s.DestX, s.DestY, s.Width, s.Height)
+
+        let source = s.SourceRect |> ValueOption.toNullable
+
+        this.Add(
+          s.Layer,
+          DrawTexture(
+            tex,
+            dest,
+            source,
+            s.Color,
+            s.Rotation,
+            s.Origin,
+            s.Effects,
+            s.Depth
+          )
+        ))
+
+      this
+
+    [<Extension>]
+    static member inline Sprite
+      (this: RenderBuffer<RenderCmd2D>, tex: Texture2D, x: int, y: int)
+      =
+      let w, h =
+        (if isNull tex then 0 else tex.Width),
+        (if isNull tex then 0 else tex.Height)
+
+      this.Add(
+        0<RenderLayer>,
+        DrawTexture(
+          tex,
+          Rectangle(x, y, w, h),
+          Nullable(),
+          Color.White,
+          0f,
+          Vector2.Zero,
+          SpriteEffects.None,
+          0f
+        )
+      )
+
+      this
+
+    [<Extension>]
+    static member inline Text(this: RenderBuffer<RenderCmd2D>, t: TextState) =
+      t.Font
+      |> ValueOption.iter(fun font ->
+        this.Add(
+          t.Layer,
+          DrawText {
+            Font = font
+            Text = t.Text
+            Position = Vector2(float32 t.DestX, float32 t.DestY)
+            Color = t.Color
+            Rotation = t.Rotation
+            Origin = t.Origin
+            Scale = t.Scale
+            Effects = t.Effects
+            Depth = 0f
+          }
+        ))
+
+      this
+
+    [<Extension>]
+    static member inline Text
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        font: SpriteFont,
+        text: string,
+        x: int,
+        y: int
+      ) =
+      this.Add(
+        0<RenderLayer>,
+        DrawText {
+          Font = font
+          Text = text
+          Position = Vector2(float32 x, float32 y)
+          Color = Color.White
+          Rotation = 0f
+          Origin = Vector2.Zero
+          Scale = 1f
+          Effects = SpriteEffects.None
+          Depth = 0f
+        }
+      )
+
+      this
+
+    [<Extension>]
+    static member inline Camera
+      (this: RenderBuffer<RenderCmd2D>, cam: Camera, ?layer: int<RenderLayer>)
+      =
+      this.Add(defaultArg layer 0<RenderLayer>, SetCamera cam)
+      this
+
+    [<Extension>]
+    static member inline Clear(this: RenderBuffer<RenderCmd2D>, color: Color) =
+      this.Add(0<RenderLayer>, ClearTarget(ValueSome color, false))
+      this
+
+    [<Extension>]
+    static member inline BlendState
+      (this: RenderBuffer<RenderCmd2D>, bs: BlendState, ?layer: int<RenderLayer>) =
+      this.Add(defaultArg layer 0<RenderLayer>, SetBlendState bs)
+      this
+
+    [<Extension>]
+    static member inline Effect
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        effect: Effect voption,
+        ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultArg layer 0<RenderLayer>, SetEffect effect)
+      this
+
+    [<Extension>]
+    static member inline Submit(this: RenderBuffer<RenderCmd2D>) = ()
+
+  // --------------------------------------------------------------------------
+  // Pipeline-Style Functions
+  // --------------------------------------------------------------------------
+
+  /// <summary>Pipeline-style functions for buffer operations.</summary>
+  module Buffer2D =
+    let inline sprite s (buffer: RenderBuffer<RenderCmd2D>) = buffer.Sprite(s)
+    let inline text t (buffer: RenderBuffer<RenderCmd2D>) = buffer.Text(t)
+
+    let inline camera cam (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Camera(cam)
+
+    let inline clear color (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Clear(color)
+
+    let inline blendState bs (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.BlendState(bs)
+
+    let inline effect fx (buffer: RenderBuffer<RenderCmd2D>) = buffer.Effect(fx)
+    let inline submit(buffer: RenderBuffer<RenderCmd2D>) = buffer.Submit()
+
+  // --------------------------------------------------------------------------
+  // Global Builder Instances
+  // --------------------------------------------------------------------------
+
+  /// <summary>Global computation expression builders.</summary>
+  [<AutoOpen>]
+  module View2D =
+    /// <summary>Builder for sprites. Usage: sprite { texture tex; at x y; ... }</summary>
+    let sprite = SpriteBuilder()
+
+    /// <summary>Builder for text. Usage: text { font f; content "Hello"; at x y; ... }</summary>
+    let text = TextBuilder()

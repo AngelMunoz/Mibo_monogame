@@ -6,6 +6,7 @@ open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
 open Mibo.Elmish.Graphics2D
+open Mibo.Elmish.Graphics2D.DSL
 open MiboSample.Domain
 
 // Particles System: MutableSystem<Model, 'Msg>
@@ -13,13 +14,17 @@ open MiboSample.Domain
 /// Age particle and return updated or None if expired
 let private ageParticle (dt: float32) (p: Particle) : Particle voption =
   let newLife = p.Life - dt
-  if newLife <= 0.0f then ValueNone
-  else ValueSome {
-    p with
-      Position = p.Position + p.Velocity * dt
-      Life = newLife
-      Color = Color.Lerp(Color.Transparent, Color.Yellow, newLife / p.MaxLife)
-  }
+
+  if newLife <= 0.0f then
+    ValueNone
+  else
+    ValueSome {
+      p with
+          Position = p.Position + p.Velocity * dt
+          Life = newLife
+          Color =
+            Color.Lerp(Color.Transparent, Color.Yellow, newLife / p.MaxLife)
+    }
 
 /// Emit particles at position (imperative for performance)
 let emit (pos: Vector2) (count: int) (model: Model) : unit =
@@ -27,31 +32,47 @@ let emit (pos: Vector2) (count: int) (model: Model) : unit =
     model.Particles.Add(ParticleFactory.createAt pos)
 
 /// MutableSystem: ages particles, removes expired
-let update<'Msg> (dt: float32) (model: Model) : struct(Model * Cmd<'Msg>) =
-    let particles = model.Particles
-    let mutable i = particles.Count - 1
-    while i >= 0 do
-      match ageParticle dt particles[i] with
-      | ValueNone -> particles.RemoveAt(i)
-      | ValueSome updated -> particles[i] <- updated
-      i <- i - 1
-    struct (model, Cmd.none)
+let update<'Msg> (dt: float32) (model: Model) : struct (Model * Cmd<'Msg>) =
+  let particles = model.Particles
+  let mutable i = particles.Count - 1
+
+  while i >= 0 do
+    match ageParticle dt particles[i] with
+    | ValueNone -> particles.RemoveAt(i)
+    | ValueSome updated -> particles[i] <- updated
+
+    i <- i - 1
+
+  struct (model, Cmd.none)
 
 // ─────────────────────────────────────────────────────────────
-// View: Render particles
+// View: Render particles using the new DSL
 // ─────────────────────────────────────────────────────────────
 
-let view (ctx: GameContext) (particles: ResizeArray<Particle>) (buffer: RenderBuffer<RenderCmd2D>) =
+let view
+  (ctx: GameContext)
+  (particles: ResizeArray<Particle>)
+  (buffer: RenderBuffer<RenderCmd2D>)
+  =
   let tex =
-    ctx |> Assets.getOrCreate<Texture2D> "pixel" (fun gd ->
+    ctx
+    |> Assets.getOrCreate<Texture2D> "pixel" (fun gd ->
       let t = new Texture2D(gd, 1, 1)
       t.SetData([| Color.White |])
       t)
 
   for i = 0 to particles.Count - 1 do
     let p = particles[i]
-    let rect = Rectangle(int p.Position.X, int p.Position.Y, 2, 2)
-    Draw2D.sprite tex rect
-    |> Draw2D.withColor p.Color
-    |> Draw2D.atLayer 5<RenderLayer>
-    |> Draw2D.submit buffer
+    // Using the new sprite computation expression
+    // Submit using the fluent extension
+    buffer
+      .Sprite(
+        sprite {
+          texture tex
+          at p.Position
+          size 2 2
+          color p.Color
+          layer 5<RenderLayer>
+        }
+      )
+      .Submit()

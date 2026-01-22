@@ -57,7 +57,7 @@ module ParticleFactory =
 // ─────────────────────────────────────────────────────────────
 // Model: The World State (mutable containers for hot data)
 // ─────────────────────────────────────────────────────────────
-
+[<Struct>]
 type Model = {
   Positions: Dictionary<Guid<EntityId>, Vector2>
   // Replaced manual input state with generic ActionState

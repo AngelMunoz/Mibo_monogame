@@ -1,11 +1,13 @@
 open System
 open System.Collections.Generic
 open Microsoft.Xna.Framework
+open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open FSharp.UMX
 
 open Mibo.Elmish
 open Mibo.Elmish.Graphics2D
+open Mibo.Elmish.Graphics2D.DSL
 open Mibo.Input
 open Mibo.Animation
 open MiboSample
@@ -170,10 +172,8 @@ let update
 // ─────────────────────────────────────────────────────────────
 
 let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
+  let uiFont = ctx |> Assets.font "Fonts/monogram"
   let snapshot = Model.toSnapshot model
-
-  ctx.Game.Window.Title <-
-    $"MiboSample | Crates={snapshot.Crates.Count}/{Crates.targetCount} | Hits={snapshot.CrateHits} | Mode={crateRetryMode}"
 
   let playerId = model.PlayerId
   let pos = model.Positions[playerId]
@@ -188,6 +188,23 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   // Draw chest at a fixed WORLD position (stays in place in the world)
   let chestWorldPos = Vector2(200.0f, 150.0f)
   model.Decoration |> AnimatedSprite.draw chestWorldPos 5<RenderLayer> buffer
+
+
+  // Using the text computation expression from the DSL
+  buffer
+    .Text(
+      text {
+        font uiFont
+
+        content
+          $"Hits: {snapshot.CrateHits}  Crates: {snapshot.Crates.Count}/{Crates.targetCount}"
+
+        at pos.X (pos.Y - 10.f)
+        color Color.White
+        layer 100<RenderLayer> // UI layer on top
+      }
+    )
+    .Submit()
 
 // ─────────────────────────────────────────────────────────────
 // Subscribe

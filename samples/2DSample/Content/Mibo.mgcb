@@ -481,3 +481,9 @@
 /processorParam:TextureFormat=Color
 /build:Tilesets/Wooden_House_Walls_Tilset.png
 
+#begin Fonts/monogram.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/processorParam:PremultiplyAlpha=True
+/processorParam:TextureFormat=Compressed
+/build:Fonts/monogram.spritefont

@@ -170,8 +170,7 @@ module internal State =
 
     state.AccumulatedLights.Clear()
 
-    state.CurrentLighting.Lights
-    |> Array.iter state.AccumulatedLights.Add
+    state.CurrentLighting.Lights |> Array.iter state.AccumulatedLights.Add
 
     state.CameraWasSet <- false
     state.OpaqueDrawables.Clear()
@@ -228,14 +227,14 @@ module internal EffectHelpers =
       match paramCache.TryGetValue(effect) with
       | true, d -> d
       | false, _ ->
-          let d = Dictionary<string, EffectParameter>()
+        let d = Dictionary<string, EffectParameter>()
 
-          for i = 0 to effect.Parameters.Count - 1 do
-            let p = effect.Parameters.[i]
-            d.[p.Name] <- p
+        for i = 0 to effect.Parameters.Count - 1 do
+          let p = effect.Parameters.[i]
+          d.[p.Name] <- p
 
-          paramCache.Add(effect, d)
-          d
+        paramCache.Add(effect, d)
+        d
 
     match dict.TryGetValue(name) with
     | true, p -> ValueSome p
@@ -378,10 +377,23 @@ module internal LightPacking =
         match state.LightDataTexture with
         | ValueSome t when t.Height = lights.Count -> t
         | ValueSome t ->
-            t.Dispose()
-            new Texture2D(state.Device, 4, lights.Count, false, SurfaceFormat.Vector4)
+          t.Dispose()
+
+          new Texture2D(
+            state.Device,
+            4,
+            lights.Count,
+            false,
+            SurfaceFormat.Vector4
+          )
         | ValueNone ->
-            new Texture2D(state.Device, 4, lights.Count, false, SurfaceFormat.Vector4)
+          new Texture2D(
+            state.Device,
+            4,
+            lights.Count,
+            false,
+            SurfaceFormat.Vector4
+          )
 
       tex.SetData(data, 0, requiredSize)
       state.LightDataTexture <- ValueSome tex
@@ -415,10 +427,23 @@ module internal LightPacking =
         match state.ShadowMatrixTexture with
         | ValueSome t when t.Height = count * 2 -> t
         | ValueSome t ->
-            t.Dispose()
-            new Texture2D(state.Device, 4, count * 2, false, SurfaceFormat.Vector4)
+          t.Dispose()
+
+          new Texture2D(
+            state.Device,
+            4,
+            count * 2,
+            false,
+            SurfaceFormat.Vector4
+          )
         | ValueNone ->
-            new Texture2D(state.Device, 4, count * 2, false, SurfaceFormat.Vector4)
+          new Texture2D(
+            state.Device,
+            4,
+            count * 2,
+            false,
+            SurfaceFormat.Vector4
+          )
 
       tex.SetData(data, 0, requiredSize)
       state.ShadowMatrixTexture <- ValueSome tex
@@ -472,13 +497,11 @@ module internal CameraState =
           struct (right, up)
 
 module internal Culling =
-  let updateFrustum (state: PipelineState) =
-    state.Frustum.Matrix <- state.CurrentCamera.View * state.CurrentCamera.Projection
+  let updateFrustum(state: PipelineState) =
+    state.Frustum.Matrix <-
+      state.CurrentCamera.View * state.CurrentCamera.Projection
 
-  let isVisible
-    (state: PipelineState)
-    (drawable: Drawable)
-    =
+  let isVisible (state: PipelineState) (drawable: Drawable) =
     state.Frustum.Contains(drawable.BoundingSphere) <> ContainmentType.Disjoint
 
   let distanceToCamera
@@ -536,7 +559,7 @@ module internal Tiling =
       let mutable minX, minY = 1f, 1f
       let mutable maxX, maxY = -1f, -1f
 
-      let updateMinMax (p: Vector3) =
+      let updateMinMax(p: Vector3) =
         let clip = Vector4.Transform(p, camera.Projection)
 
         if clip.W > 0.0001f then
@@ -747,8 +770,8 @@ module internal ShadowPass =
         if shadowMapIndex < atlas.MaxShadows then
           match light with
           | Directional dl when ValueOption.isSome dl.Shadow ->
-// ... (omitted directional light code as it's unchanged)
-// I'll be careful to include enough context in old_string.
+            // ... (omitted directional light code as it's unchanged)
+            // I'll be careful to include enough context in old_string.
             let mutable center = Vector3.Zero
 
             for i in 0 .. corners.Length - 1 do
@@ -837,8 +860,7 @@ module internal Drawing =
     =
     effect.LightingEnabled <- true
 
-    effect.AmbientLightColor <-
-      ambientColor.ToVector3() * ambientIntensity
+    effect.AmbientLightColor <- ambientColor.ToVector3() * ambientIntensity
 
     effect.DirectionalLight0.Enabled <- false
     effect.DirectionalLight1.Enabled <- false
@@ -846,21 +868,21 @@ module internal Drawing =
     let mutable lightIndex = 0
 
     for light in lights do
-        if lightIndex < 3 then
-          match light with
-          | Directional dl ->
-            let beLight =
-              match lightIndex with
-              | 0 -> effect.DirectionalLight0
-              | 1 -> effect.DirectionalLight1
-              | _ -> effect.DirectionalLight2
+      if lightIndex < 3 then
+        match light with
+        | Directional dl ->
+          let beLight =
+            match lightIndex with
+            | 0 -> effect.DirectionalLight0
+            | 1 -> effect.DirectionalLight1
+            | _ -> effect.DirectionalLight2
 
-            beLight.Enabled <- true
-            beLight.Direction <- dl.Direction
-            beLight.DiffuseColor <- dl.Color.ToVector3() * dl.Intensity
-            beLight.SpecularColor <- Vector3.Zero
-            lightIndex <- lightIndex + 1
-          | _ -> ()
+          beLight.Enabled <- true
+          beLight.Direction <- dl.Direction
+          beLight.DiffuseColor <- dl.Color.ToVector3() * dl.Intensity
+          beLight.SpecularColor <- Vector3.Zero
+          lightIndex <- lightIndex + 1
+        | _ -> ()
 
   let configureBasicEffectCamera
     (effect: BasicEffect)
@@ -1019,10 +1041,10 @@ module internal Drawing =
     match effect with
     | :? BasicEffect as be ->
       if not(drawable.Material.Flags.HasFlag(MaterialFlags.Unlit)) then
-        configureBasicEffectLighting 
-          be 
-          state.CurrentLighting.AmbientColor 
-          state.CurrentLighting.AmbientIntensity 
+        configureBasicEffectLighting
+          be
+          state.CurrentLighting.AmbientColor
+          state.CurrentLighting.AmbientIntensity
           state.AccumulatedLights
       else
         be.LightingEnabled <- false
@@ -1428,13 +1450,12 @@ module internal Orchestrate =
       state.CurrentLighting <- lighting
       state.AccumulatedLights.Clear()
 
-      lighting.Lights
-      |> Array.iter state.AccumulatedLights.Add
+      lighting.Lights |> Array.iter state.AccumulatedLights.Add
 
-      Drawing.configureBasicEffectLighting 
-        state.BasicEffect 
-        state.CurrentLighting.AmbientColor 
-        state.CurrentLighting.AmbientIntensity 
+      Drawing.configureBasicEffectLighting
+        state.BasicEffect
+        state.CurrentLighting.AmbientColor
+        state.CurrentLighting.AmbientIntensity
         state.AccumulatedLights
     | AddLight light ->
       state.AccumulatedLights.Add(light)
@@ -1443,11 +1464,11 @@ module internal Orchestrate =
       match light with
       | Directional _ ->
         // This is a bit inefficient as it reconfigures the whole state, but BasicEffect is fallback
-        Drawing.configureBasicEffectLighting 
-            state.BasicEffect 
-            state.CurrentLighting.AmbientColor 
-            state.CurrentLighting.AmbientIntensity 
-            state.AccumulatedLights
+        Drawing.configureBasicEffectLighting
+          state.BasicEffect
+          state.CurrentLighting.AmbientColor
+          state.CurrentLighting.AmbientIntensity
+          state.AccumulatedLights
       | _ -> ()
     | SetViewport viewport ->
       Drawing.flush state
