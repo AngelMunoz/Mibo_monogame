@@ -22,11 +22,6 @@ int DirectionalLightCount;
 float2 DirectionalLightDirections[8];
 float4 DirectionalLightColors[8];
 
-float TileSize;
-float TilesX;
-int MaxLightsPerTile;
-float LightIndexBufferWidth;
-
 Texture2D LightIndexBuffer;
 Texture2D SpriteTexture;
 Texture2D NormalMap;
@@ -43,6 +38,26 @@ sampler2D NormalSampler = sampler_state
     AddressV = Clamp;
 };
 
+// Shadow parameters
+Texture2D ShadowAtlas;
+sampler2D ShadowAtlasSampler = sampler_state
+{
+	Texture = <ShadowAtlas>;
+    Filter = Point;
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
+
+float2 ShadowAtlasSize;
+float ShadowBias;
+float PointLightShadowIndices[16];
+float DirectionalLightShadowIndices[8];
+
+float TileSize;
+float TilesX;
+int MaxLightsPerTile;
+float LightIndexBufferWidth;
+
 // OpenGL-compatible sampler for light index buffer
 sampler2D TileSampler = sampler_state
 {
@@ -51,6 +66,51 @@ sampler2D TileSampler = sampler_state
     AddressU = Clamp;
     AddressV = Clamp;
 };
+
+// Helper function to compute shadow factor for a light
+float ComputeShadow(int lightIdx, int isPointLight, float2 pixelPos)
+{
+    int shadowIndex = -1;
+
+    if (isPointLight)
+    {
+        if (lightIdx >= 0 && lightIdx < 16)
+            shadowIndex = (int)PointLightShadowIndices[lightIdx];
+    }
+    else
+    {
+        if (lightIdx >= 0 && lightIdx < 8)
+            shadowIndex = (int)DirectionalLightShadowIndices[lightIdx];
+    }
+
+    if (shadowIndex < 0) return 1.0; // No shadow for this light
+
+    float u, dist;
+
+    if (isPointLight)
+    {
+        // Point Light: Polar sampling
+        float2 diff = pixelPos - PointLightPositions[lightIdx];
+        dist = length(diff) / PointLightRadii[lightIdx]; // Normalize distance
+        float angle = atan2(diff.y, diff.x);
+        u = (angle + 3.14159) / 6.28318;  // 0..1
+    }
+    else
+    {
+        // Directional Light: Orthographic sampling
+        // DirectionalLightDirections are now in screen space, pixelPos is in screen space
+        float2 perpDir = float2(DirectionalLightDirections[lightIdx].y, -DirectionalLightDirections[lightIdx].x);
+        float proj = dot(pixelPos, perpDir);
+        u = (proj / ShadowAtlasSize.x + 1.0) * 0.5;
+        dist = dot(pixelPos, DirectionalLightDirections[lightIdx]) / ShadowAtlasSize.x;
+    }
+
+    float v = (float(shadowIndex) + 0.5) / ShadowAtlasSize.y;
+    float occluderDist = tex2D(ShadowAtlasSampler, float2(u, v)).r;
+
+    if (dist > occluderDist + ShadowBias) return 0.0;
+    return 1.0;
+}
 
 // --- Pixel Shader ---
 
@@ -111,7 +171,8 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
             float2 nLightDir = normalize(lightDir);
             float dotNL = max(0.0, dot(normal, float3(nLightDir, 0.5)));
 
-            finalLight += diffuse * dotNL;
+            float shadow = ComputeShadow(lightIdx, 1, pixelPos);
+            finalLight += diffuse * dotNL * shadow;
         }
     }
 
@@ -122,7 +183,9 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
 
         float2 lightDir = -DirectionalLightDirections[d]; // Negate for "coming from" direction
         float dotNL = max(0.0, dot(normal, float3(lightDir, 0.5)));
-        finalLight += DirectionalLightColors[d].rgb * dotNL;
+
+        float shadow = ComputeShadow(d, 0, pixelPos);
+        finalLight += DirectionalLightColors[d].rgb * dotNL * shadow;
     }
 
     // Clamp to prevent white saturation

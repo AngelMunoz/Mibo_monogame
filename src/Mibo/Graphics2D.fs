@@ -1,6 +1,9 @@
 namespace Mibo.Elmish.Graphics2D
 
 open System
+open System.Buffers
+open System.Collections.Generic
+open System.Runtime.InteropServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open FSharp.UMX
@@ -92,6 +95,11 @@ type Occluder2D = {
   Height: float32
 }
 
+/// <summary>Custom vertex type for 2D line occluders.</summary>
+[<Struct>]
+[<StructLayout(LayoutKind.Sequential)>]
+type VertexPosition2D = { Position: Vector2 }
+
 /// <summary>Quality level for 2D soft shadows.</summary>
 type SoftShadowQuality2D =
   | None = 0
@@ -120,6 +128,94 @@ module Shadows2DConfig =
     SoftShadowQuality = SoftShadowQuality2D.Low
     ShadowBias = 0.001f
   }
+
+/// <summary>Batcher for rendering 2D shadow occluders as line segments.</summary>
+module OccluderBatch =
+
+  let private vertexDeclaration =
+    new VertexDeclaration [|
+      VertexElement(
+        0,
+        VertexElementFormat.Vector2,
+        VertexElementUsage.Position,
+        0
+      )
+    |]
+
+  type State = {
+    mutable Vertices: VertexPosition2D[]
+    mutable VertexBuffer: DynamicVertexBuffer
+    mutable VertexCount: int
+    GraphicsDevice: GraphicsDevice
+  }
+
+  let private ensureBuffers(state: State) =
+    if isNull state.VertexBuffer then
+      state.VertexBuffer <-
+        new DynamicVertexBuffer(
+          state.GraphicsDevice,
+          vertexDeclaration,
+          state.Vertices.Length,
+          BufferUsage.WriteOnly
+        )
+
+  let private ensureCapacity (numVerts: int) (state: State) =
+    let required = state.VertexCount + numVerts
+
+    if required > state.Vertices.Length then
+      let newSize = Math.Max(state.Vertices.Length * 2, required)
+      let newVerts = ArrayPool.Shared.Rent(newSize)
+      state.Vertices.AsSpan().CopyTo(newVerts.AsSpan())
+      ArrayPool.Shared.Return(state.Vertices)
+      state.Vertices <- newVerts
+
+      state.VertexBuffer <-
+        new DynamicVertexBuffer(
+          state.GraphicsDevice,
+          vertexDeclaration,
+          state.Vertices.Length,
+          BufferUsage.WriteOnly
+        )
+
+  [<Literal>]
+  let private DefaultVertexCapacity = 256
+
+  let create(graphicsDevice: GraphicsDevice) = {
+    Vertices = ArrayPool.Shared.Rent DefaultVertexCapacity
+    VertexBuffer = null
+    VertexCount = 0
+    GraphicsDevice = graphicsDevice
+  }
+
+  let dispose(state: State) =
+    if not(isNull state.Vertices) then
+      ArrayPool.Shared.Return state.Vertices
+      state.Vertices <- null
+
+  let begin'(state: State) = state.VertexCount <- 0
+
+  let addLine (p1: Vector2) (p2: Vector2) (height: float32) (state: State) =
+    ensureCapacity 2 state
+
+    let idx = state.VertexCount
+    state.Vertices.[idx + 0] <- { Position = p1 }
+    state.Vertices.[idx + 1] <- { Position = p2 }
+    state.VertexCount <- state.VertexCount + 2
+
+  let addOccluder (occluder: Occluder2D) (state: State) =
+    addLine occluder.P1 occluder.P2 occluder.Height state
+
+  let end'(state: State) =
+    if state.VertexCount > 0 then
+      ensureBuffers state
+      state.VertexBuffer.SetData(state.Vertices, 0, state.VertexCount)
+      state.GraphicsDevice.SetVertexBuffer(state.VertexBuffer)
+
+      state.GraphicsDevice.DrawPrimitives(
+        PrimitiveType.LineList,
+        0,
+        state.VertexCount / 2
+      )
 
 /// <summary>Main configuration for 2D lighting.</summary>
 [<Struct>]
@@ -184,6 +280,17 @@ type TextDrawCmd = {
   Effects: SpriteEffects
   Depth: float32
 }
+
+/// <summary>Shader override types for 2D rendering stages.</summary>
+/// <remarks>
+/// Users provide custom effects via <see cref="T:Mibo.Elmish.Graphics2D.Batch2DConfig"/>.ShaderOverrides,
+/// and Mibo selects which effect to use for each rendering stage.
+/// </remarks>
+[<Struct>]
+type ShaderBase2D =
+  | LitSprite
+  | ShadowCaster
+  | PostProcess
 
 /// <summary>A 2D render command.</summary>
 /// <remarks>These commands are queued to a <see cref="T:Mibo.Elmish.RenderBuffer`1"/> and executed by <see cref="T:Mibo.Elmish.Graphics2D.Batch2DRenderer`1"/>.</remarks>
@@ -413,6 +520,10 @@ type Batch2DConfig = {
   PostProcess: PostProcess2DConfig voption
   /// Lighting configuration.
   Lighting: Lighting2DConfig voption
+  /// Shader overrides for specific rendering stages.
+  /// Users provide their own effects; Mibo selects which to use for each stage.
+  ShaderOverrides:
+    System.Collections.Generic.IReadOnlyDictionary<ShaderBase2D, Effect>
   /// Blend state for the final blit to screen (useful for layering/overlays).
   /// Defaults to Opaque to match standard behavior.
   FinalBlendState: BlendState
@@ -434,6 +545,8 @@ module Batch2DConfig =
     TransformMatrix = ValueNone
     PostProcess = ValueNone
     Lighting = ValueNone
+    ShaderOverrides =
+      System.Collections.Generic.Dictionary<ShaderBase2D, Effect>()
     FinalBlendState = BlendState.Opaque
   }
 
@@ -498,7 +611,64 @@ type Batch2DRenderer<'Model>
   let mutable sceneTarget: RenderTarget2D voption = ValueNone
   let mutable lightTileDataTex: Texture2D = null
   let mutable lightTileDataBuffer: float32[] = Array.empty
+  let mutable shadowAtlas: RenderTarget2D voption = ValueNone
+  let mutable shadowIndicesPoint: int[] = Array.zeroCreate 16
+  let mutable shadowIndicesDirectional: int[] = Array.zeroCreate 8
+  let mutable occluderBatch: OccluderBatch.State option = None
+  let mutable defaultNormalMap: Texture2D = null
+  let mutable currentNormalMap: Texture2D = null
+  
+  // Robust blend state for shadows: the minimum distance wins
+  let shadowMinBlend = 
+    new BlendState(
+      ColorSourceBlend = Blend.One,
+      ColorDestinationBlend = Blend.One,
+      ColorBlendFunction = BlendFunction.Min,
+      AlphaSourceBlend = Blend.One,
+      AlphaDestinationBlend = Blend.One,
+      AlphaBlendFunction = BlendFunction.Min
+    )
+  
+  // Reusable buffers for light data to avoid per-frame allocations (GC pressure)
+  let mutable pointPositions: Vector2[] = Array.empty
+  let mutable pointColors: Vector4[] = Array.empty
+  let mutable pointRadii: float32[] = Array.empty
+  let mutable pointFalloffs: float32[] = Array.empty
+  let mutable dirDirections: Vector2[] = Array.empty
+  let mutable dirColors: Vector4[] = Array.empty
+  let mutable pointShadowIndicesBuf: float32[] = Array.empty
+  let mutable dirShadowIndicesBuf: float32[] = Array.empty
+  
   let buffer = RenderBuffer<RenderCmd2D>()
+
+  let ensureCapacity (needed: int) (current: 'T[] byref) =
+    if current.Length < needed then
+      current <- Array.zeroCreate (max (current.Length * 2) needed)
+
+  let ensureDefaultNormalMap() =
+    if isNull defaultNormalMap then
+      defaultNormalMap <- new Texture2D(game.GraphicsDevice, 1, 1)
+      defaultNormalMap.SetData [| Color(128, 128, 255, 255) |]
+
+    defaultNormalMap
+
+  interface IDisposable with
+    member _.Dispose() =
+      if not(isNull spriteBatch) then
+        spriteBatch.Dispose()
+        spriteBatch <- null
+
+      if not(isNull lightTileDataTex) then
+        lightTileDataTex.Dispose()
+        lightTileDataTex <- null
+
+      if not(isNull defaultNormalMap) then
+        defaultNormalMap.Dispose()
+        defaultNormalMap <- null
+        
+      match occluderBatch with
+      | Some s -> OccluderBatch.dispose s
+      | None -> ()
 
   interface IRenderer<'Model> with
     member _.Draw(ctx: GameContext, model: 'Model, gameTime: GameTime) =
@@ -523,6 +693,8 @@ type Batch2DRenderer<'Model>
       let mutable currentDepthStencil = config.DepthStencilState
       let mutable currentRasterizer = config.RasterizerState
       let mutable currentEffect = config.Effect
+      // Reset tracked state at start of frame
+      currentNormalMap <- null
 
       let mutable currentTransform =
         match config.TransformMatrix with
@@ -544,7 +716,7 @@ type Batch2DRenderer<'Model>
 
       // 1. Initial collection pass (Phase 3)
       for i = 0 to buffer.Count - 1 do
-        let struct (_, cmd) = buffer.Item(i)
+        let struct (_, cmd) = buffer.Item i
 
         match cmd with
         | SetLighting l ->
@@ -564,7 +736,7 @@ type Batch2DRenderer<'Model>
       let mutable frameViewMatrix = Matrix.Identity
 
       for i = 0 to buffer.Count - 1 do
-        let struct (_, cmd) = buffer.Item(i)
+        let struct (_, cmd) = buffer.Item i
 
         match cmd with
         | SetCamera c -> frameViewMatrix <- c.View
@@ -593,6 +765,166 @@ type Batch2DRenderer<'Model>
             lCfg.MaxLightsPerTile
             screenSpaceLights)
 
+      // ======================================================================
+      // Shadow Generation Pass (Phase 3.7)
+      // ======================================================================
+      let shadowsEnabled =
+        config.Lighting.IsSome
+        && config.Lighting.Value.Shadows.IsSome
+        && config.ShaderOverrides.ContainsKey ShaderBase2D.ShadowCaster
+
+      let shadowPass() =
+        if shadowsEnabled then
+          let shadowCfg = config.Lighting.Value.Shadows.Value
+          let device = ctx.GraphicsDevice
+
+          match occluderBatch with
+          | None -> occluderBatch <- Some(OccluderBatch.create device)
+          | Some _ -> ()
+
+          let shadowCasters = ResizeArray<int * int * float32>()
+
+          for i = 0 to pointLights.Count - 1 do
+            let l = pointLights.[i]
+
+            if l.Shadow.IsSome then
+              let distSq = Vector2.DistanceSquared(l.Position, Vector2.Zero)
+              let priority = l.Intensity / (max 1.0f distSq)
+              shadowCasters.Add(0, i, priority)
+
+          for i = 0 to directionalLights.Count - 1 do
+            let l = directionalLights.[i]
+
+            if l.Shadow.IsSome then
+              let priority = l.Intensity
+              shadowCasters.Add(1, i, priority)
+
+          let sortedCasters =
+            shadowCasters
+            |> Seq.sortByDescending(fun (_, _, p) -> p)
+            |> Seq.truncate shadowCfg.MaxShadowLights
+            |> Seq.toArray
+
+          if shadowIndicesPoint.Length < pointLights.Count then
+            shadowIndicesPoint <- Array.create (max (shadowIndicesPoint.Length * 2) pointLights.Count) -1
+          else
+            for i = 0 to shadowIndicesPoint.Length - 1 do shadowIndicesPoint.[i] <- -1
+
+          if shadowIndicesDirectional.Length < directionalLights.Count then
+            shadowIndicesDirectional <- Array.create (max (shadowIndicesDirectional.Length * 2) directionalLights.Count) -1
+          else
+            for i = 0 to shadowIndicesDirectional.Length - 1 do shadowIndicesDirectional.[i] <- -1
+
+          let mutable shadowRow = 0
+
+          for lightType, lightIdx, _ in sortedCasters do
+            if lightType = 0 then
+              if lightIdx < shadowIndicesPoint.Length then
+                shadowIndicesPoint.[lightIdx] <- shadowRow
+            else if lightIdx < shadowIndicesDirectional.Length then
+              shadowIndicesDirectional.[lightIdx] <- shadowRow
+
+            shadowRow <- shadowRow + 1
+
+          let atlasWidth = shadowCfg.Resolution
+          let atlasHeight = shadowCfg.MaxShadowLights
+
+          match shadowAtlas with
+          | ValueSome rt when rt.Width = atlasWidth && rt.Height = atlasHeight ->
+            ()
+          | ValueSome rt ->
+            rt.Dispose()
+
+            shadowAtlas <-
+              ValueSome(
+                rtPool.Value.Acquire {
+                  Width = atlasWidth
+                  Height = atlasHeight
+                  Format = SurfaceFormat.Single
+                  DepthFormat = DepthFormat.Depth24
+                }
+              )
+          | ValueNone ->
+            shadowAtlas <-
+              ValueSome(
+                rtPool.Value.Acquire {
+                  Width = atlasWidth
+                  Height = atlasHeight
+                  Format = SurfaceFormat.Single
+                  DepthFormat = DepthFormat.Depth24
+                }
+              )
+
+          let shadowRt = shadowAtlas.Value
+          let shadowShader = config.ShaderOverrides.[ShaderBase2D.ShadowCaster]
+
+          device.SetRenderTarget(shadowRt)
+          // Clear entire atlas once to White (1.0 = infinitely far)
+          device.Clear(Color.White)
+
+          device.DepthStencilState <- DepthStencilState.None
+          device.BlendState <- shadowMinBlend
+
+          let viewport = device.Viewport
+
+          for lightType, lightIdx, _ in sortedCasters do
+            let row =
+              if lightType = 0 then
+                shadowIndicesPoint.[lightIdx]
+              else
+                shadowIndicesDirectional.[lightIdx]
+
+            if row >= 0 then
+              if lightType = 0 then
+                let pl = pointLights.[lightIdx]
+                // Each light gets its own 1px row
+                device.Viewport <- Viewport(0, row, atlasWidth, 1, 0f, 1f)
+
+                shadowShader.SafeSetParam("LightPosition", pl.Position)
+                shadowShader.SafeSetParam("LightRadius", pl.Radius)
+                shadowShader.SafeSetParam("AtlasWidth", float32 atlasWidth)
+                shadowShader.SafeSetParam("AtlasHeight", float32 atlasHeight)
+
+                shadowShader.CurrentTechnique.Passes.[0].Apply()
+
+                let batchState = occluderBatch.Value
+                OccluderBatch.begin' batchState
+
+                for o in occluders do
+                  // Tessellate long occluders to handle polar distortion
+                  let segments = 8
+                  for s = 0 to segments - 1 do
+                    let t1 = float32 s / float32 segments
+                    let t2 = float32 (s + 1) / float32 segments
+                    let p1 = Vector2.Lerp(o.P1, o.P2, t1)
+                    let p2 = Vector2.Lerp(o.P1, o.P2, t2)
+                    OccluderBatch.addLine p1 p2 o.Height batchState
+
+                OccluderBatch.end' batchState
+              else
+                let dl = directionalLights.[lightIdx]
+                device.Viewport <- Viewport(0, row, atlasWidth, 1, 0f, 1f)
+
+                shadowShader.SafeSetParam("LightDirection", dl.Direction)
+                shadowShader.SafeSetParam("LightRadius", -1.0f)
+                shadowShader.SafeSetParam("AtlasWidth", float32 atlasWidth)
+                shadowShader.SafeSetParam("AtlasHeight", float32 atlasHeight)
+
+                shadowShader.CurrentTechnique.Passes.[0].Apply()
+
+                let batchState = occluderBatch.Value
+                OccluderBatch.begin' batchState
+
+                for o in occluders do
+                  OccluderBatch.addOccluder o batchState
+
+                OccluderBatch.end' batchState
+
+          device.Viewport <- viewport
+          device.SetRenderTarget null
+
+      shadowPass()
+
       // Helper to update lighting params on an effect (Phase 3.7)
       let updateLighting(fx: Effect) =
         if fx <> null then
@@ -604,44 +936,38 @@ type Batch2DRenderer<'Model>
 
             match binResults with
             | ValueSome bin ->
-              let counts = pointLights.Count
+              let pCounts = pointLights.Count
+              ensureCapacity pCounts &pointPositions
+              ensureCapacity pCounts &pointColors
+              ensureCapacity pCounts &pointRadii
+              ensureCapacity pCounts &pointFalloffs
 
-              // Use the frame-wide view matrix for consistency with binning
-              let viewMatrix = frameViewMatrix
+              for i = 0 to pCounts - 1 do
+                let l = pointLights.[i]
+                pointPositions.[i] <- Vector2.Transform(l.Position, frameViewMatrix)
+                pointColors.[i] <- l.Color.ToVector4() * l.Intensity
+                pointRadii.[i] <- l.Radius
+                pointFalloffs.[i] <- l.Falloff
 
-              let positions =
-                Array.init counts (fun i ->
-                  Vector2.Transform(pointLights.[i].Position, viewMatrix))
-
-              let colors =
-                Array.init counts (fun i ->
-                  pointLights.[i].Color.ToVector4()
-                  * pointLights.[i].Intensity)
-
-              let radii = Array.init counts (fun i -> pointLights.[i].Radius)
-
-              let falloffs =
-                Array.init counts (fun i -> pointLights.[i].Falloff)
-
-              fx.SafeSetParam("PointLightPositions", positions)
-              fx.SafeSetParam("PointLightColors", colors)
-              fx.SafeSetParam("PointLightRadii", radii)
-              fx.SafeSetParam("PointLightFalloffs", falloffs)
-              fx.SafeSetParam("PointLightCount", counts)
+              fx.SafeSetParam("PointLightPositions", pointPositions)
+              fx.SafeSetParam("PointLightColors", pointColors)
+              fx.SafeSetParam("PointLightRadii", pointRadii)
+              fx.SafeSetParam("PointLightFalloffs", pointFalloffs)
+              fx.SafeSetParam("PointLightCount", pCounts)
 
               // Directional lights (no position/radius, just direction)
               let dirCounts = directionalLights.Count
               fx.SafeSetParam("DirectionalLightCount", dirCounts)
 
               if dirCounts > 0 then
-                let dirDirections =
-                  Array.init dirCounts (fun i ->
-                    directionalLights.[i].Direction)
+                ensureCapacity dirCounts &dirDirections
+                ensureCapacity dirCounts &dirColors
 
-                let dirColors =
-                  Array.init dirCounts (fun i ->
-                    directionalLights.[i].Color.ToVector4()
-                    * directionalLights.[i].Intensity)
+                for i = 0 to dirCounts - 1 do
+                  let l = directionalLights.[i]
+                  let viewDir = Vector2.Transform(l.Direction, frameViewMatrix)
+                  dirDirections.[i] <- if viewDir.LengthSquared() > 0.0001f then Vector2.Normalize(viewDir) else viewDir
+                  dirColors.[i] <- l.Color.ToVector4() * l.Intensity
 
                 fx.SafeSetParam("DirectionalLightDirections", dirDirections)
                 fx.SafeSetParam("DirectionalLightColors", dirColors)
@@ -683,6 +1009,33 @@ type Batch2DRenderer<'Model>
               )
 
               fx.SafeSetParam("LightIndexBuffer", lightTileDataTex :> Texture)
+
+              lCfg.Shadows
+              |> ValueOption.iter(fun shadowCfg ->
+                shadowAtlas
+                |> ValueOption.iter(fun atlas ->
+                  fx.SafeSetParam("ShadowAtlas", atlas :> Texture)
+
+                  fx.SafeSetParam(
+                    "ShadowAtlasSize",
+                    Vector2(float32 atlas.Width, float32 atlas.Height)
+                  )
+
+                  fx.SafeSetParam("ShadowBias", shadowCfg.ShadowBias)
+
+                  // Map to float32 for shader array passing without per-frame allocation
+                  let pIndicesCount = shadowIndicesPoint.Length
+                  let dIndicesCount = shadowIndicesDirectional.Length
+                  ensureCapacity pIndicesCount &pointShadowIndicesBuf
+                  ensureCapacity dIndicesCount &dirShadowIndicesBuf
+
+                  for i = 0 to pIndicesCount - 1 do 
+                    pointShadowIndicesBuf.[i] <- float32 shadowIndicesPoint.[i]
+                  for i = 0 to dIndicesCount - 1 do 
+                    dirShadowIndicesBuf.[i] <- float32 shadowIndicesDirectional.[i]
+
+                  fx.SafeSetParam("PointLightShadowIndices", pointShadowIndicesBuf)
+                  fx.SafeSetParam("DirectionalLightShadowIndices", dirShadowIndicesBuf)))
             | ValueNone -> ())
 
       // CRITICAL: Set RenderTarget BEFORE Clear to avoid accumulation trails
@@ -787,6 +1140,8 @@ type Batch2DRenderer<'Model>
             | ValueSome e -> e
             | ValueNone -> config.Effect
 
+          currentNormalMap <- null
+
           // Force update of lighting params for the new effect immediately
           updateLighting currentEffect
 
@@ -840,11 +1195,21 @@ type Batch2DRenderer<'Model>
           isBatching <- true
 
         | DrawTexture(tex, dest, src, color, rot, origin, fx, depth) ->
-          if not isBatching then
-            // Should not happen if logic above is correct, but safe guard
-            beginBatch()
+          let targetNM = ensureDefaultNormalMap()
 
+          if
+            isBatching && currentEffect <> null && targetNM <> currentNormalMap
+          then
+            endBatch()
+            isBatching <- false
+
+          if not isBatching then
+            beginBatch()
             isBatching <- true
+
+          if currentEffect <> null && targetNM <> currentNormalMap then
+            currentEffect.SafeSetParam("NormalMap", targetNM :> Texture)
+            currentNormalMap <- targetNM
 
           if src.HasValue then
             spriteBatch.Draw(
@@ -861,14 +1226,26 @@ type Batch2DRenderer<'Model>
             spriteBatch.Draw(tex, dest, color)
 
         | DrawSprite s ->
+          let targetNM =
+            match s.NormalMap with
+            | ValueSome tex -> tex
+            | ValueNone -> ensureDefaultNormalMap()
+
+          // If using a custom effect (lighting), we must flush if the normal map changes
+          // because SpriteBatch only supports one set of effect parameters per batch.
+          if
+            isBatching && currentEffect <> null && targetNM <> currentNormalMap
+          then
+            endBatch()
+            isBatching <- false
+
           if not isBatching then
             beginBatch()
             isBatching <- true
 
-          if currentEffect <> null then
-            s.NormalMap
-            |> ValueOption.iter(fun nm ->
-              currentEffect.SafeSetParam("NormalMap", nm :> Texture))
+          if currentEffect <> null && targetNM <> currentNormalMap then
+            currentEffect.SafeSetParam("NormalMap", targetNM :> Texture)
+            currentNormalMap <- targetNM
 
           let src = s.SourceRect |> ValueOption.toNullable
 
@@ -884,9 +1261,21 @@ type Batch2DRenderer<'Model>
           )
 
         | DrawText s ->
+          let targetNM = ensureDefaultNormalMap()
+
+          if
+            isBatching && currentEffect <> null && targetNM <> currentNormalMap
+          then
+            endBatch()
+            isBatching <- false
+
           if not isBatching then
             beginBatch()
             isBatching <- true
+
+          if currentEffect <> null && targetNM <> currentNormalMap then
+            currentEffect.SafeSetParam("NormalMap", targetNM :> Texture)
+            currentNormalMap <- targetNM
 
           spriteBatch.DrawString(
             s.Font,
@@ -901,9 +1290,21 @@ type Batch2DRenderer<'Model>
           )
 
         | DrawTextLegacy cmd ->
+          let targetNM = ensureDefaultNormalMap()
+
+          if
+            isBatching && currentEffect <> null && targetNM <> currentNormalMap
+          then
+            endBatch()
+            isBatching <- false
+
           if not isBatching then
             beginBatch()
             isBatching <- true
+
+          if currentEffect <> null && targetNM <> currentNormalMap then
+            currentEffect.SafeSetParam("NormalMap", targetNM :> Texture)
+            currentNormalMap <- targetNM
 
           spriteBatch.DrawString(
             cmd.Font,
@@ -1062,30 +1463,28 @@ type Batch2DRenderer<'Model>
 module Batch2DRenderer =
   /// <summary>Creates a standard 2D renderer.</summary>
   let inline create<'Model>
+    (game: Game)
     ([<InlineIfLambda>] view:
       GameContext -> 'Model -> RenderBuffer<RenderCmd2D> -> unit)
-    (game: Game)
-    =
-    Batch2DRenderer<'Model>(
+    : IRenderer<'Model> =
+    new Batch2DRenderer<'Model>(
       game,
       Batch2DConfig.defaults,
       fun (ctx, model, buffer) -> view ctx model buffer
     )
-    :> IRenderer<'Model>
 
   /// <summary>Creates a 2D renderer with custom configuration.</summary>
   let inline createWithConfig<'Model>
+    (game: Game)
     (config: Batch2DConfig)
     ([<InlineIfLambda>] view:
       GameContext -> 'Model -> RenderBuffer<RenderCmd2D> -> unit)
-    (game: Game)
-    =
-    Batch2DRenderer<'Model>(
+    : IRenderer<'Model> =
+    new Batch2DRenderer<'Model>(
       game,
       config,
       fun (ctx, model, buffer) -> view ctx model buffer
     )
-    :> IRenderer<'Model>
 
 
 /// <summary>Fluent builder for <see cref="T:Mibo.Elmish.Graphics2D.RenderCmd2D"/>.</summary>
