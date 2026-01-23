@@ -14,6 +14,7 @@ open MiboSample
 open MiboSample.Domain
 open MiboSample.Crates
 open MiboSample.DemoComponents
+
 // Shared ref used by the subscription to support dynamic remapping without requiring
 // subscription replacement. The user can ignore this if they never remap.
 let private inputMapRef: InputMap<GameAction> ref = ref InputMap.empty
@@ -33,8 +34,6 @@ type Msg =
   | CrateHit of crateId: Guid<EntityId>
 
 let crateRetryMode = RetryMode.Immediate
-
-// System pipeline is now provided by Mibo.Elmish.System
 
 // ─────────────────────────────────────────────────────────────
 // Init
@@ -79,11 +78,14 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     ItemSprite = animations.ItemSprite
     VignetteEffect = Assets.effect "Shaders/vignette" ctx
     GrayscaleEffect = Assets.effect "Shaders/grayscale" ctx
+    LightingEffect = Assets.effect "Shaders/lighting" ctx
+    SphereNormalMap = Assets.texture "sphere_normal" ctx
+    TotalTime = 0.0
   },
   Cmd.none
 
 // ─────────────────────────────────────────────────────────────
-// Update: Composable Pipeline
+// Update
 // ─────────────────────────────────────────────────────────────
 
 let update
@@ -95,28 +97,24 @@ let update
   | Tick gt ->
     let dt = float32 gt.ElapsedGameTime.TotalSeconds
 
-    // Type-enforced pipeline with snapshot boundary
     let struct (finalModel, allCmds) =
-      System.start model
-      // Phase 1: Mutable systems (can mutate positions, particles)
+      System.start {
+        model with
+            TotalTime = model.TotalTime + float gt.ElapsedGameTime.TotalSeconds
+      }
       |> System.pipeMutable(Physics.update dt)
       |> System.pipeMutable(Particles.update dt)
-      // SNAPSHOT: transition to readonly
       |> System.snapshot Model.toSnapshot
-      // Phase 2: Readonly systems (work with immutable snapshot)
       |> System.pipe(HueColor.update dt 5.f)
       |> System.pipe(Crates.ensureTarget crateRetryMode (fun () -> SpawnCrate))
       |> System.pipe(Crates.detectFirstOverlap(fun id -> CrateHit id))
       |> System.pipe(Player.processActions(fun id pos -> PlayerFired(id, pos)))
-      |> System.pipe(Animation.update dt) // Update animations)
-      // Finish: convert back to Model
+      |> System.pipe(Animation.update dt)
       |> System.finish Model.fromSnapshot
 
-    // MonoGame interop (reads from model)
     let interopCmd =
       Cmd.ofEffect(
         Effect<Msg>(fun _ ->
-          // Direct Actions check instead of dictionary lookup
           boxRef.TryGet()
           |> ValueOption.iter(fun box ->
             let isFiring = finalModel.Actions.Held.Contains Fire
@@ -128,14 +126,11 @@ let update
 
     finalModel, Cmd.batch2(allCmds, interopCmd)
 
-
-  | InputMapped actions ->
-    // User handles their own model strategy: here we store the mapped ActionState.
-    { model with Actions = actions }, Cmd.none
+  | InputMapped actions -> { model with Actions = actions }, Cmd.none
 
   | PlayerFired(id, pos) ->
     let newModel = HueColor.shiftTarget id 15.f model
-    newModel, Cmd.ofMsg(EmitParticles(pos, 100)) |> Cmd.deferNextFrame
+    newModel, Cmd.ofMsg(EmitParticles(pos, 50)) |> Cmd.deferNextFrame
 
   | EmitParticles(pos, count) ->
     Particles.emit pos count model
@@ -147,8 +142,6 @@ let update
     |> Cmd.deferNextFrame
 
   | SpawnCrate ->
-    // Update doesn't have GameContext by design; use current default window size.
-    // This is just a sample; a real game would model viewport changes explicitly.
     let struct (m, cmd) =
       Crates.spawnOne crateRetryMode (fun () -> SpawnCrate) 800 600 model
 
@@ -157,16 +150,13 @@ let update
   | CrateHit crateId ->
     let m = Crates.removeCrate crateId model
 
-    let spawnCmd =
-      match crateRetryMode with
-      | Deferred -> Cmd.ofMsg SpawnCrate |> Cmd.deferNextFrame
-      | Immediate -> Cmd.ofMsg SpawnCrate
-
     m,
     Cmd.batch [
       Cmd.ofMsg(EmitParticles(model.Positions[model.PlayerId], 40))
       |> Cmd.deferNextFrame
-      spawnCmd
+      match crateRetryMode with
+      | Deferred -> Cmd.ofMsg SpawnCrate |> Cmd.deferNextFrame
+      | Immediate -> Cmd.ofMsg SpawnCrate
     ]
 
 // ─────────────────────────────────────────────────────────────
@@ -175,40 +165,96 @@ let update
 
 let view(ctx: GameContext, model: Model, buffer: RenderBuffer<RenderCmd2D>) =
   let uiFont = ctx |> Assets.font "Fonts/monogram"
+  let egg = Assets.texture "Objects/Egg_item" ctx
   let snapshot = Model.toSnapshot model
-
   let playerId = model.PlayerId
   let pos = model.Positions[playerId]
   let hue = model.Hues |> Map.tryFind playerId |> Option.defaultValue 0f
   let color = HueColor.hueToColor hue
 
-  // Draw player sprite with camera setup and color tint
+  // --- Grayscale Layer (for crates at layer 2) ---
+  buffer.Effect(model.GrayscaleEffect, 1<RenderLayer>) |> ignore
+  Crates.view ctx snapshot buffer // draws at layer 2
+
+  // --- Lighting Layer (for everything else at layer 5+) ---
+  buffer.Effect(model.LightingEffect, 4<RenderLayer>) |> ignore
+
+  // Draw player lit (layer 5)
   Player.view ctx pos model.PlayerSprite color buffer
 
-  // Apply grayscale only to crates to demonstrate selective effects
-  buffer.Effect(ValueSome model.GrayscaleEffect) |> ignore
-  Crates.view ctx snapshot buffer
-  buffer.Effect(ValueNone) |> ignore
+  // Draw Torch Lit (layer 5)
+  let torchPos = Vector2(400f, 300f)
+  model.ItemSprite |> AnimatedSprite.draw torchPos 5<RenderLayer> buffer
 
+  // Demo sphere with normal map (layer 5)
+  buffer.Sprite(
+    sprite {
+      texture egg
+      at 100 100
+      size 64 64
+      normalMap model.SphereNormalMap
+      layer 5<RenderLayer>
+    }
+  )
+  |> ignore
+
+  // Draw Wall Lit (layer 5)
+  for y in 100.f..32.f..500.f do
+    model.CrateSprite
+    |> AnimatedSprite.draw (Vector2(600.f, y)) 5<RenderLayer> buffer
+
+  // Draw Particles (layer 7, emissive/unlit - no lighting shader)
+  buffer.Add(6<RenderLayer>, SetEffect ValueNone)
   Particles.view ctx model.Particles buffer
 
-  // Draw chest at a fixed WORLD position (stays in place in the world)
-  let chestWorldPos = Vector2(200.0f, 150.0f)
-  model.Decoration |> AnimatedSprite.draw chestWorldPos 5<RenderLayer> buffer
+  // --- Lighting Submission ---
+  buffer.PointLight {
+    Position = pos
+    Color = Color.White
+    Intensity = 2.0f
+    Radius = 450f
+    Falloff = 0.5f
+    Shadow = ValueSome ShadowSettings2D.defaults
+  }
+  |> ignore
 
+  let flicker = 1.0f + (float32(Math.Sin(model.TotalTime * 12.0)) * 0.2f)
 
-  // Using the text computation expression from the DSL
+  buffer.PointLight {
+    Position = torchPos
+    Color = Color.Orange
+    Intensity = 2.5f * flicker
+    Radius = 350f
+    Falloff = 1.0f
+    Shadow = ValueSome ShadowSettings2D.defaults
+  }
+  |> ignore
+
+  // Directional light (moonlight from upper-left) - made obvious for testing
+  buffer.DirectionalLight {
+    Direction = Vector2.Normalize(Vector2(1f, 1f)) // Coming from upper-left
+    Color = Color.LightYellow
+    Intensity = 0.2f
+    Shadow = ValueNone
+  }
+  |> ignore
+
+  buffer.Occluder {
+    P1 = Vector2(600f, 100f)
+    P2 = Vector2(600f, 500f)
+    Height = 1.0f
+  }
+  |> ignore
+
+  // UI
   buffer
     .Text(
       text {
         font uiFont
-
-        content
-          $"Hits: {snapshot.CrateHits}  Crates: {snapshot.Crates.Count}/{Crates.targetCount}"
-
-        at pos.X (pos.Y - 10.f)
+        content $"Hits: {snapshot.CrateHits}  Crates: {snapshot.Crates.Count}"
+        at pos.X (pos.Y - 15.f)
         color Color.White
-        layer 100<RenderLayer> // UI layer on top
+        layer 100<RenderLayer>
       }
     )
     .Submit()
@@ -223,8 +269,6 @@ let subscribe
   (_model: Model)
   =
   Sub.batch [
-    // Subscription-based input mapping: the framework maps raw input -> ActionState.
-    // The user only needs to handle a single message.
     InputMapper.subscribe (fun () -> inputMapRef.Value) InputMapped ctx
     InteractiveBoxOverlayBridge.subscribeBounced boxRef DemoBoxBounced
   ]
@@ -241,26 +285,30 @@ let main argv =
     Program.mkProgram init (update interactiveBoxRef)
     |> Program.withAssets
     |> Program.withRenderer(fun game ->
-      let gd = game.GraphicsDevice
       let vignetteFx = game.Content.Load<Effect>("Shaders/vignette")
-      let grayscaleFx = game.Content.Load<Effect>("Shaders/grayscale")
 
       let ppConfig =
         PostProcess2D.none
         |> PostProcess2D.withVignette {
           Effect = vignetteFx
-          Radius = 0.8f
-          Softness = 0.4f
+          Radius = 7.0f // Almost 0 visibility
+          Softness = 0.05f
         }
-      // Removed global grayscale to demonstrate selective application in the view function
 
+      let lightingConfig =
+        Lighting2DConfig.enabled { Color = Color.White * 0.2f }
+        |> Lighting2DConfig.withShadows {
+          Shadows2DConfig.defaults with
+              SoftShadowQuality = SoftShadowQuality2D.Low
+        }
+        |> ValueSome
 
-      let config = {
+      {
         Batch2DConfig.defaults with
             PostProcess = ValueSome ppConfig
+            Lighting = lightingConfig
       }
-
-      Batch2DRenderer(game, config, view) :> IRenderer<_>)
+      |> fun c -> Batch2DRenderer(game, c, view))
     |> Program.withInputMapper inputMapRef.Value
     |> Program.withTick Tick
     |> Program.withSubscription(subscribe interactiveBoxRef)

@@ -8,6 +8,13 @@
 - Rendering: **Selective 2D Effects**. Added support for per-batch shader effects using the `SetEffect` command, enabling targeted effects like grayscale on specific entity groups.
 - Rendering: **Render Target Pooling**. Introduced `IRenderTargetPool` to efficiently manage intermediate buffers during complex 2D post-processing passes, reducing allocation overhead.
 - Rendering: **Layered Compositing**. Added `FinalBlendState` to `Batch2DConfig` to allow 2D layers (including post-processed ones) to composite cleanly over previous 3D or 2D scenes.
+- Rendering: **Tiled 2D Lighting System**. Added GPU-accelerated point lighting with screen-space tile binning for efficient multi-light support.
+- Rendering: `PointLight2D` struct with position, color, intensity, radius, and falloff properties.
+- Rendering: `DirectionalLight2D` struct with direction, color, and intensity properties for global lighting (e.g., sun/moon).
+- Rendering: `Lighting2DConfig` for enabling/disabling 2D lighting with configurable ambient color, tile size, and max lights per tile.
+- Rendering: `buffer.PointLight` and `buffer.DirectionalLight` fluent APIs for submitting lights to the 2D render pipeline.
+- Rendering: Screen-space light transformation for correct world-to-screen light binning when using cameras.
+- Shaders: `lighting.fx` and `grayscale.fx` implement the Tiled Lighting Contract with normal map support and light clamping.
 - DSL: Updated `sprite` and `text` computation expressions for Improved performance via direct struct-based command submission.
 
 ### Fixed

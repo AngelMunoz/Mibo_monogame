@@ -20,6 +20,7 @@ type RenderBuffer<'Cmd> = RenderBuffer<int<RenderLayer>, 'Cmd>
 [<Struct>]
 type SpriteState = {
   Texture: Texture2D
+  NormalMap: Texture2D voption
   DestX: int
   DestY: int
   Width: int
@@ -32,6 +33,128 @@ type SpriteState = {
   Depth: float32
   Layer: int<RenderLayer>
 }
+
+// ============================================================================
+// 2D Lighting System (Phase 3)
+// ============================================================================
+
+/// <summary>Per-light shadow settings.</summary>
+[<Struct>]
+type ShadowSettings2D = {
+  /// <summary>Optional override for global shadow bias.</summary>
+  Bias: float32 voption
+}
+
+module ShadowSettings2D =
+  let defaults: ShadowSettings2D = { Bias = ValueNone }
+  let withBias b : ShadowSettings2D = { Bias = ValueSome b }
+
+/// <summary>A 2D point light.</summary>
+[<Struct>]
+type PointLight2D = {
+  Position: Vector2
+  Color: Color
+  Intensity: float32
+  Radius: float32
+  Falloff: float32
+  /// <summary>Shadow settings. ValueSome means the light casts shadows.</summary>
+  Shadow: ShadowSettings2D voption
+}
+
+/// <summary>A 2D directional light.</summary>
+[<Struct>]
+type DirectionalLight2D = {
+  Direction: Vector2
+  Color: Color
+  Intensity: float32
+  /// <summary>Shadow settings. ValueSome means the light casts shadows.</summary>
+  Shadow: ShadowSettings2D voption
+}
+
+/// <summary>A 2D ambient light.</summary>
+[<Struct>]
+type AmbientLight2D = { Color: Color }
+
+/// <summary>State of the 2D lighting system for a single frame.</summary>
+[<Struct>]
+type LightingState2D = {
+  Ambient: AmbientLight2D
+  PointLights: PointLight2D[]
+  DirectionalLights: DirectionalLight2D[]
+}
+
+/// <summary>A 2D shadow occluder (line segment).</summary>
+[<Struct>]
+type Occluder2D = {
+  P1: Vector2
+  P2: Vector2
+  /// <summary>Z-height for pseudo-3D shadows (default: 1.0).</summary>
+  Height: float32
+}
+
+/// <summary>Quality level for 2D soft shadows.</summary>
+type SoftShadowQuality2D =
+  | None = 0
+  | Low = 1
+  | Medium = 3
+  | High = 5
+
+/// <summary>Configuration for 2D shadows.</summary>
+[<Struct>]
+type Shadows2DConfig = {
+  Enabled: bool
+  /// <summary>Angular resolution per shadow strip (e.g., 512).</summary>
+  Resolution: int
+  /// <summary>Maximum number of shadow-casting lights.</summary>
+  MaxShadowLights: int
+  SoftShadowQuality: SoftShadowQuality2D
+  /// <summary>Global default shadow bias.</summary>
+  ShadowBias: float32
+}
+
+module Shadows2DConfig =
+  let defaults: Shadows2DConfig = {
+    Enabled = true
+    Resolution = 512
+    MaxShadowLights = 16
+    SoftShadowQuality = SoftShadowQuality2D.Low
+    ShadowBias = 0.001f
+  }
+
+/// <summary>Main configuration for 2D lighting.</summary>
+[<Struct>]
+type Lighting2DConfig = {
+  Enabled: bool
+  DefaultAmbient: AmbientLight2D
+  /// <summary>Screen-space tile size for CPU light culling (default: 32).</summary>
+  TileSize: int
+  /// <summary>Maximum lights per tile (default: 8).</summary>
+  MaxLightsPerTile: int
+  /// <summary>Shadow configuration.</summary>
+  Shadows: Shadows2DConfig voption
+}
+
+module Lighting2DConfig =
+  let disabled: Lighting2DConfig = {
+    Enabled = false
+    DefaultAmbient = { Color = Color.White }
+    TileSize = 32
+    MaxLightsPerTile = 8
+    Shadows = ValueNone
+  }
+
+  let enabled ambient : Lighting2DConfig = {
+    Enabled = true
+    DefaultAmbient = ambient
+    TileSize = 32
+    MaxLightsPerTile = 8
+    Shadows = ValueNone
+  }
+
+  let withShadows (cfg: Shadows2DConfig) (lighting: Lighting2DConfig) = {
+    lighting with
+        Shadows = ValueSome cfg
+  }
 
 /// <summary>Unified state for a text draw call.</summary>
 [<Struct>]
@@ -116,6 +239,20 @@ type RenderCmd2D =
 
   /// Draws text (legacy).
   | DrawTextLegacy of textCmd: TextDrawCmd
+
+  // --- Phase 3 Lighting Commands ---
+
+  /// Set the overall lighting state.
+  | SetLighting of lightingState: LightingState2D
+
+  /// Add a point light to the current frame.
+  | AddPointLight of pointLightVal: PointLight2D
+
+  /// Add a directional light to the current frame.
+  | AddDirectionalLight of directionalLightVal: DirectionalLight2D
+
+  /// Add an occluder for shadows.
+  | AddOccluder of occluderVal: Occluder2D
 
 // ============================================================================
 // Post-Processing Configuration (Phase 2)
@@ -274,6 +411,8 @@ type Batch2DConfig = {
   TransformMatrix: Matrix voption
   /// Post-processing configuration.
   PostProcess: PostProcess2DConfig voption
+  /// Lighting configuration.
+  Lighting: Lighting2DConfig voption
   /// Blend state for the final blit to screen (useful for layering/overlays).
   /// Defaults to Opaque to match standard behavior.
   FinalBlendState: BlendState
@@ -294,8 +433,57 @@ module Batch2DConfig =
     Effect = null
     TransformMatrix = ValueNone
     PostProcess = ValueNone
+    Lighting = ValueNone
     FinalBlendState = BlendState.Opaque
   }
+
+module Lighting2DInternal =
+  [<Struct>]
+  type LightBinResults = {
+    TileData: int[]
+    TileCounts: int[]
+    TilesX: int
+    TilesY: int
+  }
+
+  let binPointLights
+    (device: GraphicsDevice)
+    (tileSize: int)
+    (maxLightsPerTile: int)
+    (lights: PointLight2D[])
+    : LightBinResults =
+    let viewport = device.Viewport
+    let tw = (viewport.Width + tileSize - 1) / tileSize
+    let th = (viewport.Height + tileSize - 1) / tileSize
+
+    let tileCounts = Array.zeroCreate<int>(tw * th)
+    // Initialize with -1 (no light marker) instead of 0 (which is a valid light index!)
+    let tileData = Array.create (tw * th * maxLightsPerTile) -1
+
+    for i = 0 to lights.Length - 1 do
+      let l = lights.[i]
+      let r = l.Radius
+      let minX = max 0 (int(l.Position.X - r) / tileSize)
+      let maxX = min (tw - 1) (int(l.Position.X + r) / tileSize)
+      let minY = max 0 (int(l.Position.Y - r) / tileSize)
+      let maxY = min (th - 1) (int(l.Position.Y + r) / tileSize)
+
+      for ty = minY to maxY do
+        for tx = minX to maxX do
+          let tileIdx = ty * tw + tx
+          let count = tileCounts.[tileIdx]
+
+          if count < maxLightsPerTile then
+            tileData.[tileIdx * maxLightsPerTile + count] <- i
+            tileCounts.[tileIdx] <- count + 1
+
+    {
+      TileData = tileData
+      TileCounts = tileCounts
+      TilesX = tw
+      TilesY = th
+    }
+
 
 /// <summary>Standard 2D Renderer using <see cref="T:Microsoft.Xna.Framework.Graphics.SpriteBatch"/>.</summary>
 type Batch2DRenderer<'Model>
@@ -308,6 +496,8 @@ type Batch2DRenderer<'Model>
   let mutable spriteBatch: SpriteBatch = null
   let mutable rtPool: IRenderTargetPool voption = ValueNone
   let mutable sceneTarget: RenderTarget2D voption = ValueNone
+  let mutable lightTileDataTex: Texture2D = null
+  let mutable lightTileDataBuffer: float32[] = Array.empty
   let buffer = RenderBuffer<RenderCmd2D>()
 
   interface IRenderer<'Model> with
@@ -339,7 +529,161 @@ type Batch2DRenderer<'Model>
         | ValueSome m -> Nullable m
         | ValueNone -> Nullable()
 
+      // Lighting tracking (Phase 3)
+      let mutable currentLightingState =
+        config.Lighting
+        |> ValueOption.map(fun l -> {
+          Ambient = l.DefaultAmbient
+          PointLights = [||]
+          DirectionalLights = [||]
+        })
+
+      let pointLights = ResizeArray<PointLight2D>()
+      let directionalLights = ResizeArray<DirectionalLight2D>()
+      let occluders = ResizeArray<Occluder2D>()
+
+      // 1. Initial collection pass (Phase 3)
+      for i = 0 to buffer.Count - 1 do
+        let struct (_, cmd) = buffer.Item(i)
+
+        match cmd with
+        | SetLighting l ->
+          currentLightingState <- ValueSome l
+          pointLights.Clear()
+          directionalLights.Clear()
+          pointLights.AddRange l.PointLights
+          directionalLights.AddRange l.DirectionalLights
+        | AddPointLight l -> pointLights.Add l
+        | AddDirectionalLight l -> directionalLights.Add l
+        | AddOccluder o -> occluders.Add o
+        | _ -> ()
+
       let hasPostProcess = config.PostProcess.IsSome
+
+      // 1.5 Scan for View Matrix (needed for light binning)
+      let mutable frameViewMatrix = Matrix.Identity
+
+      for i = 0 to buffer.Count - 1 do
+        let struct (_, cmd) = buffer.Item(i)
+
+        match cmd with
+        | SetCamera c -> frameViewMatrix <- c.View
+        // We assume the last camera set is the main one, or the first?
+        // Usually simple 2D games have one camera.
+        // If multiple, this architecture requires more complex binning (per-view).
+        // For this sample, we'll take the first one found or iterate to find active.
+        | _ -> ()
+
+      // 2. Binning (Phase 3) - Transform lights to screen space!
+      let binResults: Lighting2DInternal.LightBinResults voption =
+        config.Lighting
+        |> ValueOption.map(fun lCfg ->
+          // Transform lights to screen space for binning
+          let screenSpaceLights =
+            pointLights
+            |> Seq.map(fun l -> {
+              l with
+                  Position = Vector2.Transform(l.Position, frameViewMatrix)
+            })
+            |> Seq.toArray
+
+          Lighting2DInternal.binPointLights
+            ctx.GraphicsDevice
+            lCfg.TileSize
+            lCfg.MaxLightsPerTile
+            screenSpaceLights)
+
+      // Helper to update lighting params on an effect (Phase 3.7)
+      let updateLighting(fx: Effect) =
+        if fx <> null then
+          config.Lighting
+          |> ValueOption.iter(fun lCfg ->
+            currentLightingState
+            |> ValueOption.iter(fun state ->
+              fx.SafeSetParam("AmbientColor", state.Ambient.Color))
+
+            match binResults with
+            | ValueSome bin ->
+              let counts = pointLights.Count
+
+              // Use the frame-wide view matrix for consistency with binning
+              let viewMatrix = frameViewMatrix
+
+              let positions =
+                Array.init counts (fun i ->
+                  Vector2.Transform(pointLights.[i].Position, viewMatrix))
+
+              let colors =
+                Array.init counts (fun i ->
+                  pointLights.[i].Color.ToVector4()
+                  * pointLights.[i].Intensity)
+
+              let radii = Array.init counts (fun i -> pointLights.[i].Radius)
+
+              let falloffs =
+                Array.init counts (fun i -> pointLights.[i].Falloff)
+
+              fx.SafeSetParam("PointLightPositions", positions)
+              fx.SafeSetParam("PointLightColors", colors)
+              fx.SafeSetParam("PointLightRadii", radii)
+              fx.SafeSetParam("PointLightFalloffs", falloffs)
+              fx.SafeSetParam("PointLightCount", counts)
+
+              // Directional lights (no position/radius, just direction)
+              let dirCounts = directionalLights.Count
+              fx.SafeSetParam("DirectionalLightCount", dirCounts)
+
+              if dirCounts > 0 then
+                let dirDirections =
+                  Array.init dirCounts (fun i ->
+                    directionalLights.[i].Direction)
+
+                let dirColors =
+                  Array.init dirCounts (fun i ->
+                    directionalLights.[i].Color.ToVector4()
+                    * directionalLights.[i].Intensity)
+
+                fx.SafeSetParam("DirectionalLightDirections", dirDirections)
+                fx.SafeSetParam("DirectionalLightColors", dirColors)
+
+              // Handle tiered tile data texture
+              let requiredBufferSize = bin.TileData.Length
+
+              if
+                isNull lightTileDataTex
+                || lightTileDataTex.Width <> bin.TileData.Length
+              then
+                if not(isNull lightTileDataTex) then
+                  lightTileDataTex.Dispose()
+
+                lightTileDataTex <-
+                  new Texture2D(
+                    ctx.GraphicsDevice,
+                    bin.TileData.Length,
+                    1,
+                    false,
+                    SurfaceFormat.Single
+                  )
+
+                lightTileDataBuffer <- Array.zeroCreate requiredBufferSize
+
+              // Zero-allocation copy (mostly)
+              for j = 0 to bin.TileData.Length - 1 do
+                lightTileDataBuffer.[j] <- float32 bin.TileData.[j]
+
+              lightTileDataTex.SetData(lightTileDataBuffer)
+
+              fx.SafeSetParam("TileSize", float32 lCfg.TileSize)
+              fx.SafeSetParam("TilesX", float32 bin.TilesX)
+              fx.SafeSetParam("MaxLightsPerTile", lCfg.MaxLightsPerTile)
+
+              fx.SafeSetParam(
+                "LightIndexBufferWidth",
+                float32 lightTileDataTex.Width
+              )
+
+              fx.SafeSetParam("LightIndexBuffer", lightTileDataTex :> Texture)
+            | ValueNone -> ())
 
       // CRITICAL: Set RenderTarget BEFORE Clear to avoid accumulation trails
       if hasPostProcess then
@@ -366,6 +710,8 @@ type Batch2DRenderer<'Model>
       config.ClearColor |> ValueOption.iter(fun c -> ctx.GraphicsDevice.Clear c)
 
       let beginBatch() =
+        updateLighting currentEffect
+
         spriteBatch.Begin(
           currentSortMode,
           currentBlend,
@@ -440,6 +786,9 @@ type Batch2DRenderer<'Model>
             match effectOpt with
             | ValueSome e -> e
             | ValueNone -> config.Effect
+
+          // Force update of lighting params for the new effect immediately
+          updateLighting currentEffect
 
           beginBatch()
           isBatching <- true
@@ -516,6 +865,11 @@ type Batch2DRenderer<'Model>
             beginBatch()
             isBatching <- true
 
+          if currentEffect <> null then
+            s.NormalMap
+            |> ValueOption.iter(fun nm ->
+              currentEffect.SafeSetParam("NormalMap", nm :> Texture))
+
           let src = s.SourceRect |> ValueOption.toNullable
 
           spriteBatch.Draw(
@@ -562,6 +916,11 @@ type Batch2DRenderer<'Model>
             cmd.Effects,
             cmd.Depth
           )
+
+        | SetLighting l -> currentLightingState <- ValueSome l
+        | AddPointLight l -> pointLights.Add l
+        | AddDirectionalLight l -> directionalLights.Add l
+        | AddOccluder o -> occluders.Add o
 
       if isBatching then
         endBatch()
@@ -877,6 +1236,7 @@ module DSL =
     /// <summary>Creates a default empty sprite state.</summary>
     let empty: SpriteState = {
       Texture = null
+      NormalMap = ValueNone
       DestX = 0
       DestY = 0
       Width = 0
@@ -937,6 +1297,12 @@ module DSL =
           Texture = tex
           Width = tex.Width
           Height = tex.Height
+    }
+
+    [<CustomOperation("normalMap")>]
+    member inline _.NormalMap(s: SpriteState, tex: Texture2D) = {
+      s with
+          NormalMap = ValueSome tex
     }
 
     [<CustomOperation("at")>]
@@ -1168,9 +1534,12 @@ module DSL =
 
     [<Extension>]
     static member inline Camera
-      (this: RenderBuffer<RenderCmd2D>, cam: Camera, ?layer: int<RenderLayer>)
-      =
-      this.Add(defaultArg layer 0<RenderLayer>, SetCamera cam)
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        cam: Camera,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultValueArg layer 0<RenderLayer>, SetCamera cam)
       this
 
     [<Extension>]
@@ -1180,18 +1549,66 @@ module DSL =
 
     [<Extension>]
     static member inline BlendState
-      (this: RenderBuffer<RenderCmd2D>, bs: BlendState, ?layer: int<RenderLayer>) =
-      this.Add(defaultArg layer 0<RenderLayer>, SetBlendState bs)
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        bs: BlendState,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultValueArg layer 0<RenderLayer>, SetBlendState bs)
       this
 
     [<Extension>]
     static member inline Effect
       (
         this: RenderBuffer<RenderCmd2D>,
-        effect: Effect voption,
-        ?layer: int<RenderLayer>
+        effect: Effect,
+        [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultArg layer 0<RenderLayer>, SetEffect effect)
+      this.Add(
+        defaultValueArg layer 0<RenderLayer>,
+        SetEffect(ValueSome effect)
+      )
+
+      this
+
+    [<Extension>]
+    static member inline Lighting
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        lighting: LightingState2D,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultValueArg layer 0<RenderLayer>, SetLighting lighting)
+      this
+
+    [<Extension>]
+    static member inline PointLight
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        light: PointLight2D,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultValueArg layer 0<RenderLayer>, AddPointLight light)
+      this
+
+    [<Extension>]
+    static member inline DirectionalLight
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        light: DirectionalLight2D,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultValueArg layer 0<RenderLayer>, AddDirectionalLight light)
+      this
+
+    [<Extension>]
+    static member inline Occluder
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        occluder: Occluder2D,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultValueArg layer 0<RenderLayer>, AddOccluder occluder)
       this
 
     [<Extension>]
@@ -1216,6 +1633,19 @@ module DSL =
       buffer.BlendState(bs)
 
     let inline effect fx (buffer: RenderBuffer<RenderCmd2D>) = buffer.Effect(fx)
+
+    let inline lighting l (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Lighting(l)
+
+    let inline pointLight l (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.PointLight(l)
+
+    let inline directionalLight l (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.DirectionalLight(l)
+
+    let inline occluder o (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Occluder(o)
+
     let inline submit(buffer: RenderBuffer<RenderCmd2D>) = buffer.Submit()
 
   // --------------------------------------------------------------------------

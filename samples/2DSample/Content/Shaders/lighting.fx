@@ -9,7 +9,7 @@
     #define VPOS_SEMANTIC SV_Position
 #endif
 
-// --- Phase 3 Tiled Lighting Contract ---
+// Established Contract Uniforms (Phase 3)
 float4 AmbientColor;
 int PointLightCount;
 float2 PointLightPositions[16];
@@ -31,9 +31,26 @@ Texture2D LightIndexBuffer;
 Texture2D SpriteTexture;
 Texture2D NormalMap;
 
-sampler2D SpriteSampler = sampler_state { Texture = <SpriteTexture>; };
-sampler2D NormalSampler = sampler_state { Texture = <NormalMap>; AddressU = Clamp; AddressV = Clamp; };
-sampler2D TileSampler = sampler_state { Texture = <LightIndexBuffer>; Filter = Point; AddressU = Clamp; AddressV = Clamp; };
+sampler2D SpriteSampler = sampler_state
+{
+	Texture = <SpriteTexture>;
+};
+
+sampler2D NormalSampler = sampler_state
+{
+	Texture = <NormalMap>;
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
+
+// OpenGL-compatible sampler for light index buffer
+sampler2D TileSampler = sampler_state
+{
+	Texture = <LightIndexBuffer>;
+    Filter = Point;
+    AddressU = Clamp;
+    AddressV = Clamp;
+};
 
 // --- Pixel Shader ---
 
@@ -42,13 +59,10 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
 	float4 texColor = tex2D(SpriteSampler, texCoord) * color;
     if (texColor.a < 0.1) discard;
 
-    // 1. Apply Grayscale (The core purpose of this shader)
-    float gray = dot(texColor.rgb, float3(0.299, 0.587, 0.114));
-    texColor.rgb = float3(gray, gray, gray);
-
-    // 2. Apply Lighting (Contract Fulfillment)
+    // 1. Sample Normal Map
     float3 normal = float3(0, 0, 1);
     float4 nData = tex2D(NormalSampler, texCoord);
+
     if (any(nData.rgb)) {
         normal = normalize(nData.rgb * 2.0 - 1.0);
     }
@@ -56,6 +70,7 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
     float3 finalLight = AmbientColor.rgb;
     float2 pixelPos = pos.xy;
 
+    // 2. Tiled Lookup (Universal for GL/DX)
     float2 tileCoord = floor(pixelPos / TileSize);
     int tileIdx = (int)(tileCoord.y * TilesX + tileCoord.x);
     int startOffset = tileIdx * MaxLightsPerTile;
@@ -73,15 +88,18 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
 
         int lightIdx = -1;
         #if OPENGL
+            // Normalized lookup for OpenGL (MojoShader)
             float fetchCoord = (float(bufferIndex) + 0.5) / LightIndexBufferWidth;
             lightIdx = (int)tex2Dlod(TileSampler, float4(fetchCoord, 0.5, 0, 0)).r;
         #else
+            // High-performance Load for SM 4.0+ (DirectX)
             lightIdx = (int)LightIndexBuffer.Load(int3(bufferIndex, 0, 0)).r;
         #endif
 
         if (lightIdx < 0) break;
         if (lightIdx >= 16) continue;
 
+        // 3. Lighting Calculation
         float2 lightDir = PointLightPositions[lightIdx] - pixelPos;
         float dist = length(lightDir);
 
@@ -92,6 +110,7 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
 
             float2 nLightDir = normalize(lightDir);
             float dotNL = max(0.0, dot(normal, float3(nLightDir, 0.5)));
+
             finalLight += diffuse * dotNL;
         }
     }

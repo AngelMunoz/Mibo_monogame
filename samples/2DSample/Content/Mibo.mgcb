@@ -497,3 +497,19 @@
 /importer:EffectImporter
 /processor:EffectProcessor
 /build:Shaders/grayscale.fx
+
+#begin Shaders/lighting.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/build:Shaders/lighting.fx
+
+#begin sphere_normal.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyEnabled=False
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=False
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:sphere_normal.png

@@ -82,6 +82,9 @@ type Model = {
   // Phase 2: Post-processing effects
   VignetteEffect: Effect
   GrayscaleEffect: Effect
+  LightingEffect: Effect
+  SphereNormalMap: Texture2D
+  TotalTime: float
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -108,6 +111,9 @@ type ModelSnapshot = {
   ItemSprite: AnimatedSprite
   VignetteEffect: Effect
   GrayscaleEffect: Effect
+  LightingEffect: Effect
+  SphereNormalMap: Texture2D
+  TotalTime: float
 }
 
 module Model =
@@ -131,6 +137,9 @@ module Model =
     ItemSprite = model.ItemSprite
     VignetteEffect = model.VignetteEffect
     GrayscaleEffect = model.GrayscaleEffect
+    LightingEffect = model.LightingEffect
+    SphereNormalMap = model.SphereNormalMap
+    TotalTime = model.TotalTime
   }
 
   let fromSnapshot(snapshot: ModelSnapshot) : Model = {
@@ -152,4 +161,7 @@ module Model =
     ItemSprite = snapshot.ItemSprite
     VignetteEffect = snapshot.VignetteEffect
     GrayscaleEffect = snapshot.GrayscaleEffect
+    LightingEffect = snapshot.LightingEffect
+    SphereNormalMap = snapshot.SphereNormalMap
+    TotalTime = snapshot.TotalTime
   }

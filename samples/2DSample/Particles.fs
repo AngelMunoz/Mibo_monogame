@@ -72,7 +72,7 @@ let view
           at p.Position
           size 2 2
           color p.Color
-          layer 5<RenderLayer>
+          layer 7<RenderLayer> // Higher layer, drawn after lit content
         }
       )
       .Submit()
