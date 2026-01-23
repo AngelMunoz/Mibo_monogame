@@ -210,9 +210,9 @@ let view(ctx: GameContext, model: Model, buffer: RenderBuffer<RenderCmd2D>) =
   // --- Lighting Submission ---
   buffer.PointLight {
     Position = pos
-    Color = Color.White
-    Intensity = 2.0f
-    Radius = 450f
+    Color = Color.YellowGreen
+    Intensity = 1.5f
+    Radius = 256f
     Falloff = 0.5f
     Shadow = ValueSome ShadowSettings2D.defaults
   }
@@ -286,6 +286,7 @@ let main argv =
     |> Program.withAssets
     |> Program.withRenderer(fun game ->
       let vignetteFx = game.Content.Load<Effect>("Shaders/vignette")
+      let shadowCasterFx = game.Content.Load<Effect>("Shaders/shadowcaster")
 
       let ppConfig =
         PostProcess2D.none
@@ -303,12 +304,24 @@ let main argv =
         }
         |> ValueSome
 
-      {
-        Batch2DConfig.defaults with
-            PostProcess = ValueSome ppConfig
-            Lighting = lightingConfig
-      }
-      |> fun c -> Batch2DRenderer(game, c, view))
+      let shaderOverrides =
+        let dict =
+          System.Collections.Generic.Dictionary<ShaderBase2D, Effect>()
+
+        dict[ShaderBase2D.ShadowCaster] <- shadowCasterFx
+
+        dict
+        :> System.Collections.Generic.IReadOnlyDictionary<ShaderBase2D, Effect>
+
+      Batch2DRenderer.createWithConfig
+        game
+        {
+          Batch2DConfig.defaults with
+              PostProcess = ValueSome ppConfig
+              Lighting = lightingConfig
+              ShaderOverrides = shaderOverrides
+        }
+        (fun ctx model buffer -> view(ctx, model, buffer)))
     |> Program.withInputMapper inputMapRef.Value
     |> Program.withTick Tick
     |> Program.withSubscription(subscribe interactiveBoxRef)
