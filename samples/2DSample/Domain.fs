@@ -63,7 +63,6 @@ type Platform = {
   Variant: int
 }
 
-
 // ─────────────────────────────────────────────────────────────
 // Physics Constants
 // ─────────────────────────────────────────────────────────────
@@ -104,6 +103,11 @@ type TerrainAssets = {
   Background: Texture2D
 }
 
+/// Loaded animation assets for decorative elements
+type DecorationAssets = {
+  Torch: AnimatedSprite
+}
+
 // ─────────────────────────────────────────────────────────────
 // Model: The World State
 // ─────────────────────────────────────────────────────────────
@@ -131,9 +135,12 @@ type Model = {
   Platforms: Platform array // Collision boxes cached from map for physics
 
   // Assets
-
   PlayerAssets: PlayerAssets
   TerrainAssets: TerrainAssets
+  DecorationAssets: DecorationAssets
+
+  // Active decorations
+  Torches: (Vector2 * AnimatedSprite) array
 
   // World state
   CameraX: float32 // Camera scroll position

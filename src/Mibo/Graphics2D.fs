@@ -522,8 +522,7 @@ type Batch2DConfig = {
   Lighting: Lighting2DConfig voption
   /// Shader overrides for specific rendering stages.
   /// Users provide their own effects; Mibo selects which to use for each stage.
-  ShaderOverrides:
-    System.Collections.Generic.IReadOnlyDictionary<ShaderBase2D, Effect>
+  ShaderOverrides: Dictionary<ShaderBase2D, Effect>
   /// Blend state for the final blit to screen (useful for layering/overlays).
   /// Defaults to Opaque to match standard behavior.
   FinalBlendState: BlendState
@@ -545,10 +544,84 @@ module Batch2DConfig =
     TransformMatrix = ValueNone
     PostProcess = ValueNone
     Lighting = ValueNone
-    ShaderOverrides =
-      System.Collections.Generic.Dictionary<ShaderBase2D, Effect>()
+    ShaderOverrides = Dictionary()
     FinalBlendState = BlendState.Opaque
   }
+
+  let withClearColor (color: Color voption) (cfg: Batch2DConfig) = {
+    cfg with
+        ClearColor = color
+  }
+
+  let withSortCommands (sort: bool) (cfg: Batch2DConfig) = {
+    cfg with
+        SortCommands = sort
+  }
+
+  let withSortMode (mode: SpriteSortMode) (cfg: Batch2DConfig) = {
+    cfg with
+        SortMode = mode
+  }
+
+  let withBlendState (state: BlendState) (cfg: Batch2DConfig) = {
+    cfg with
+        BlendState = state
+  }
+
+  let withSamplerState (state: SamplerState) (cfg: Batch2DConfig) = {
+    cfg with
+        SamplerState = state
+  }
+
+  let withDepthStencilState (state: DepthStencilState) (cfg: Batch2DConfig) = {
+    cfg with
+        DepthStencilState = state
+  }
+
+  let withRasterizerState (state: RasterizerState) (cfg: Batch2DConfig) = {
+    cfg with
+        RasterizerState = state
+  }
+
+  let withEffect (effect: Effect) (cfg: Batch2DConfig) = {
+    cfg with
+        Effect = effect
+  }
+
+  let withTransform (matrix: Matrix voption) (cfg: Batch2DConfig) = {
+    cfg with
+        TransformMatrix = matrix
+  }
+
+  let withPostProcess (pp: PostProcess2DConfig) (cfg: Batch2DConfig) = {
+    cfg with
+        PostProcess = ValueSome pp
+  }
+
+  let withLighting (lighting: Lighting2DConfig) (cfg: Batch2DConfig) = {
+    cfg with
+        Lighting = ValueSome lighting
+  }
+
+  let withShader
+    (baseType: ShaderBase2D)
+    (effect: Effect)
+    (cfg: Batch2DConfig)
+    =
+    cfg.ShaderOverrides.Add(baseType, effect)
+    cfg
+
+  let withLitSprite (effect: Effect) (cfg: Batch2DConfig) =
+    withShader ShaderBase2D.LitSprite effect cfg
+
+  let withShadowCaster (effect: Effect) (cfg: Batch2DConfig) =
+    withShader ShaderBase2D.ShadowCaster effect cfg
+
+  let withFinalBlendState (state: BlendState) (cfg: Batch2DConfig) = {
+    cfg with
+        FinalBlendState = state
+  }
+
 
 module Lighting2DInternal =
   [<Struct>]

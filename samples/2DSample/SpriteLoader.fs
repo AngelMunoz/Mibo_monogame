@@ -11,7 +11,7 @@ open MiboSample.Domain
 // ─────────────────────────────────────────────────────────────
 
 /// Load all assets required for the platformer
-let load(ctx: GameContext) : struct (PlayerAssets * TerrainAssets) =
+let load(ctx: GameContext) =
   // Load character spritesheet
   let characterTex =
     Assets.texture
@@ -91,6 +91,26 @@ let load(ctx: GameContext) : struct (PlayerAssets * TerrainAssets) =
   }
 
   // ─────────────────────────────────────────────────────────────
+  // Decoration Animations
+  // ─────────────────────────────────────────────────────────────
+
+  // Torch animation (two frames)
+  let torchAnim: Animation = {
+    Frames = [| Rectangle(65, 1105, 64, 64); Rectangle(130, 1105, 64, 64) |]
+    FrameDuration = 1.0f / 8.0f // 8 FPS
+    Loop = true
+  }
+
+  let decorationSheet =
+    SpriteSheet.fromFrames tileTex (Vector2(32.0f, 64.0f)) [|
+      "torch", torchAnim
+    |]
+
+  let decorationAssets = {
+    Torch = AnimatedSprite.create decorationSheet "torch"
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // Terrain Assets
   // ─────────────────────────────────────────────────────────────
 
@@ -101,9 +121,10 @@ let load(ctx: GameContext) : struct (PlayerAssets * TerrainAssets) =
     Background = backgroundTex
   }
 
-  struct (playerAssets, terrainAssets)
+  struct (playerAssets, terrainAssets, decorationAssets)
 
 // ─────────────────────────────────────────────────────────────
+
 // Sprite Region Helpers for Tile Rendering
 // Coordinates from spritesheet-tiles-default.xml
 // ─────────────────────────────────────────────────────────────

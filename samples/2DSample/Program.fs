@@ -10,7 +10,6 @@ open Mibo.Input
 open Mibo.Animation
 open Mibo.Rendering
 open MiboSample.Domain
-
 open MiboSample.SpriteLoader
 open MiboSample.Physics
 open MiboSample.Terrain
@@ -47,15 +46,39 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
   inputMapRef.Value <- inputMap
 
   // Load sprites
-  let struct (playerAssets, terrainAssets) = SpriteLoader.load ctx
+  let struct (playerAssets, terrainAssets, decorationAssets) =
+    SpriteLoader.load ctx
 
   // Generate random seed for procedural terrain
   let seed = 78494612
 
   // Generate initial terrain
-  let tiles = Terrain.generateInitialTerrain seed
-  let map = Terrain.createMapFromTiles tiles seed
-  let platforms = Terrain.createPlatformsFromTiles tiles
+  let initialTiles = Terrain.generateInitialTerrain seed
+  let map = Terrain.createMapFromTiles initialTiles seed
+  let initialPlatforms = Terrain.createPlatformsFromTiles initialTiles
+
+  // Manual test setup: specific platforms and torches near spawn
+  // Spawn is at (200, 576). Ground is at Y=640.
+  let testTorches = [|
+    Vector2(300.0f, 576.0f), decorationAssets.Torch
+    Vector2(100.0f, 576.0f), decorationAssets.Torch
+    Vector2(500.0f, 448.0f), decorationAssets.Torch
+  |]
+
+  let testPlatforms = [|
+    {
+      Bounds = Rectangle(450, 512, 128, 32)
+      Type = TileType.Platform
+      Variant = 0
+    }
+    {
+      Bounds = Rectangle(50, 512, 128, 32)
+      Type = TileType.Platform
+      Variant = 0
+    }
+  |]
+
+  let platforms = Array.append initialPlatforms testPlatforms
 
   // Create player
   let playerId = Helpers.newEntityId()
@@ -78,6 +101,8 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     Platforms = platforms
     PlayerAssets = playerAssets
     TerrainAssets = terrainAssets
+    DecorationAssets = decorationAssets
+    Torches = testTorches
     CameraX = 0.0f
     TotalTime = 0.0f
     Seed = seed
@@ -85,6 +110,7 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
   },
   Cmd.none
 
+// ─────────────────────────────────────────────────────────────
 // Update: Orchestration using System Pipeline
 // ─────────────────────────────────────────────────────────────
 
@@ -107,14 +133,20 @@ let private updateSystems dt model =
       { model with Platforms = platforms }, Cmd.none
     else
       model, Cmd.none)
-  |> System.finish Camera.update
+  |> System.pipe(fun model ->
+    let dt = dt
 
+    let updatedTorches =
+      model.Torches
+      |> Array.map(fun (pos, sprite) -> pos, AnimatedSprite.update dt sprite)
+
+    { model with Torches = updatedTorches }, Cmd.none)
+  |> System.finish Camera.update
 
 let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
   match msg with
   | InputMapped actions -> { model with Actions = actions }, Cmd.none
   | Tick gt -> updateSystems (float32 gt.ElapsedGameTime.TotalSeconds) model
-
 
 // ─────────────────────────────────────────────────────────────
 // View: Orchestration of rendering modules
@@ -123,21 +155,44 @@ let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
 let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   let viewport = ctx.GraphicsDevice.Viewport
 
-
   // 1. Setup World Camera
   let worldCamera = Camera.createWorldCamera ctx model
   buffer.Camera(worldCamera, 0<RenderLayer>) |> ignore
 
-  // 2. Draw World Elements
-  // Parallax Background (placeholder - moves slower than camera)
-  // let bgX = model.CameraX * 0.5f
+  // 2. Global Lighting State
+  buffer.Lighting(
+    {
+      Ambient = { Color = Color(40, 40, 60) } // Dark blue ambient
+      PointLights = [||]
+      DirectionalLights = [||]
+    }
+  )
+  |> ignore
 
+  // 3. Draw World Elements
   // Terrain
   Terrain.view model buffer
 
+  // Torches and their lights
+  for (pos, sprite) in model.Torches do
+    // Draw torch sprite
+    AnimatedSprite.draw pos 0<RenderLayer> buffer sprite
+
+    // Add dynamic light for the torch
+    buffer.PointLight(
+      {
+        Position = pos
+        Color = Color.Orange
+        Intensity = 2.0f
+        Radius = 300.0f
+        Falloff = 1.5f
+        Shadow = ValueSome ShadowSettings2D.defaults
+      }
+    )
+    |> ignore
+
   // Player
   Player.view ctx model buffer
-
 
   // 3. Setup UI Camera
   let uiCamera = Camera.createUICamera ctx
@@ -174,13 +229,24 @@ let main _ =
     |> Program.withTick Tick
     |> Program.withSubscription subscribe
     |> Program.withRenderer(fun game ->
-      Batch2DRenderer.createWithConfig
-        game
-        {
-          Batch2DConfig.defaults with
-              ClearColor = ValueSome Color.CornflowerBlue
-        }
-        view)
+      let lightingConfig =
+        Lighting2DConfig.enabled { Color = Color(40, 40, 60) }
+        |> Lighting2DConfig.withShadows Shadows2DConfig.defaults
+
+      let ctx = {
+        GraphicsDevice = game.GraphicsDevice
+        Content = game.Content
+        Game = game
+      }
+
+      Batch2DConfig.defaults
+      |> Batch2DConfig.withClearColor(ValueSome Color.Black)
+      |> Batch2DConfig.withLighting lightingConfig
+      |> Batch2DConfig.withLitSprite(game.Content.Load "Shaders/lighting")
+      |> Batch2DConfig.withShadowCaster(
+        game.Content.Load "Shaders/shadowcaster"
+      )
+      |> fun cfg -> Batch2DRenderer.createWithConfig game cfg view)
 
   use game = new ElmishGame<Model, Msg>(program)
   game.Run()
