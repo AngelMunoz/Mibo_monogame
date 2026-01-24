@@ -12,9 +12,10 @@ open MiboSample.Animation
 // ─────────────────────────────────────────────────────────────
 
 /// Update player-specific state (separate from physics)
-let update (dt: float32) (model: Model) : Model =
+let update (dt: float32) (model: Model) : struct (Model * Cmd<'Msg>) =
   // Update player animations based on current state
-  Animation.update(dt, model)
+  Animation.update(dt, model), Cmd.none
+
 
 /// Get the player's current animation state
 let getAnimationState(model: Model) : AnimationState =

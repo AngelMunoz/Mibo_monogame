@@ -16,6 +16,8 @@
     <Compile Include="Physics.fs" />
     <Compile Include="Terrain.fs" />
     <Compile Include="Player.fs" />
+    <Compile Include="Camera.fs" />
+    <Compile Include="UI.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

@@ -2,15 +2,19 @@ module MiboSample.Program
 
 open System
 open Microsoft.Xna.Framework
-open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open Mibo.Elmish
 open Mibo.Elmish.Graphics2D
 open Mibo.Elmish.Graphics2D.DSL
 open Mibo.Input
+
 open MiboSample.Domain
 open MiboSample.SpriteLoader
-open Mibo.Elmish.Graphics2D
+open MiboSample.Physics
+open MiboSample.Terrain
+open MiboSample.Player
+open MiboSample.Camera
+open MiboSample.UI
 
 // ─────────────────────────────────────────────────────────────
 // Messages
@@ -22,12 +26,6 @@ type Msg =
 
 // Shared ref for input map (allows dynamic remapping)
 let private inputMapRef: InputMap<GameAction> ref = ref InputMap.empty
-
-// Import modules
-open MiboSample.Physics
-open MiboSample.Terrain
-open MiboSample.Animation
-open MiboSample.Player
 
 // ─────────────────────────────────────────────────────────────
 // Init
@@ -53,16 +51,13 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
   let seed = 78494612
 
   // Generate initial terrain
-  let tiles = generateInitialTerrain seed
-  let platforms = createPlatformsFromTiles tiles
+  let tiles = Terrain.generateInitialTerrain seed
+  let platforms = Terrain.createPlatformsFromTiles tiles
 
   // Create player
   let playerId = Helpers.newEntityId()
 
   // Spawn player on ground
-  // Ground tiles are at tile index 10, which is y=640 in world coordinates
-  // Collision box is 64x64, origin at top-left
-  // Player needs to be at Y = groundY - playerHeight = 640 - 64 = 576
   let spawnY = 576.0f
 
   {
@@ -70,7 +65,7 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     PlayerPosition = Vector2(200.0f, spawnY)
     PlayerVelocity = Vector2.Zero
     PlayerFacing = 1.0f
-    IsGrounded = true // Player spawns on ground
+    IsGrounded = true
     IsJumping = false
     CoyoteTimer = 0.0f
     JumpBufferTimer = 0.0f
@@ -83,197 +78,63 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     CameraX = 0.0f
     TotalTime = 0.0f
     Seed = seed
-    // Initial terrain generates chunks -1, 0, 1. So the last generated is 1.
     LastGeneratedChunk = 1
   },
   Cmd.none
 
 // ─────────────────────────────────────────────────────────────
-// Update
+// Update: Orchestration using System Pipeline
 // ─────────────────────────────────────────────────────────────
+
+let private updateSystems dt model =
+  System.start { model with TotalTime = model.TotalTime + dt }
+  |> System.pipe(Physics.update dt)
+  |> System.pipe Terrain.update
+  |> System.pipe(Player.update dt)
+  |> System.pipe(fun model ->
+    if Physics.checkKillPlane model || model.Actions.Started.Contains Respawn then
+      let model = Physics.respawnPlayer model
+      let model = Terrain.reset model
+      model, Cmd.none
+    else
+      model, Cmd.none)
+  |> System.finish Camera.update
 
 let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
   match msg with
   | InputMapped actions -> { model with Actions = actions }, Cmd.none
+  | Tick gt -> updateSystems (float32 gt.ElapsedGameTime.TotalSeconds) model
 
-  | Tick gt ->
-    let dt = float32 gt.ElapsedGameTime.TotalSeconds
-    let totalTime = model.TotalTime + dt
-
-    // Update physics
-    let model = Physics.update dt model
-
-    // Update terrain generation as player moves
-    let model = updateTerrain model
-
-    // Update platforms when terrain changes
-    let model = updatePlatforms model
-
-    // Update player animations
-    let model = Player.update dt model
-
-    // Update camera to follow player
-    let viewportWidth = float32 1280 // Default window width
-    let targetCameraX = model.PlayerPosition.X - viewportWidth * 0.3f
-    let cameraX = Math.Max(0.0f, targetCameraX)
-
-    // Check if player fell off world or requested respawn
-    let model =
-      if checkKillPlane model || model.Actions.Started.Contains Respawn then
-        let model = respawnPlayer model
-        // Regenerate initial terrain so the player has somewhere to land
-        let tiles = generateInitialTerrain model.Seed
-        // Rebuild platforms from new tiles
-        let platforms = createPlatformsFromTiles tiles
-
-        {
-          model with
-              Tiles = tiles
-              Platforms = platforms
-              LastGeneratedChunk = 1
-        }
-      else
-        model
-
-    {
-      model with
-          CameraX = cameraX
-          TotalTime = totalTime
-    },
-    Cmd.none
 
 // ─────────────────────────────────────────────────────────────
-// View
+// View: Orchestration of rendering modules
 // ─────────────────────────────────────────────────────────────
 
 let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   let viewport = ctx.GraphicsDevice.Viewport
-  let viewportSize = Vector2(float32 viewport.Width, float32 viewport.Height)
 
-  // Set up camera to follow player
-  // Camera position is top-left of the viewable area
-  let cameraX = Math.Max(0.0f, model.PlayerPosition.X - viewportSize.X * 0.3f)
 
-  // Camera2D.create expects the CENTER of the view, so we offset by half viewport
-  let cameraCenter =
-    Vector2(cameraX + viewportSize.X * 0.5f, viewportSize.Y * 0.5f)
+  // 1. Setup World Camera
+  let worldCamera = Camera.createWorldCamera ctx model
+  buffer.Camera(worldCamera, 0<RenderLayer>) |> ignore
 
-  let camera =
-    Camera2D.create cameraCenter 1.0f (Point(viewport.Width, viewport.Height))
+  // 2. Draw World Elements
+  // Parallax Background (placeholder - moves slower than camera)
+  // let bgX = model.CameraX * 0.5f
 
-  buffer.Camera(camera, 0<RenderLayer>) |> ignore
+  // Terrain
+  Terrain.view model buffer
 
-  // UI Camera (Screen Space)
-  let uiCamera =
-    Camera2D.create
-      (viewportSize * 0.5f)
-      1.0f
-      (Point(viewport.Width, viewport.Height))
-
-  buffer.Camera(uiCamera, 100<RenderLayer>) |> ignore
-
-  // DEBUG: Show camera and player position
-  let debugText =
-    $"CamX: {cameraX:F0} PlayerX: {model.PlayerPosition.X:F0} Grounded: {model.IsGrounded}"
-
-  // Draw background with parallax (moves slower than camera)
-  let bgX = cameraX * 0.5f // 50% parallax
-
-  // No background for now
-
-  // DEBUG: Show camera and player position
-  let debugText =
-    $"CamX: {cameraX:F0} PlayerX: {model.PlayerPosition.X:F0} Grounded: {model.IsGrounded}"
-
-  // Get visible tiles for culling
-  let visibleTiles = getVisibleTiles(cameraX, viewportSize.X, model.Tiles)
-
-  // Draw terrain tiles
-  for tile in visibleTiles do
-    let rect =
-      match tile.TileType with
-      | Ground -> TileRegions.getGroundVariant tile.Variant
-      | Platform -> TileRegions.getPlatformVariant tile.Variant
-      | Hazard -> TileRegions.getHazardTile()
-      | Empty -> Rectangle.Empty // Skip empty tiles
-
-    if rect <> Rectangle.Empty then
-      buffer.Sprite(
-        sprite {
-          texture model.TerrainAssets.GroundTile
-          sourceRect rect
-          at tile.Position.X tile.Position.Y
-          size Constants.tileSize Constants.tileSize
-          layer 0<RenderLayer>
-        }
-      )
-      |> ignore
-
-  // Draw player
+  // Player
   Player.view ctx model buffer
 
-  // Draw UI (no camera reset - test if UI moves)
-  let uiFont = Assets.font "Fonts/monogram" ctx
 
-  // DEBUG line
-  buffer.Text(
-    text {
-      font uiFont
-      content debugText
-      at 10.0f 10.0f
-      color Color.Yellow
-      layer 100<RenderLayer>
-    }
-  )
-  |> ignore
+  // 3. Setup UI Camera
+  let uiCamera = Camera.createUICamera ctx
+  buffer.Camera(uiCamera, 100<RenderLayer>) |> ignore
 
-  buffer.Text(
-    text {
-      font uiFont
-
-      content
-        $"Position: ({int model.PlayerPosition.X}, {int model.PlayerPosition.Y})"
-
-      at 10.0f 30.0f
-      color Color.White
-      layer 100<RenderLayer>
-    }
-  )
-  |> ignore
-
-  buffer.Text(
-    text {
-      font uiFont
-      content $"Chunk: {worldXToChunkX model.PlayerPosition.X}"
-      at 10.0f 50.0f
-      color Color.White
-      layer 100<RenderLayer>
-    }
-  )
-  |> ignore
-
-  buffer.Text(
-    text {
-      font uiFont
-      content $"Tiles: {model.Tiles.Length}"
-      at 10.0f 70.0f
-      color Color.White
-      layer 100<RenderLayer>
-    }
-  )
-  |> ignore
-
-  // Controls help
-  buffer.Text(
-    text {
-      font uiFont
-      content "Controls: A/D or Arrow Keys to move, Space to jump"
-      at 10.0f (float32 viewport.Height - 30.0f)
-      color Color.Yellow
-      layer 100<RenderLayer>
-    }
-  )
-  |> ignore
+  // 4. Draw UI
+  UI.view ctx model buffer
 
 // ─────────────────────────────────────────────────────────────
 // Subscribe
@@ -294,7 +155,7 @@ let main _ =
     Program.mkProgram init update
     |> Program.withConfig(fun (game, graphics) ->
       game.Content.RootDirectory <- "Content"
-      game.Window.Title <- "Mibo 2D Platformer - Procedural Terrain"
+      game.Window.Title <- "Mibo 2D Platformer - Modular Architecture"
       graphics.PreferredBackBufferWidth <- 1280
       graphics.PreferredBackBufferHeight <- 720
       game.IsMouseVisible <- true)

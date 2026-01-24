@@ -2,7 +2,11 @@ module MiboSample.Terrain
 
 open System
 open Microsoft.Xna.Framework
+open Mibo.Elmish
+open Mibo.Elmish.Graphics2D
+open Mibo.Elmish.Graphics2D.DSL
 open MiboSample.Domain
+
 
 // ─────────────────────────────────────────────────────────────
 // Simple Noise Generator for Procedural Terrain
@@ -488,15 +492,49 @@ let cleanupOldTiles(model: Model) : Model =
 
   { model with Tiles = filteredTiles }
 
+/// Create platforms array from tiles array
+let createPlatformsFromTiles(tiles: Tile array) : Platform array =
+  tiles
+  |> Array.filter(fun t -> t.TileType <> TileType.Empty)
+  |> Array.map(fun tile -> {
+    Bounds =
+      Rectangle(
+        int tile.Position.X,
+        int tile.Position.Y,
+        int Constants.tileSize,
+        int Constants.tileSize
+      )
+    Type = tile.TileType
+    Variant = tile.Variant
+  })
+
 /// Ensure terrain is generated as player moves
-let updateTerrain(model: Model) : Model =
+let update (model: Model) : struct (Model * Cmd<'Msg>) =
+
   let model =
     if needsTerrainGeneration model then
       generateNextChunk model
     else
       model
 
-  cleanupOldTiles model
+  let model = cleanupOldTiles model
+
+  // Update platforms when terrain changes
+  let platforms = createPlatformsFromTiles model.Tiles
+
+  { model with Platforms = platforms }, Cmd.none
+
+
+/// Reset terrain to initial state
+let reset (model: Model) : Model =
+  let tiles = generateInitialTerrain model.Seed
+  {
+    model with
+        Tiles = tiles
+        LastGeneratedChunk = 1
+  }
+
+
 
 // ─────────────────────────────────────────────────────────────
 // Terrain Query Functions
@@ -514,7 +552,9 @@ let findGroundAt(worldX: float32, tiles: Tile array) : float32 option =
 
 /// Get all tiles visible in the given camera range
 let getVisibleTiles
-  (cameraX: float32, screenWidth: float32, tiles: Tile array)
+  (cameraX: float32)
+  (screenWidth: float32)
+  (tiles: Tile array)
   : Tile array =
   let margin = Constants.tileSize * 2.0f
   let left = cameraX - margin
@@ -523,6 +563,33 @@ let getVisibleTiles
   tiles
   |> Array.filter(fun tile ->
     tile.Position.X >= left && tile.Position.X <= right)
+
+/// Render terrain tiles
+let view (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
+  let viewportWidth = 1280.0f // Default window width
+  let visibleTiles = getVisibleTiles model.CameraX viewportWidth model.Tiles
+
+  for tile in visibleTiles do
+    let rect =
+      match tile.TileType with
+      | Ground -> SpriteLoader.TileRegions.getGroundVariant tile.Variant
+      | Platform -> SpriteLoader.TileRegions.getPlatformVariant tile.Variant
+      | Hazard -> SpriteLoader.TileRegions.getHazardTile()
+      | Empty -> Rectangle.Empty
+
+    if rect <> Rectangle.Empty then
+      buffer.Sprite(
+        sprite {
+          texture model.TerrainAssets.GroundTile
+          sourceRect rect
+          at tile.Position.X tile.Position.Y
+          size Constants.tileSize Constants.tileSize
+          layer 0<RenderLayer>
+        }
+      )
+      |> ignore
+
+
 
 // ─────────────────────────────────────────────────────────────
 // Terrain Statistics and Debugging
