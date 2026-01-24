@@ -1,12 +1,14 @@
 module MiboSample.Domain
 
 open System
-open System.Collections.Generic
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open FSharp.UMX
 open Mibo.Input
 open Mibo.Animation
+open Mibo.Elmish
+open Mibo.Elmish.Graphics2D
+open Mibo.Elmish.Graphics2D.DSL
 
 // ─────────────────────────────────────────────────────────────
 // Core Types
@@ -16,152 +18,139 @@ open Mibo.Animation
 [<Measure>]
 type EntityId
 
-/// Semantic Actions
+/// Semantic game actions for platformer controls
 type GameAction =
   | MoveLeft
   | MoveRight
-  | MoveUp
-  | MoveDown
-  | Fire
+  | Jump
 
+/// Platform tile type for terrain generation
 [<Struct>]
-type Particle = {
+type TileType =
+  | Empty
+  | Ground
+  | Platform
+  | Hazard
+
+/// Individual terrain tile
+[<Struct>]
+type Tile = {
   Position: Vector2
-  Velocity: Vector2
-  Life: float32
-  MaxLife: float32
-  Color: Color
+  TileType: TileType
+  Variant: int // For sprite variation
 }
 
+/// Platform collision box
 [<Struct>]
-type ParticleSpawn = { Position: Vector2; Count: int }
-
-module ParticleFactory =
-  let private rng = Random.Shared
-
-  let createAt(pos: Vector2) : Particle =
-    let angle = rng.NextDouble() * Math.PI * 2.0
-    let speed = rng.NextDouble() * 100.0 + 50.0
-
-    let velocity =
-      Vector2(float32(Math.Cos angle), float32(Math.Sin angle)) * float32 speed
-
-    {
-      Position = pos
-      Velocity = velocity
-      Life = 1.0f
-      MaxLife = 1.0f
-      Color = Color.Yellow
-    }
-
+type Platform = {
+  Bounds: Rectangle
+  Type: TileType
+  Variant: int
+}
 
 // ─────────────────────────────────────────────────────────────
-// Model: The World State (mutable containers for hot data)
+// Physics Constants
 // ─────────────────────────────────────────────────────────────
+
+module Constants =
+  let gravity = 1200.0f // pixels/second^2 (positive = down in MonoGame)
+  let moveSpeed = 300.0f // pixels/second
+  let jumpSpeed = -700.0f // pixels/second (negative = up in MonoGame)
+  let airAcceleration = 1500.0f
+  let groundAcceleration = 2500.0f
+  let friction = 12.0f
+  let maxFallSpeed = 1000.0f // positive max fall speed
+  let coyoteTime = 0.1f // Time you can jump after leaving ground
+  let jumpBufferTime = 0.15f // Time jump input is remembered
+
+  // Terrain generation
+  let tileSize = 64.0f
+  let chunkWidth = 20 // Tiles per chunk
+  let worldHeight = 12 // Total tiles high (12 * 64 = 768 pixels)
+
+// ─────────────────────────────────────────────────────────────
+// Sprite Assets
+// ─────────────────────────────────────────────────────────────
+
+/// Loaded animation assets for the player
+type PlayerAssets = {
+  Idle: AnimatedSprite
+  Walk: AnimatedSprite
+  Jump: AnimatedSprite
+  Fall: AnimatedSprite
+}
+
+/// Loaded terrain sprite assets
+type TerrainAssets = {
+  GroundTile: Texture2D
+  PlatformTile: Texture2D
+  HazardTile: Texture2D
+  Background: Texture2D
+}
+
+// ─────────────────────────────────────────────────────────────
+// Model: The World State
+// ─────────────────────────────────────────────────────────────
+
 [<Struct>]
 type Model = {
-  Positions: Dictionary<Guid<EntityId>, Vector2>
-  // Replaced manual input state with generic ActionState
+  // Player state
+  PlayerId: Guid<EntityId>
+  PlayerPosition: Vector2
+  PlayerVelocity: Vector2
+  PlayerFacing: float32 // -1.0f left, 1.0f right
+  IsGrounded: bool
+  IsJumping: bool
+
+  // Physics state
+  CoyoteTimer: float32 // Time since last grounded
+  JumpBufferTimer: float32 // Time since jump pressed
+
+  // Input state
   Actions: ActionState<GameAction>
   InputMap: InputMap<GameAction>
-  Particles: ResizeArray<Particle>
-  Crates: ResizeArray<Guid<EntityId>>
-  Speeds: Map<Guid<EntityId>, float32>
-  Hues: Map<Guid<EntityId>, float32>
-  TargetHues: Map<Guid<EntityId>, float32>
-  Sizes: Map<Guid<EntityId>, Vector2>
-  PlayerId: Guid<EntityId>
-  BoxBounces: int
-  CrateHits: int
-  // Player sprite
-  PlayerSprite: AnimatedSprite
-  // Decoration animation demo
-  Decoration: AnimatedSprite
-  CrateSprite: AnimatedSprite
-  ItemSprite: AnimatedSprite
-  // Phase 2: Post-processing effects
-  VignetteEffect: Effect
-  GrayscaleEffect: Effect
-  LightingEffect: Effect
-  SphereNormalMap: Texture2D
-  TotalTime: float
+
+  // Terrain
+  Tiles: Tile array // Sparse array of active tiles
+  Platforms: Platform array // Collision boxes
+
+  // Assets
+  PlayerAssets: PlayerAssets
+  TerrainAssets: TerrainAssets
+
+  // World state
+  CameraX: float32 // Camera scroll position
+  TotalTime: float32
+  Seed: int // For procedural generation
+  LastGeneratedChunk: int
 }
 
 // ─────────────────────────────────────────────────────────────
-// ModelSnapshot: Readonly view for post-physics systems
+// Helper Functions
 // ─────────────────────────────────────────────────────────────
 
-[<Struct>]
-type ModelSnapshot = {
-  Positions: IReadOnlyDictionary<Guid<EntityId>, Vector2>
-  Actions: ActionState<GameAction>
-  InputMap: InputMap<GameAction>
-  Particles: IReadOnlyList<Particle>
-  Crates: IReadOnlyList<Guid<EntityId>>
-  Speeds: Map<Guid<EntityId>, float32>
-  Hues: Map<Guid<EntityId>, float32>
-  TargetHues: Map<Guid<EntityId>, float32>
-  Sizes: Map<Guid<EntityId>, Vector2>
-  PlayerId: Guid<EntityId>
-  BoxBounces: int
-  CrateHits: int
-  PlayerSprite: AnimatedSprite
-  Decoration: AnimatedSprite
-  CrateSprite: AnimatedSprite
-  ItemSprite: AnimatedSprite
-  VignetteEffect: Effect
-  GrayscaleEffect: Effect
-  LightingEffect: Effect
-  SphereNormalMap: Texture2D
-  TotalTime: float
-}
+module Helpers =
+  /// Create a new entity ID
+  let newEntityId() : Guid<EntityId> = Guid.NewGuid() |> UMX.tag<EntityId>
 
-module Model =
-  /// Create readonly snapshot after physics mutations
-  let toSnapshot(model: Model) : ModelSnapshot = {
-    Positions = model.Positions :> IReadOnlyDictionary<_, _>
-    Actions = model.Actions
-    InputMap = model.InputMap
-    Particles = model.Particles :> IReadOnlyList<_>
-    Crates = model.Crates :> IReadOnlyList<_>
-    Speeds = model.Speeds
-    Hues = model.Hues
-    TargetHues = model.TargetHues
-    Sizes = model.Sizes
-    PlayerId = model.PlayerId
-    BoxBounces = model.BoxBounces
-    CrateHits = model.CrateHits
-    PlayerSprite = model.PlayerSprite
-    Decoration = model.Decoration
-    CrateSprite = model.CrateSprite
-    ItemSprite = model.ItemSprite
-    VignetteEffect = model.VignetteEffect
-    GrayscaleEffect = model.GrayscaleEffect
-    LightingEffect = model.LightingEffect
-    SphereNormalMap = model.SphereNormalMap
-    TotalTime = model.TotalTime
-  }
+  /// Convert world position to tile coordinates
+  let worldToTile(position: Vector2, tileSize: float32) : Point =
+    Point(int(position.X / tileSize), int(position.Y / tileSize))
 
-  let fromSnapshot(snapshot: ModelSnapshot) : Model = {
-    Positions = snapshot.Positions :?> Dictionary<_, _>
-    Actions = snapshot.Actions
-    InputMap = snapshot.InputMap
-    Particles = snapshot.Particles :?> ResizeArray<_>
-    Crates = snapshot.Crates :?> ResizeArray<_>
-    Speeds = snapshot.Speeds
-    Hues = snapshot.Hues
-    TargetHues = snapshot.TargetHues
-    Sizes = snapshot.Sizes
-    PlayerId = snapshot.PlayerId
-    BoxBounces = snapshot.BoxBounces
-    CrateHits = snapshot.CrateHits
-    PlayerSprite = snapshot.PlayerSprite
-    Decoration = snapshot.Decoration
-    CrateSprite = snapshot.CrateSprite
-    ItemSprite = snapshot.ItemSprite
-    VignetteEffect = snapshot.VignetteEffect
-    GrayscaleEffect = snapshot.GrayscaleEffect
-    LightingEffect = snapshot.LightingEffect
-    SphereNormalMap = snapshot.SphereNormalMap
-    TotalTime = snapshot.TotalTime
-  }
+  /// Convert tile coordinates to world position (center of tile)
+  let tileToWorld(tile: Point, tileSize: float32) : Vector2 =
+    Vector2(float32 tile.X * tileSize, float32 tile.Y * tileSize)
+
+  /// Check if a point is within screen bounds (for culling)
+  let isVisible
+    (position: Vector2, cameraX: float32, screenWidth: float32, margin: float32)
+    : bool =
+    position.X >= cameraX - margin
+    && position.X <= cameraX + screenWidth + margin
+
+  /// Calculate facing direction from velocity
+  let calculateFacing(velocity: Vector2, currentFacing: float32) : float32 =
+    if Math.Abs(velocity.X) > 1.0f then
+      Math.Sign(velocity.X) |> float32
+    else
+      currentFacing

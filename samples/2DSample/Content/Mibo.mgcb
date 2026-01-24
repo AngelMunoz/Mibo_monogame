@@ -20,22 +20,183 @@
 /processorParam:TextureFormat=Compressed
 /build:Fonts/monogram.spritefont
 
-#begin Shaders/vignette.fx
-/importer:EffectImporter
-/processor:EffectProcessor
-/build:Shaders/vignette.fx
+#begin kenney_platformer/Sounds/sfx_bump.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_bump.ogg
+
+#begin kenney_platformer/Sounds/sfx_coin.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_coin.ogg
+
+#begin kenney_platformer/Sounds/sfx_disappear.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_disappear.ogg
+
+#begin kenney_platformer/Sounds/sfx_gem.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_gem.ogg
+
+#begin kenney_platformer/Sounds/sfx_hurt.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_hurt.ogg
+
+#begin kenney_platformer/Sounds/sfx_jump-high.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_jump-high.ogg
+
+#begin kenney_platformer/Sounds/sfx_jump.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_jump.ogg
+
+#begin kenney_platformer/Sounds/sfx_magic.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_magic.ogg
+
+#begin kenney_platformer/Sounds/sfx_select.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_select.ogg
+
+#begin kenney_platformer/Sounds/sfx_throw.ogg
+/importer:OggImporter
+/processor:SongProcessor
+/processorParam:Quality=Best
+/build:kenney_platformer/Sounds/sfx_throw.ogg
+
+#begin kenney_platformer/Spritesheets/spritesheet-backgrounds-default.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-backgrounds-default.png
+
+#begin kenney_platformer/Spritesheets/spritesheet-backgrounds-double.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-backgrounds-double.png
+
+#begin kenney_platformer/Spritesheets/spritesheet-characters-default.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-characters-default.png
+
+#begin kenney_platformer/Spritesheets/spritesheet-characters-double.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-characters-double.png
+
+#begin kenney_platformer/Spritesheets/spritesheet-enemies-default.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-enemies-default.png
+
+#begin kenney_platformer/Spritesheets/spritesheet-enemies-double.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-enemies-double.png
+
+#begin kenney_platformer/Spritesheets/spritesheet-tiles-default.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-tiles-default.png
+
+#begin kenney_platformer/Spritesheets/spritesheet-tiles-double.png
+/importer:TextureImporter
+/processor:TextureProcessor
+/processorParam:ColorKeyColor=255,0,255,255
+/processorParam:ColorKeyEnabled=True
+/processorParam:GenerateMipmaps=False
+/processorParam:PremultiplyAlpha=True
+/processorParam:ResizeToPowerOfTwo=False
+/processorParam:MakeSquare=False
+/processorParam:TextureFormat=Color
+/build:kenney_platformer/Spritesheets/spritesheet-tiles-double.png
 
 #begin Shaders/grayscale.fx
 /importer:EffectImporter
 /processor:EffectProcessor
+/processorParam:DebugMode=Auto
 /build:Shaders/grayscale.fx
 
 #begin Shaders/lighting.fx
 /importer:EffectImporter
 /processor:EffectProcessor
+/processorParam:DebugMode=Auto
 /build:Shaders/lighting.fx
 
 #begin Shaders/shadowcaster.fx
 /importer:EffectImporter
 /processor:EffectProcessor
+/processorParam:DebugMode=Auto
 /build:Shaders/shadowcaster.fx
+
+#begin Shaders/vignette.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Shaders/vignette.fx
+

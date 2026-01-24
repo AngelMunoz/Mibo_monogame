@@ -617,9 +617,9 @@ type Batch2DRenderer<'Model>
   let mutable occluderBatch: OccluderBatch.State option = None
   let mutable defaultNormalMap: Texture2D = null
   let mutable currentNormalMap: Texture2D = null
-  
+
   // Robust blend state for shadows: the minimum distance wins
-  let shadowMinBlend = 
+  let shadowMinBlend =
     new BlendState(
       ColorSourceBlend = Blend.One,
       ColorDestinationBlend = Blend.One,
@@ -628,7 +628,7 @@ type Batch2DRenderer<'Model>
       AlphaDestinationBlend = Blend.One,
       AlphaBlendFunction = BlendFunction.Min
     )
-  
+
   // Reusable buffers for light data to avoid per-frame allocations (GC pressure)
   let mutable pointPositions: Vector2[] = Array.empty
   let mutable pointColors: Vector4[] = Array.empty
@@ -638,12 +638,12 @@ type Batch2DRenderer<'Model>
   let mutable dirColors: Vector4[] = Array.empty
   let mutable pointShadowIndicesBuf: float32[] = Array.empty
   let mutable dirShadowIndicesBuf: float32[] = Array.empty
-  
+
   let buffer = RenderBuffer<RenderCmd2D>()
 
   let ensureCapacity (needed: int) (current: 'T[] byref) =
     if current.Length < needed then
-      current <- Array.zeroCreate (max (current.Length * 2) needed)
+      current <- Array.zeroCreate(max (current.Length * 2) needed)
 
   let ensureDefaultNormalMap() =
     if isNull defaultNormalMap then
@@ -665,7 +665,7 @@ type Batch2DRenderer<'Model>
       if not(isNull defaultNormalMap) then
         defaultNormalMap.Dispose()
         defaultNormalMap <- null
-        
+
       match occluderBatch with
       | Some s -> OccluderBatch.dispose s
       | None -> ()
@@ -806,14 +806,24 @@ type Batch2DRenderer<'Model>
             |> Seq.toArray
 
           if shadowIndicesPoint.Length < pointLights.Count then
-            shadowIndicesPoint <- Array.create (max (shadowIndicesPoint.Length * 2) pointLights.Count) -1
+            shadowIndicesPoint <-
+              Array.create
+                (max (shadowIndicesPoint.Length * 2) pointLights.Count)
+                -1
           else
-            for i = 0 to shadowIndicesPoint.Length - 1 do shadowIndicesPoint.[i] <- -1
+            for i = 0 to shadowIndicesPoint.Length - 1 do
+              shadowIndicesPoint.[i] <- -1
 
           if shadowIndicesDirectional.Length < directionalLights.Count then
-            shadowIndicesDirectional <- Array.create (max (shadowIndicesDirectional.Length * 2) directionalLights.Count) -1
+            shadowIndicesDirectional <-
+              Array.create
+                (max
+                  (shadowIndicesDirectional.Length * 2)
+                  directionalLights.Count)
+                -1
           else
-            for i = 0 to shadowIndicesDirectional.Length - 1 do shadowIndicesDirectional.[i] <- -1
+            for i = 0 to shadowIndicesDirectional.Length - 1 do
+              shadowIndicesDirectional.[i] <- -1
 
           let mutable shadowRow = 0
 
@@ -893,9 +903,10 @@ type Batch2DRenderer<'Model>
                 for o in occluders do
                   // Tessellate long occluders to handle polar distortion
                   let segments = 8
+
                   for s = 0 to segments - 1 do
                     let t1 = float32 s / float32 segments
-                    let t2 = float32 (s + 1) / float32 segments
+                    let t2 = float32(s + 1) / float32 segments
                     let p1 = Vector2.Lerp(o.P1, o.P2, t1)
                     let p2 = Vector2.Lerp(o.P1, o.P2, t2)
                     OccluderBatch.addLine p1 p2 o.Height batchState
@@ -944,7 +955,10 @@ type Batch2DRenderer<'Model>
 
               for i = 0 to pCounts - 1 do
                 let l = pointLights.[i]
-                pointPositions.[i] <- Vector2.Transform(l.Position, frameViewMatrix)
+
+                pointPositions.[i] <-
+                  Vector2.Transform(l.Position, frameViewMatrix)
+
                 pointColors.[i] <- l.Color.ToVector4() * l.Intensity
                 pointRadii.[i] <- l.Radius
                 pointFalloffs.[i] <- l.Falloff
@@ -966,7 +980,13 @@ type Batch2DRenderer<'Model>
                 for i = 0 to dirCounts - 1 do
                   let l = directionalLights.[i]
                   let viewDir = Vector2.Transform(l.Direction, frameViewMatrix)
-                  dirDirections.[i] <- if viewDir.LengthSquared() > 0.0001f then Vector2.Normalize(viewDir) else viewDir
+
+                  dirDirections.[i] <-
+                    if viewDir.LengthSquared() > 0.0001f then
+                      Vector2.Normalize(viewDir)
+                    else
+                      viewDir
+
                   dirColors.[i] <- l.Color.ToVector4() * l.Intensity
 
                 fx.SafeSetParam("DirectionalLightDirections", dirDirections)
@@ -1029,13 +1049,23 @@ type Batch2DRenderer<'Model>
                   ensureCapacity pIndicesCount &pointShadowIndicesBuf
                   ensureCapacity dIndicesCount &dirShadowIndicesBuf
 
-                  for i = 0 to pIndicesCount - 1 do 
-                    pointShadowIndicesBuf.[i] <- float32 shadowIndicesPoint.[i]
-                  for i = 0 to dIndicesCount - 1 do 
-                    dirShadowIndicesBuf.[i] <- float32 shadowIndicesDirectional.[i]
+                  for i = 0 to pIndicesCount - 1 do
+                    pointShadowIndicesBuf.[i] <-
+                      float32 shadowIndicesPoint.[i]
 
-                  fx.SafeSetParam("PointLightShadowIndices", pointShadowIndicesBuf)
-                  fx.SafeSetParam("DirectionalLightShadowIndices", dirShadowIndicesBuf)))
+                  for i = 0 to dIndicesCount - 1 do
+                    dirShadowIndicesBuf.[i] <-
+                      float32 shadowIndicesDirectional.[i]
+
+                  fx.SafeSetParam(
+                    "PointLightShadowIndices",
+                    pointShadowIndicesBuf
+                  )
+
+                  fx.SafeSetParam(
+                    "DirectionalLightShadowIndices",
+                    dirShadowIndicesBuf
+                  )))
             | ValueNone -> ())
 
       // CRITICAL: Set RenderTarget BEFORE Clear to avoid accumulation trails
@@ -1730,6 +1760,13 @@ module DSL =
       s with
           Width = w
           Height = h
+    }
+
+    [<CustomOperation("size")>]
+    member inline _.Size(s: SpriteState, w: float32, h: float32) = {
+      s with
+          Width = int w
+          Height = int h
     }
 
     [<CustomOperation("sourceRect")>]
