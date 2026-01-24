@@ -159,17 +159,7 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   let worldCamera = Camera.createWorldCamera ctx model
   buffer.Camera(worldCamera, 0<RenderLayer>) |> ignore
 
-  // 2. Global Lighting State
-  buffer.Lighting(
-    {
-      Ambient = { Color = Color(40, 40, 60) } // Dark blue ambient
-      PointLights = [||]
-      DirectionalLights = [||]
-    }
-  )
-  |> ignore
-
-  // 3. Draw World Elements
+  // 2. Draw World Elements
   // Terrain
   Terrain.view model buffer
 
@@ -179,16 +169,14 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
     AnimatedSprite.draw pos 0<RenderLayer> buffer sprite
 
     // Add dynamic light for the torch
-    buffer.PointLight(
-      {
-        Position = pos
-        Color = Color.Orange
-        Intensity = 2.0f
-        Radius = 300.0f
-        Falloff = 1.5f
-        Shadow = ValueSome ShadowSettings2D.defaults
-      }
-    )
+    buffer.PointLight {
+      Position = pos
+      Color = Color.Orange
+      Intensity = 2.0f
+      Radius = 300.0f
+      Falloff = 1.5f
+      Shadow = ValueSome ShadowSettings2D.defaults
+    }
     |> ignore
 
   // Player
@@ -232,12 +220,6 @@ let main _ =
       let lightingConfig =
         Lighting2DConfig.enabled { Color = Color(40, 40, 60) }
         |> Lighting2DConfig.withShadows Shadows2DConfig.defaults
-
-      let ctx = {
-        GraphicsDevice = game.GraphicsDevice
-        Content = game.Content
-        Game = game
-      }
 
       Batch2DConfig.defaults
       |> Batch2DConfig.withClearColor(ValueSome Color.Black)

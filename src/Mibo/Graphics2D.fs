@@ -81,7 +81,7 @@ type AmbientLight2D = { Color: Color }
 /// <summary>State of the 2D lighting system for a single frame.</summary>
 [<Struct>]
 type LightingState2D = {
-  Ambient: AmbientLight2D
+  Ambient: AmbientLight2D voption
   PointLights: PointLight2D[]
   DirectionalLights: DirectionalLight2D[]
 }
@@ -221,7 +221,7 @@ module OccluderBatch =
 [<Struct>]
 type Lighting2DConfig = {
   Enabled: bool
-  DefaultAmbient: AmbientLight2D
+  DefaultAmbient: AmbientLight2D voption
   /// <summary>Screen-space tile size for CPU light culling (default: 32).</summary>
   TileSize: int
   /// <summary>Maximum lights per tile (default: 8).</summary>
@@ -233,7 +233,7 @@ type Lighting2DConfig = {
 module Lighting2DConfig =
   let disabled: Lighting2DConfig = {
     Enabled = false
-    DefaultAmbient = { Color = Color.White }
+    DefaultAmbient = ValueNone
     TileSize = 32
     MaxLightsPerTile = 8
     Shadows = ValueNone
@@ -241,7 +241,7 @@ module Lighting2DConfig =
 
   let enabled ambient : Lighting2DConfig = {
     Enabled = true
-    DefaultAmbient = ambient
+    DefaultAmbient = ValueSome ambient
     TileSize = 32
     MaxLightsPerTile = 8
     Shadows = ValueNone
@@ -349,8 +349,11 @@ type RenderCmd2D =
 
   // --- Phase 3 Lighting Commands ---
 
-  /// Set the overall lighting state.
+  /// Set the overall lighting state (tiered: overrides ambient, keeps accumulated lights).
   | SetLighting of lightingState: LightingState2D
+
+  /// Add to lighting state (tiered: ambient only, keeps accumulated lights).
+  | AddLighting of ambient: AmbientLight2D
 
   /// Add a point light to the current frame.
   | AddPointLight of pointLightVal: PointLight2D
@@ -765,7 +768,15 @@ type Batch2DRenderer<'Model>
       let mutable currentSampler = config.SamplerState
       let mutable currentDepthStencil = config.DepthStencilState
       let mutable currentRasterizer = config.RasterizerState
-      let mutable currentEffect = config.Effect
+
+      let mutable currentEffect =
+        if
+          config.Lighting.IsSome
+          && config.ShaderOverrides.ContainsKey ShaderBase2D.LitSprite
+        then
+          config.ShaderOverrides.[ShaderBase2D.LitSprite]
+        else
+          config.Effect
       // Reset tracked state at start of frame
       currentNormalMap <- null
 
@@ -775,13 +786,19 @@ type Batch2DRenderer<'Model>
         | ValueNone -> Nullable()
 
       // Lighting tracking (Phase 3)
-      let mutable currentLightingState =
+      let mutable currentLightingState: LightingState2D voption =
         config.Lighting
         |> ValueOption.map(fun l -> {
           Ambient = l.DefaultAmbient
           PointLights = [||]
           DirectionalLights = [||]
         })
+        |> ValueOption.defaultValue {
+          Ambient = ValueNone
+          PointLights = [||]
+          DirectionalLights = [||]
+        }
+        |> ValueSome
 
       let pointLights = ResizeArray<PointLight2D>()
       let directionalLights = ResizeArray<DirectionalLight2D>()
@@ -793,11 +810,22 @@ type Batch2DRenderer<'Model>
 
         match cmd with
         | SetLighting l ->
-          currentLightingState <- ValueSome l
+          currentLightingState <-
+            ValueSome {
+              currentLightingState.Value with
+                  Ambient = l.Ambient
+            }
+
           pointLights.Clear()
           directionalLights.Clear()
           pointLights.AddRange l.PointLights
           directionalLights.AddRange l.DirectionalLights
+        | AddLighting ambient ->
+          currentLightingState <-
+            ValueSome {
+              currentLightingState.Value with
+                  Ambient = ValueSome ambient
+            }
         | AddPointLight l -> pointLights.Add l
         | AddDirectionalLight l -> directionalLights.Add l
         | AddOccluder o -> occluders.Add o
@@ -1016,7 +1044,9 @@ type Batch2DRenderer<'Model>
           |> ValueOption.iter(fun lCfg ->
             currentLightingState
             |> ValueOption.iter(fun state ->
-              fx.SafeSetParam("AmbientColor", state.Ambient.Color))
+              state.Ambient
+              |> ValueOption.iter(fun ambient ->
+                fx.SafeSetParam("AmbientColor", ambient.Color)))
 
             match binResults with
             | ValueSome bin ->
@@ -1421,7 +1451,23 @@ type Batch2DRenderer<'Model>
             cmd.Depth
           )
 
-        | SetLighting l -> currentLightingState <- ValueSome l
+        | SetLighting l ->
+          currentLightingState <-
+            ValueSome {
+              currentLightingState.Value with
+                  Ambient = l.Ambient
+            }
+
+          pointLights.Clear()
+          directionalLights.Clear()
+          pointLights.AddRange l.PointLights
+          directionalLights.AddRange l.DirectionalLights
+        | AddLighting ambient ->
+          currentLightingState <-
+            ValueSome {
+              currentLightingState.Value with
+                  Ambient = ValueSome ambient
+            }
         | AddPointLight l -> pointLights.Add l
         | AddDirectionalLight l -> directionalLights.Add l
         | AddOccluder o -> occluders.Add o
@@ -2091,6 +2137,16 @@ module DSL =
       this
 
     [<Extension>]
+    static member inline AddLighting
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        ambient: AmbientLight2D,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      this.Add(defaultValueArg layer 0<RenderLayer>, AddLighting ambient)
+      this
+
+    [<Extension>]
     static member inline PointLight
       (
         this: RenderBuffer<RenderCmd2D>,
@@ -2145,6 +2201,9 @@ module DSL =
 
     let inline lighting l (buffer: RenderBuffer<RenderCmd2D>) =
       buffer.Lighting(l)
+
+    let inline addLighting ambient (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.AddLighting(ambient)
 
     let inline pointLight l (buffer: RenderBuffer<RenderCmd2D>) =
       buffer.PointLight(l)
