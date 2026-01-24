@@ -41,6 +41,20 @@ type Tile = {
   Variant: int // For sprite variation
 }
 
+/// Structured map definition containing all static world data
+type GameMap = {
+  Tiles: Tile array
+  Occluders: Occluder2D array
+  PointLights: PointLight2D array
+}
+
+module GameMap =
+  let empty: GameMap = {
+    Tiles = [||]
+    Occluders = [||]
+    PointLights = [||]
+  }
+
 /// Platform collision box
 [<Struct>]
 type Platform = {
@@ -48,6 +62,7 @@ type Platform = {
   Type: TileType
   Variant: int
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Physics Constants
@@ -111,11 +126,12 @@ type Model = {
   Actions: ActionState<GameAction>
   InputMap: InputMap<GameAction>
 
-  // Terrain
-  Tiles: Tile array // Sparse array of active tiles
-  Platforms: Platform array // Collision boxes
+  // World Data
+  Map: GameMap
+  Platforms: Platform array // Collision boxes cached from map for physics
 
   // Assets
+
   PlayerAssets: PlayerAssets
   TerrainAssets: TerrainAssets
 

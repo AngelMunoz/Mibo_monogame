@@ -190,6 +190,53 @@ let getTileShape(x: int, y: int, seed: int) : int =
   else
     1 // Center (Full fill)
 
+/// Generate occluders for a tile if it is solid
+let generateOccluders (tile: Tile) : Occluder2D array =
+  match tile.TileType with
+  | Ground
+  | Platform ->
+    let x, y = tile.Position.X, tile.Position.Y
+    let size = Constants.tileSize
+    // For a simple square tile, we add 4 segments
+    [|
+      { P1 = Vector2(x, y); P2 = Vector2(x + size, y); Height = 1.0f }
+      { P1 = Vector2(x + size, y); P2 = Vector2(x + size, y + size); Height = 1.0f }
+      { P1 = Vector2(x + size, y + size); P2 = Vector2(x, y + size); Height = 1.0f }
+      { P1 = Vector2(x, y + size); P2 = Vector2(x, y); Height = 1.0f }
+    |]
+  | _ -> [||]
+
+/// Generate a light source for specific tile types
+let generateLight (tile: Tile) (seed: int) : PointLight2D option =
+  let x, y = tile.Position.X, tile.Position.Y
+  let tileX = int(x / Constants.tileSize)
+  let tileY = int(y / Constants.tileSize)
+
+  match tile.TileType with
+  | Hazard ->
+    // Glowing spikes?
+    Some {
+      Position = tile.Position + Vector2(Constants.tileSize * 0.5f)
+      Color = Color.Red
+      Intensity = 1.5f
+      Radius = 150.0f
+      Falloff = 2.0f
+      Shadow = ValueSome ShadowSettings2D.defaults
+    }
+  | Ground when y = float32(getGlobalGroundHeight(tileX, seed)) * Constants.tileSize ->
+    // Occasionally place a torch on the surface
+    if SimpleNoise.chance(0.05f, tileX, tileY, seed) then
+      Some {
+        Position = tile.Position + Vector2(Constants.tileSize * 0.5f, -20.0f)
+        Color = Color.Orange
+        Intensity = 2.0f
+        Radius = 300.0f
+        Falloff = 1.5f
+        Shadow = ValueSome ShadowSettings2D.defaults
+      }
+    else None
+  | _ -> None
+
 /// Generate a single tile at the given position
 let generateTile
   (
@@ -380,6 +427,16 @@ let generateTile
     else
       None
 
+/// Create a GameMap from a collection of tiles
+let createMapFromTiles (tiles: Tile array) (seed: int) : GameMap =
+  let occluders = tiles |> Array.collect generateOccluders
+  let lights = tiles |> Array.choose (fun t -> generateLight t seed)
+  {
+    Tiles = tiles
+    Occluders = occluders
+    PointLights = lights
+  }
+
 /// Generate a chunk of tiles
 let generateChunk(chunkX: int, seed: int) : Tile array =
   let pattern = getChunkPattern(chunkX, seed)
@@ -467,11 +524,11 @@ let generateNextChunk(model: Model) : Model =
   let newTiles = generateChunk(nextChunk, model.Seed)
 
   // Combine existing tiles with new chunk
-  let allTiles = Array.append model.Tiles newTiles
+  let allTiles = Array.append model.Map.Tiles newTiles
 
   {
     model with
-        Tiles = allTiles
+        Map = createMapFromTiles allTiles model.Seed
         LastGeneratedChunk = nextChunk
   }
 
@@ -481,7 +538,7 @@ let cleanupOldTiles(model: Model) : Model =
   let cleanupThreshold = currentChunkX - 3 // Remove chunks 3 chunks behind
 
   let filteredTiles =
-    model.Tiles
+    model.Map.Tiles
     |> Array.filter(fun tile ->
       let tileChunkX =
         int(
@@ -490,7 +547,10 @@ let cleanupOldTiles(model: Model) : Model =
 
       tileChunkX >= cleanupThreshold)
 
-  { model with Tiles = filteredTiles }
+  if filteredTiles.Length = model.Map.Tiles.Length then
+    model
+  else
+    { model with Map = createMapFromTiles filteredTiles model.Seed }
 
 /// Create platforms array from tiles array
 let createPlatformsFromTiles(tiles: Tile array) : Platform array =
@@ -520,7 +580,7 @@ let update (model: Model) : struct (Model * Cmd<'Msg>) =
   let model = cleanupOldTiles model
 
   // Update platforms when terrain changes
-  let platforms = createPlatformsFromTiles model.Tiles
+  let platforms = createPlatformsFromTiles model.Map.Tiles
 
   { model with Platforms = platforms }, Cmd.none
 
@@ -530,7 +590,7 @@ let reset (model: Model) : Model =
   let tiles = generateInitialTerrain model.Seed
   {
     model with
-        Tiles = tiles
+        Map = createMapFromTiles tiles model.Seed
         LastGeneratedChunk = 1
   }
 
@@ -567,7 +627,7 @@ let getVisibleTiles
 /// Render terrain tiles
 let view (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   let viewportWidth = 1280.0f // Default window width
-  let visibleTiles = getVisibleTiles model.CameraX viewportWidth model.Tiles
+  let visibleTiles = getVisibleTiles model.CameraX viewportWidth model.Map.Tiles
 
   for tile in visibleTiles do
     let rect =
@@ -588,6 +648,14 @@ let view (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
         }
       )
       |> ignore
+
+  // Add lights and occluders to the buffer for the renderer to process
+  for light in model.Map.PointLights do
+    buffer.Add(0<RenderLayer>, AddPointLight light)
+
+  for occluder in model.Map.Occluders do
+    buffer.Add(0<RenderLayer>, AddOccluder occluder)
+
 
 
 

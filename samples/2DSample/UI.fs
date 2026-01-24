@@ -56,12 +56,13 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   buffer.Text(
     text {
       font uiFont
-      content $"Tiles: {model.Tiles.Length}"
+      content $"Tiles: {model.Map.Tiles.Length}"
       at 10.0f 70.0f
       color Color.White
       layer 100<RenderLayer>
     }
   )
+
   |> ignore
 
   // Controls help

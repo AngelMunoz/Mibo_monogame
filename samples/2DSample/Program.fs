@@ -7,8 +7,10 @@ open Mibo.Elmish
 open Mibo.Elmish.Graphics2D
 open Mibo.Elmish.Graphics2D.DSL
 open Mibo.Input
-
+open Mibo.Animation
+open Mibo.Rendering
 open MiboSample.Domain
+
 open MiboSample.SpriteLoader
 open MiboSample.Physics
 open MiboSample.Terrain
@@ -52,6 +54,7 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
 
   // Generate initial terrain
   let tiles = Terrain.generateInitialTerrain seed
+  let map = Terrain.createMapFromTiles tiles seed
   let platforms = Terrain.createPlatformsFromTiles tiles
 
   // Create player
@@ -71,7 +74,7 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     JumpBufferTimer = 0.0f
     Actions = ActionState.empty
     InputMap = inputMap
-    Tiles = tiles
+    Map = map
     Platforms = platforms
     PlayerAssets = playerAssets
     TerrainAssets = terrainAssets
@@ -82,23 +85,30 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
   },
   Cmd.none
 
-// ─────────────────────────────────────────────────────────────
 // Update: Orchestration using System Pipeline
 // ─────────────────────────────────────────────────────────────
 
 let private updateSystems dt model =
-  System.start { model with TotalTime = model.TotalTime + dt }
+  System.start {
+    model with
+        TotalTime = model.TotalTime + dt
+  }
   |> System.pipe(Physics.update dt)
   |> System.pipe Terrain.update
   |> System.pipe(Player.update dt)
   |> System.pipe(fun model ->
-    if Physics.checkKillPlane model || model.Actions.Started.Contains Respawn then
+    if
+      Physics.checkKillPlane model || model.Actions.Started.Contains Respawn
+    then
       let model = Physics.respawnPlayer model
       let model = Terrain.reset model
-      model, Cmd.none
+      // Rebuild platforms from the new map tiles
+      let platforms = Terrain.createPlatformsFromTiles model.Map.Tiles
+      { model with Platforms = platforms }, Cmd.none
     else
       model, Cmd.none)
   |> System.finish Camera.update
+
 
 let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
   match msg with
