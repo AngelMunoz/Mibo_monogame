@@ -84,30 +84,52 @@ let getChunkPattern(chunkX: int, seed: int) : TerrainPattern =
 // Terrain Generation Functions
 // ─────────────────────────────────────────────────────────────
 
+/// Ensure height difference between adjacent columns is jumpable
+/// Maximum jump height is ~3 tiles, so we clamp differences to 3 tiles
+let clampHeightDifference
+  (prevHeight: int, currentHeight: int, maxHeightDiff: int)
+  : int =
+  let diff = prevHeight - currentHeight
+
+  if abs diff <= maxHeightDiff then currentHeight
+  elif diff > 0 then prevHeight - maxHeightDiff // Current is too low, raise it
+  else prevHeight + maxHeightDiff // Current is too high, lower it
+
 /// Generate height for a ground tile at given column
 let generateGroundHeight
-  (column: int, chunkX: int, pattern: TerrainPattern, seed: int)
-  : int =
+  (
+    column: int,
+    chunkX: int,
+    pattern: TerrainPattern,
+    seed: int,
+    prevHeight: int option
+  ) : int =
   let baseHeight = int Constants.worldHeight - 2 // Near bottom (tile index 10)
 
   // Use smooth noise for organic transitions
   // Scale 5.0 means height changes gradually over 5 tiles
   let noise = SimpleNoise.smoothNoise(float32 column, seed, 5.0f)
 
-  // Map 0..1 noise to height variation
+  // Map 0..1 noise to height variation (max 3 tiles for jumpability)
   let variation = int(noise * 4.0f) // 0 to 3 tiles variation
 
-  match pattern with
-  | FlatGround -> baseHeight
-  | RollingHills -> baseHeight - variation
-  | Mountains -> baseHeight - variation - (if column % 2 = 0 then 1 else 0) // Jagged but controlled
-  | FloatingPlatforms -> baseHeight - 3 // Higher up (lower tile index)
-  | Cavernous -> baseHeight - variation * 2
-  | StaircaseUp -> baseHeight - (column % 3)
-  | StaircaseDown -> baseHeight + (column % 3)
+  let rawHeight =
+    match pattern with
+    | FlatGround -> baseHeight
+    | RollingHills -> baseHeight - variation
+    | Mountains -> baseHeight - variation // Max 3 tiles - within jump range
+    | FloatingPlatforms -> baseHeight - 3 // Higher up (lower tile index)
+    | Cavernous -> baseHeight - variation // Max 3 tiles - within jump range
+    | StaircaseUp -> baseHeight - (column % 3)
+    | StaircaseDown -> baseHeight + (column % 3)
 
-/// Calculate ground height for any global tile X coordinate
-let getGlobalGroundHeight(x: int, seed: int) : int =
+  // Clamp height difference from previous column to ensure jumpability
+  match prevHeight with
+  | Some prev -> clampHeightDifference(prev, rawHeight, 3)
+  | None -> rawHeight
+
+/// Calculate raw ground height without clamping (used to get previous height)
+let getRawGroundHeight(x: int, seed: int) : int =
   // Handle negative coordinates correctly for chunk calculation
   let chunkX =
     if x >= 0 then
@@ -116,7 +138,21 @@ let getGlobalGroundHeight(x: int, seed: int) : int =
       (x - Constants.chunkWidth + 1) / Constants.chunkWidth
 
   let pattern = getChunkPattern(chunkX, seed)
-  generateGroundHeight(x, chunkX, pattern, seed)
+  generateGroundHeight(x, chunkX, pattern, seed, None)
+
+/// Calculate ground height for any global tile X coordinate with clamping
+let getGlobalGroundHeight(x: int, seed: int) : int =
+  let prevHeight = getRawGroundHeight(x - 1, seed)
+
+  // Handle negative coordinates correctly for chunk calculation
+  let chunkX =
+    if x >= 0 then
+      x / Constants.chunkWidth
+    else
+      (x - Constants.chunkWidth + 1) / Constants.chunkWidth
+
+  let pattern = getChunkPattern(chunkX, seed)
+  generateGroundHeight(x, chunkX, pattern, seed, Some prevHeight)
 
 /// Check if a tile at (x, y) would be solid based on the heightmap
 let isSolid(x: int, y: int, seed: int) : bool =
@@ -152,9 +188,16 @@ let getTileShape(x: int, y: int, seed: int) : int =
 
 /// Generate a single tile at the given position
 let generateTile
-  (x: int, y: int, chunkX: int, pattern: TerrainPattern, seed: int, theme: int)
-  : Tile option =
-  let groundHeight = generateGroundHeight(x, chunkX, pattern, seed)
+  (
+    x: int,
+    y: int,
+    chunkX: int,
+    pattern: TerrainPattern,
+    seed: int,
+    theme: int,
+    prevHeight: int option
+  ) : Tile option =
+  let groundHeight = generateGroundHeight(x, chunkX, pattern, seed, prevHeight)
   let columnNoise = SimpleNoise.noise2d(x, y, seed)
   let gapProbability = SimpleNoise.noise2d(x, chunkX + 100, seed)
 
@@ -167,11 +210,11 @@ let generateTile
   let hR = getGlobalGroundHeight(x + 1, seed)
   let needsStepL = hL < groundHeight - 2
   let needsStepR = hR < groundHeight - 2
-  let isClimbAssist = (needsStepL || needsStepR) && y == groundHeight - 2
+  let isClimbAssist = (needsStepL || needsStepR) && y = groundHeight - 2
 
   match pattern with
   | FlatGround ->
-    if y == groundHeight - 3 && SimpleNoise.chance(0.3f, x, y, seed) then
+    if y = groundHeight - 3 && SimpleNoise.chance(0.3f, x, y, seed) then
       Some {
         Position =
           Vector2(
@@ -205,7 +248,7 @@ let generateTile
         TileType = TileType.Platform
         Variant = 0
       }
-    elif y == groundHeight - 3 && SimpleNoise.chance(0.2f, x, y, seed) then
+    elif y = groundHeight - 3 && SimpleNoise.chance(0.2f, x, y, seed) then
       Some {
         Position =
           Vector2(
@@ -249,7 +292,7 @@ let generateTile
         TileType = Ground
         Variant = variant
       }
-    elif y == groundHeight - 4 && SimpleNoise.chance(0.3f, x, y + 50, seed) then
+    elif y = groundHeight - 4 && SimpleNoise.chance(0.3f, x, y + 50, seed) then
       Some {
         Position =
           Vector2(
@@ -344,7 +387,17 @@ let generateChunk(chunkX: int, seed: int) : Tile array =
 
   for x in 0 .. Constants.chunkWidth - 1 do
     for y in 0 .. Constants.worldHeight - 1 do
-      match generateTile(startX + x, y, chunkX, pattern, seed, theme) with
+      let globalX = startX + x
+
+      let prevHeight =
+        if globalX = 0 then
+          None
+        else
+          Some(getGlobalGroundHeight(globalX - 1, seed))
+
+      match
+        generateTile(globalX, y, chunkX, pattern, seed, theme, prevHeight)
+      with
       | Some tile -> tiles.Add(tile)
       | None -> ()
 
@@ -367,7 +420,20 @@ let generateInitialTerrain(seed: int) : Tile array =
 
       for x in 0 .. Constants.chunkWidth - 1 do
         for y in 0 .. Constants.worldHeight - 1 do
-          match generateTile(startX + x, y, chunkX, pattern, seed, theme) with
+          let globalX = startX + x
+          let prevHeight = getGlobalGroundHeight(globalX - 1, seed)
+
+          match
+            generateTile(
+              globalX,
+              y,
+              chunkX,
+              pattern,
+              seed,
+              theme,
+              Some prevHeight
+            )
+          with
           | Some tile -> chunkTiles.Add(tile)
           | None -> ()
 

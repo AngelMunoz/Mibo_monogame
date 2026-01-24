@@ -148,11 +148,13 @@ let private resolveY
 
   (platforms: Platform array)
 
-  : struct (Vector2 * bool) =
+  : struct (Vector2 * Vector2 * bool) =
 
 
 
   let mutable newPos = position
+
+  let mutable newVelocity = velocity
 
   let mutable grounded = false
 
@@ -207,13 +209,15 @@ let private resolveY
 
       elif velocity.Y < 0.0f then
 
-        // Hit head
+        // Hit head - stop upward movement
 
         newPos.Y <- float32(platform.Bounds.Y + platform.Bounds.Height)
 
+        newVelocity.Y <- 0.0f
 
 
-  struct (newPos, grounded)
+
+  struct (newPos, newVelocity, grounded)
 
 /// Main physics update function
 /// Integrates gravity, movement, jumping, and collision
@@ -250,11 +254,15 @@ let update (dt: float32) (model: Model) : Model =
   // Phase Y
   let posAfterY = resolvedPosX + Vector2(0.0f, velocity.Y * dt)
 
-  let struct (finalPos, isGrounded) =
+  let struct (finalPos, velocityAfterY, isGrounded) =
     resolveY posAfterY velocity previousPosition model.Platforms
 
-  // Update velocity after collision
-  let newVelocity = if isGrounded then Vector2(velocity.X, 0.0f) else velocity
+  // Update velocity after collision (grounded already handled, velocityAfterY handles head hits)
+  let newVelocity =
+    if isGrounded then
+      Vector2(velocity.X, 0.0f)
+    else
+      velocityAfterY
 
   // Update facing direction
   let newFacing = Helpers.calculateFacing(newVelocity, model.PlayerFacing)
