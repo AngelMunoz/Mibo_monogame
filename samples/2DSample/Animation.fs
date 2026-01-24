@@ -56,14 +56,34 @@ let update(dt: float32, model: Model) : Model =
   let animationState =
     getAnimationState model.IsGrounded model.PlayerVelocity model.Actions
 
-  // Get the appropriate sprite for current state
-  let currentSprite = getCurrentSprite model.PlayerAssets animationState
+  // Update only the active sprite to advance its frame timer
+  let assets = model.PlayerAssets
 
-  // Update the sprite
-  let updatedSprite = AnimatedSprite.update dt currentSprite
+  let newAssets =
+    match animationState with
+    | Idle -> {
+        assets with
+            Idle = AnimatedSprite.update dt assets.Idle
+      }
+    | Walk -> {
+        assets with
+            Walk = AnimatedSprite.update dt assets.Walk
+      }
+    | Jump -> {
+        assets with
+            Jump = AnimatedSprite.update dt assets.Jump
+      }
+    | Fall -> {
+        assets with
+            Fall = AnimatedSprite.update dt assets.Fall
+      }
+    | Climb ->
+        {
+          assets with
+              Jump = AnimatedSprite.update dt assets.Jump
+        }
 
-  // Update model with new animation state
-  model
+  { model with PlayerAssets = newAssets }
 
 // ─────────────────────────────────────────────────────────────
 // Animation View

@@ -23,6 +23,7 @@ type GameAction =
   | MoveLeft
   | MoveRight
   | Jump
+  | Respawn
 
 /// Platform tile type for terrain generation
 [<Struct>]

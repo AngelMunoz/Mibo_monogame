@@ -39,6 +39,21 @@ module SimpleNoise =
   let chance(probability: float32, x: int, y: int, seed: int) : bool =
     noise2d(x, y, seed) < probability
 
+  /// Generate 1D smooth noise (interpolated)
+  let smoothNoise(x: float32, seed: int, scale: float32) : float32 =
+    let scaledX = x / scale
+    let x0 = int(floor scaledX)
+    let x1 = x0 + 1
+    let t = scaledX - float32 x0
+    // Smoothstep interpolation
+    let tSmooth = t * t * (3.0f - 2.0f * t)
+
+    // Use y=0 for 1D noise
+    let n0 = noise2d(x0, 0, seed)
+    let n1 = noise2d(x1, 0, seed)
+
+    n0 + (n1 - n0) * tSmooth
+
 // ─────────────────────────────────────────────────────────────
 // Terrain Patterns
 // ─────────────────────────────────────────────────────────────
@@ -74,13 +89,18 @@ let generateGroundHeight
   (column: int, chunkX: int, pattern: TerrainPattern, seed: int)
   : int =
   let baseHeight = int Constants.worldHeight - 2 // Near bottom (tile index 10)
-  let variation = SimpleNoise.rangeInt(0, 2, column, chunkX, seed)
-  let noise = SimpleNoise.noise2d(column, chunkX, seed)
+
+  // Use smooth noise for organic transitions
+  // Scale 5.0 means height changes gradually over 5 tiles
+  let noise = SimpleNoise.smoothNoise(float32 column, seed, 5.0f)
+
+  // Map 0..1 noise to height variation
+  let variation = int(noise * 4.0f) // 0 to 3 tiles variation
 
   match pattern with
   | FlatGround -> baseHeight
   | RollingHills -> baseHeight - variation
-  | Mountains -> baseHeight - variation * 2
+  | Mountains -> baseHeight - variation - (if column % 2 = 0 then 1 else 0) // Jagged but controlled
   | FloatingPlatforms -> baseHeight - 3 // Higher up (lower tile index)
   | Cavernous -> baseHeight - variation * 2
   | StaircaseUp -> baseHeight - (column % 3)
@@ -98,32 +118,37 @@ let getGlobalGroundHeight(x: int, seed: int) : int =
   let pattern = getChunkPattern(chunkX, seed)
   generateGroundHeight(x, chunkX, pattern, seed)
 
-/// Determine the tile shape based on neighbors
-let getTileShape(x: int, y: int, height: int, seed: int) : int =
-  let hL = getGlobalGroundHeight(x - 1, seed)
-  let hR = getGlobalGroundHeight(x + 1, seed)
+/// Check if a tile at (x, y) would be solid based on the heightmap
+let isSolid(x: int, y: int, seed: int) : bool =
+  let h = getGlobalGroundHeight(x, seed)
+  y >= h
 
-  // y is positive down. Larger Y = Lower Ground (Underground). Smaller Y = Higher Ground (Air).
-  // height is the Y level of the surface.
+/// Determine the tile shape based on 4-neighbors (Auto-Tiling)
+/// Returns index 0-8 matching SpriteLoader mapping
+let getTileShape(x: int, y: int, seed: int) : int =
+  let n = isSolid(x, y - 1, seed)
+  let s = isSolid(x, y + 1, seed)
+  let w = isSolid(x - 1, y, seed)
+  let e = isSolid(x + 1, y, seed)
 
-  if y = height then
-    // Surface
-    if hL > height && hR > height then 0 // Isolated/Top (Both sides lower/open) - Use Top
-    elif hL > height then 4 // Top Left (Left is open/lower)
-    elif hR > height then 5 // Top Right (Right is open/lower)
+  if not n then // Surface (Top row)
+    if not w then 4 // Top Left
+    elif not e then 5 // Top Right
     else 0 // Top Center
-  elif y > height then
-    // Underground
-    // Check if we are exposed on sides (cliff face)
-    // Exposed if neighbor height is below us (h > y)
-    let exposedL = hL > y
-    let exposedR = hR > y
-
-    if exposedL then 2 // Center Left
-    elif exposedR then 3 // Center Right
-    else 1 // Center (Solid)
+  else if // Underground
+    not s
+  then // Bottom row (Ceiling/Floating bottom)
+    if not w then 7 // Bottom Left
+    elif not e then 8 // Bottom Right
+    else 6 // Bottom Center
+  else if // Middle
+    not w
+  then
+    2 // Center Left (Wall)
+  elif not e then
+    3 // Center Right (Wall)
   else
-    0 // Should not happen for air
+    1 // Center (Full fill)
 
 /// Generate a single tile at the given position
 let generateTile
@@ -133,23 +158,30 @@ let generateTile
   let columnNoise = SimpleNoise.noise2d(x, y, seed)
   let gapProbability = SimpleNoise.noise2d(x, chunkX + 100, seed)
 
-  let shape = getTileShape(x, y, groundHeight, seed)
+  // Auto-tiling shape
+  let shape = getTileShape(x, y, seed)
   let variant = theme * 10 + shape
+
+  // Climb Assist: Check if neighbors are significantly higher (smaller Y)
+  let hL = getGlobalGroundHeight(x - 1, seed)
+  let hR = getGlobalGroundHeight(x + 1, seed)
+  let needsStepL = hL < groundHeight - 2
+  let needsStepR = hR < groundHeight - 2
+  let isClimbAssist = (needsStepL || needsStepR) && y == groundHeight - 2
 
   match pattern with
   | FlatGround ->
-    if y = groundHeight then
+    if y == groundHeight - 3 && SimpleNoise.chance(0.3f, x, y, seed) then
       Some {
         Position =
           Vector2(
             float32 x * Constants.tileSize,
             float32 y * Constants.tileSize
           )
-        TileType = Ground
-        Variant = variant
+        TileType = TileType.Platform
+        Variant = 0
       }
-    elif y > groundHeight && y < groundHeight + 2 then
-      // Fill below ground (2 tiles thick for solidity)
+    elif y >= groundHeight && y < Constants.worldHeight then
       Some {
         Position =
           Vector2(
@@ -163,18 +195,27 @@ let generateTile
       None
 
   | RollingHills ->
-    if y = groundHeight then
+    if isClimbAssist then
       Some {
         Position =
           Vector2(
             float32 x * Constants.tileSize,
             float32 y * Constants.tileSize
           )
-        TileType = Ground
-        Variant = variant
+        TileType = TileType.Platform
+        Variant = 0
       }
-    elif y > groundHeight && y < groundHeight + 2 then
-      // Fill below ground
+    elif y == groundHeight - 3 && SimpleNoise.chance(0.2f, x, y, seed) then
+      Some {
+        Position =
+          Vector2(
+            float32 x * Constants.tileSize,
+            float32 y * Constants.tileSize
+          )
+        TileType = TileType.Platform
+        Variant = 0
+      }
+    elif y >= groundHeight && y < Constants.worldHeight then
       Some {
         Position =
           Vector2(
@@ -188,7 +229,17 @@ let generateTile
       None
 
   | Mountains ->
-    if y = groundHeight then
+    if isClimbAssist then
+      Some {
+        Position =
+          Vector2(
+            float32 x * Constants.tileSize,
+            float32 y * Constants.tileSize
+          )
+        TileType = TileType.Platform
+        Variant = 0
+      }
+    elif y >= groundHeight && y < Constants.worldHeight then
       Some {
         Position =
           Vector2(
@@ -198,18 +249,7 @@ let generateTile
         TileType = Ground
         Variant = variant
       }
-    elif y > groundHeight && y < groundHeight + 4 then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    // Add floating platforms above mountains
-    elif y = groundHeight - 4 && SimpleNoise.chance(0.3f, x, y + 50, seed) then
+    elif y == groundHeight - 4 && SimpleNoise.chance(0.3f, x, y + 50, seed) then
       Some {
         Position =
           Vector2(
@@ -222,7 +262,23 @@ let generateTile
     else
       None
 
+  | StaircaseUp
+  | StaircaseDown ->
+    if y >= groundHeight && y < Constants.worldHeight then
+      Some {
+        Position =
+          Vector2(
+            float32 x * Constants.tileSize,
+            float32 y * Constants.tileSize
+          )
+        TileType = Ground
+        Variant = variant
+      }
+    else
+      None
+
   | FloatingPlatforms ->
+    // Only 1 block thick for floating platforms
     if y = groundHeight && SimpleNoise.chance(0.4f, x, y, seed) then
       Some {
         Position =
@@ -248,20 +304,10 @@ let generateTile
       None
 
   | Cavernous ->
-    // Create gaps in ground
-    if y = groundHeight && gapProbability < 0.2f then
-      None // Gap
-    elif y = groundHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    elif y > groundHeight && y < groundHeight + 2 then
+    // Create gaps in ground (pits)
+    if gapProbability < 0.2f then
+      None // Full column gap
+    elif y >= groundHeight && y < Constants.worldHeight then
       Some {
         Position =
           Vector2(
@@ -283,54 +329,6 @@ let generateTile
           )
         TileType = Hazard
         Variant = 0
-      }
-    else
-      None
-
-  | StaircaseUp ->
-    if y = groundHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    elif y > groundHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    else
-      None
-
-  | StaircaseDown ->
-    if y = groundHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    elif y > groundHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
       }
     else
       None

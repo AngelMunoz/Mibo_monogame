@@ -42,6 +42,7 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     |> InputMap.key MoveRight Keys.D
     |> InputMap.key MoveRight Keys.Right
     |> InputMap.key GameAction.Jump Keys.Space
+    |> InputMap.key GameAction.Respawn Keys.R
 
   inputMapRef.Value <- inputMap
 
@@ -116,9 +117,9 @@ let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
     let targetCameraX = model.PlayerPosition.X - viewportWidth * 0.3f
     let cameraX = Math.Max(0.0f, targetCameraX)
 
-    // Check if player fell off world
+    // Check if player fell off world or requested respawn
     let model =
-      if checkKillPlane model then
+      if checkKillPlane model || model.Actions.Started.Contains Respawn then
         let model = respawnPlayer model
         // Regenerate initial terrain so the player has somewhere to land
         let tiles = generateInitialTerrain model.Seed

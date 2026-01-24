@@ -137,41 +137,81 @@ let private resolveX
   newPos
 
 /// Resolve vertical collisions
+
 let private resolveY
+
   (position: Vector2)
+
   (velocity: Vector2)
+
   (previousPosition: Vector2)
+
   (platforms: Platform array)
+
   : struct (Vector2 * bool) =
 
+
+
   let mutable newPos = position
+
   let mutable grounded = false
 
   let bounds =
     Rectangle(int newPos.X, int newPos.Y, int playerWidth, int playerHeight + 1) // +1 for ground check stability
 
+
+
   for platform in platforms do
+
     let intersection = Rectangle.Intersect(bounds, platform.Bounds)
 
     if intersection.Width > 0 && intersection.Height > 0 then
+
       // Check if we are landing on top
+
       let prevFeetY = previousPosition.Y + playerHeight
+
       let currFeetY = newPos.Y + playerHeight
+
       let platformTop = float32 platform.Bounds.Y
-      let tolerance = 5.0f // Snap tolerance
+
+      let tolerance = 5.0f // Snap tolerance for high speed
+
+      let restingTolerance = 1.0f // Tolerance for standing still
+
+
 
       let crossedSurface =
         prevFeetY <= platformTop + tolerance && currFeetY > platformTop
 
       let movingDown = velocity.Y >= 0.0f
 
-      if crossedSurface && movingDown then
-        // Landed
+
+
+      // Check if we are just standing on it (resting)
+
+      // We are resting if feet are very close to top and not moving up
+
+      let isResting =
+        abs(currFeetY - platformTop) <= restingTolerance && velocity.Y >= -0.1f
+
+
+
+      if (crossedSurface && movingDown) || isResting then
+
+        // Landed or Staying Grounded
+
         newPos.Y <- float32 platform.Bounds.Y - playerHeight
+
         grounded <- true
+
       elif velocity.Y < 0.0f then
+
         // Hit head
+
         newPos.Y <- float32(platform.Bounds.Y + platform.Bounds.Height)
+
+
 
   struct (newPos, grounded)
 

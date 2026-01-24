@@ -19,6 +19,7 @@ module internal BillboardBatch =
 
   let private refillIndices (indices: int16[]) (vertexCount: int) =
     let quadCapacity = vertexCount / 4
+
     for i in 0 .. quadCapacity - 1 do
       let vBase = i * 4
       let iBase = i * 6
@@ -31,6 +32,7 @@ module internal BillboardBatch =
 
   let private ensureCapacity (numSprites: int) (state: State) =
     let requiredVerts = (state.SpriteCount + numSprites) * 4
+
     if requiredVerts > state.Vertices.Length then
       let newSize = Math.Max(state.Vertices.Length * 2, requiredVerts)
       let newVerts = ArrayPool.Shared.Rent(newSize)
@@ -46,6 +48,7 @@ module internal BillboardBatch =
 
   [<Literal>]
   let private DefaultVertexCapacity = 2048
+
   [<Literal>]
   let private DefaultIndexCapacity = 3072
 
@@ -53,6 +56,7 @@ module internal BillboardBatch =
     let vertices = ArrayPool.Shared.Rent DefaultVertexCapacity
     let indices = ArrayPool.Shared.Rent DefaultIndexCapacity
     refillIndices indices vertices.Length
+
     {
       Vertices = vertices
       Indices = indices
@@ -61,13 +65,26 @@ module internal BillboardBatch =
     }
 
   let dispose(state: State) =
-    if not(isNull state.Vertices) then ArrayPool.Shared.Return state.Vertices; state.Vertices <- null
-    if not(isNull state.Indices) then ArrayPool.Shared.Return state.Indices; state.Indices <- null
+    if not(isNull state.Vertices) then
+      ArrayPool.Shared.Return state.Vertices
+      state.Vertices <- null
 
-  let inline begin'(state: State) =
-    state.SpriteCount <- 0
+    if not(isNull state.Indices) then
+      ArrayPool.Shared.Return state.Indices
+      state.Indices <- null
 
-  let drawUv (position: Vector3) (size: Vector2) (rotation: float32) (color: Color) (uv: UvRect) (camRight: Vector3) (camUp: Vector3) (state: State) =
+  let inline begin'(state: State) = state.SpriteCount <- 0
+
+  let drawUv
+    (position: Vector3)
+    (size: Vector2)
+    (rotation: float32)
+    (color: Color)
+    (uv: UvRect)
+    (camRight: Vector3)
+    (camUp: Vector3)
+    (state: State)
+    =
     ensureCapacity 1 state
     let halfSize = size * 0.5f
     let cos = MathF.Cos rotation
@@ -82,17 +99,36 @@ module internal BillboardBatch =
     let v3 = position - w - h
     let idx = state.SpriteCount * 4
     let u0, v0', u1, v1' = uv.U0, uv.V0, uv.U1, uv.V1
-    state.Vertices[idx + 0] <- VertexPositionColorTexture(v0, color, Vector2(u0, v0'))
-    state.Vertices[idx + 1] <- VertexPositionColorTexture(v1, color, Vector2(u1, v0'))
-    state.Vertices[idx + 2] <- VertexPositionColorTexture(v2, color, Vector2(u1, v1'))
-    state.Vertices[idx + 3] <- VertexPositionColorTexture(v3, color, Vector2(u0, v1'))
+
+    state.Vertices[idx + 0] <-
+      VertexPositionColorTexture(v0, color, Vector2(u0, v0'))
+
+    state.Vertices[idx + 1] <-
+      VertexPositionColorTexture(v1, color, Vector2(u1, v0'))
+
+    state.Vertices[idx + 2] <-
+      VertexPositionColorTexture(v2, color, Vector2(u1, v1'))
+
+    state.Vertices[idx + 3] <-
+      VertexPositionColorTexture(v3, color, Vector2(u0, v1'))
+
     state.SpriteCount <- state.SpriteCount + 1
 
   let flush (effect: Effect) (state: State) =
     if state.SpriteCount > 0 then
       let gd = state.GraphicsDevice
+
       for pass in effect.CurrentTechnique.Passes do
         pass.Apply()
-        gd.DrawUserIndexedPrimitives(PrimitiveType.TriangleList, state.Vertices, 0, state.SpriteCount * 4, state.Indices, 0, state.SpriteCount * 2)
 
-  let inline end'(effect: Effect) (state: State) = flush effect state
+        gd.DrawUserIndexedPrimitives(
+          PrimitiveType.TriangleList,
+          state.Vertices,
+          0,
+          state.SpriteCount * 4,
+          state.Indices,
+          0,
+          state.SpriteCount * 2
+        )
+
+  let inline end' (effect: Effect) (state: State) = flush effect state

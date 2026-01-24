@@ -10,8 +10,7 @@ open PipelineSample.Core
 // ─────────────────────────────────────────────────────────────
 
 /// Bounds are already computed in Mesh, just return it
-let computeBounds(mesh: Mesh) : BoundingBox =
-  mesh.BoundingBox
+let computeBounds(mesh: Mesh) : BoundingBox = mesh.BoundingBox
 
 /// Create platform at position with bounds offset from base bounds
 let create (baseBounds: BoundingBox) (pos: Vector3) : PlatformData =

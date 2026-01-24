@@ -69,19 +69,20 @@ type Camera = {
   Near: float32
   Far: float32
 } with
+
   member this.Forward = Vector3.Normalize(this.Target - this.Position)
 
 module Camera =
   /// <summary>
   /// Recomputes the view matrix based on Position, Target, and Up.
   /// </summary>
-  let rebuildView (c: Camera) =
+  let rebuildView(c: Camera) =
     Matrix.CreateLookAt(c.Position, c.Target, c.Up)
 
   /// <summary>
   /// Recomputes the projection matrix based on Fov, Aspect, Near, and Far.
   /// </summary>
-  let rebuildProjection (c: Camera) =
+  let rebuildProjection(c: Camera) =
     Matrix.CreatePerspectiveFieldOfView(c.Fov, c.Aspect, c.Near, c.Far)
 
   /// <summary>
@@ -129,7 +130,12 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
-    { c with View = rebuildView c; Projection = rebuildProjection c }
+
+    {
+      c with
+          View = rebuildView c
+          Projection = rebuildProjection c
+    }
 
   /// <summary>
   /// Create an orthographic camera. (Backward compatibility)
@@ -154,6 +160,7 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.CreateOrthographic(width, height, near, far)
     }
+
     { c with View = rebuildView c }
 
   /// <summary>Sets the Field of View in radians.</summary>
