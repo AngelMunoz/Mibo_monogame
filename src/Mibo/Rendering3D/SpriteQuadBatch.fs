@@ -4,6 +4,7 @@ open System
 open System.Buffers
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open Mibo.Rendering
 
 /// <summary>
 /// A simple batcher for drawing textured, vertex-colored quads in 3D.
@@ -110,10 +111,18 @@ module internal SpriteQuadBatch =
     let bl = center - right - up
     let u0, v0, u1, v1 = uv.U0, uv.V0, uv.U1, uv.V1
 
-    state.Vertices[idx + 0] <- VertexPositionColorTexture(tl, color, Vector2(u0, v0))
-    state.Vertices[idx + 1] <- VertexPositionColorTexture(tr, color, Vector2(u1, v0))
-    state.Vertices[idx + 2] <- VertexPositionColorTexture(br, color, Vector2(u1, v1))
-    state.Vertices[idx + 3] <- VertexPositionColorTexture(bl, color, Vector2(u0, v1))
+    state.Vertices[idx + 0] <-
+      VertexPositionColorTexture(tl, color, Vector2(u0, v0))
+
+    state.Vertices[idx + 1] <-
+      VertexPositionColorTexture(tr, color, Vector2(u1, v0))
+
+    state.Vertices[idx + 2] <-
+      VertexPositionColorTexture(br, color, Vector2(u1, v1))
+
+    state.Vertices[idx + 3] <-
+      VertexPositionColorTexture(bl, color, Vector2(u0, v1))
+
     state.QuadCount <- state.QuadCount + 1
 
   let inline end' (effect: Effect) (state: State) = flush effect state

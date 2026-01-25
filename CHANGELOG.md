@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Added
+
+- Rendering: **Enhanced 2D Render Pipeline**. Integrated a multi-pass post-processing system in `Batch2DRenderer` supporting global effects: **Vignette**, **Bloom**, and **Color Grading (3D LUT)**.
+- Rendering: **Selective 2D Effects**. Added support for per-batch shader effects using the `SetEffect` command, enabling targeted effects like grayscale on specific entity groups.
+- Rendering: **Render Target Pooling**. Introduced `IRenderTargetPool` to efficiently manage intermediate buffers during complex 2D post-processing passes, reducing allocation overhead.
+- Rendering: **Layered Compositing**. Added `FinalBlendState` to `Batch2DConfig` to allow 2D layers (including post-processed ones) to composite cleanly over previous 3D or 2D scenes.
+- Rendering: **Tiled 2D Lighting System**. Added GPU-accelerated point lighting with screen-space tile binning for efficient multi-light support.
+- Rendering: **2D Dynamic Shadows**. Integrated a polar/orthographic shadow atlas system for point and directional lights, supporting soft shadows and occluder segments.
+- Rendering: **High-Performance 2D Particles**. Repurposed `BillboardBatch` for 2D space, enabling GPU-accelerated particle systems with rotation and custom UVs.
+- Rendering: **2D Primitive Batching**. Added `DrawLine2D`, `DrawRect2D`, and `DrawCircle2D` commands using `LineBatch` for efficient shape rendering.
+- Rendering: `PointLight2D` struct with position, color, intensity, radius, and falloff properties.
+- Rendering: `DirectionalLight2D` struct with direction, color, and intensity properties for global lighting (e.g., sun/moon).
+- Rendering: `Lighting2DConfig` for enabling/disabling 2D lighting with configurable ambient color, tile size, and max lights per tile.
+- Rendering: `buffer.PointLight`, `buffer.DirectionalLight`, and `buffer.Occluder` fluent APIs for submitting lighting data to the 2D render pipeline.
+- Rendering: Screen-space light transformation for correct world-to-screen light binning when using cameras.
+- Shaders: `lighting.fx` and `grayscale.fx` implement the Tiled Lighting Contract with normal map support and light clamping.
+- DSL: Updated `sprite` and `text` computation expressions for Improved performance via direct struct-based command submission.
+
+### Fixed
+
+- Rendering: Corrected rendering state management in `Batch2DRenderer` to fix "accumulation trails" by ensuring render targets are set before clearing.
+- Rendering: Improved `Batch2DRenderer` to always clear internal pooled targets to `Transparent`, preventing garbage data from persisting across frames while still allowing background preservation via `ClearColor: ValueNone`.
+- Rendering: Fixed winding order in `BillboardBatch.draw2D` to prevent culling in 2D (Y-down) coordinate systems.
+- Rendering: Improved `DrawParticles` robustness in `Batch2DRenderer` by explicitly handling `BasicEffect` property mapping and camera matrix propagation.
+
 ## [1.4.0] - 2026-01-19
 
 ### Added

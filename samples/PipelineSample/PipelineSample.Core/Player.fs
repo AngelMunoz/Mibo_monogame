@@ -37,7 +37,8 @@ let view (state: State) (buffer: PipelineBuffer<RenderCommand>) =
       Shadow = ValueSome ShadowSettings.defaults
       SourceRadius = 0.1f
     }
-  ) |> ignore
+  )
+  |> ignore
 
   // 2. Draw the player mesh
   buffer.Draw(
@@ -48,7 +49,8 @@ let view (state: State) (buffer: PipelineBuffer<RenderCommand>) =
       withAlbedo Color.White
       withEmissive Color.Magenta state.EmissivePulse
     }
-  ) |> ignore
+  )
+  |> ignore
 
   // 3. Draw player particles (sparks)
   let sparkCount = 8
@@ -86,4 +88,4 @@ let view (state: State) (buffer: PipelineBuffer<RenderCommand>) =
       state.PlayerPosition + state.Velocity * 0.5f,
       Color.Green
     )
-    |> ignore
+  |> ignore

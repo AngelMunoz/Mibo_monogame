@@ -3,6 +3,7 @@ namespace Mibo.Rendering.Graphics3D
 open System
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open Mibo.Rendering
 
 // ============================================================================
 // Core Types for the Rendering Pipeline
@@ -25,23 +26,6 @@ type EffectContext = {
 
 /// <summary>Callback for configuring an effect before a draw operation.</summary>
 type EffectSetup = Effect -> EffectContext -> unit
-
-/// <summary>UV rectangle in normalized texture coordinates.</summary>
-[<Struct>]
-type UvRect = {
-  U0: float32
-  V0: float32
-  U1: float32
-  V1: float32
-}
-
-module UvRect =
-  let full: UvRect = {
-    U0 = 0.0f
-    V0 = 0.0f
-    U1 = 1.0f
-    V1 = 1.0f
-  }
 
 /// Shader base types for override mapping
 type ShaderBase =
@@ -69,19 +53,20 @@ type Camera = {
   Near: float32
   Far: float32
 } with
+
   member this.Forward = Vector3.Normalize(this.Target - this.Position)
 
 module Camera =
   /// <summary>
   /// Recomputes the view matrix based on Position, Target, and Up.
   /// </summary>
-  let rebuildView (c: Camera) =
+  let rebuildView(c: Camera) =
     Matrix.CreateLookAt(c.Position, c.Target, c.Up)
 
   /// <summary>
   /// Recomputes the projection matrix based on Fov, Aspect, Near, and Far.
   /// </summary>
-  let rebuildProjection (c: Camera) =
+  let rebuildProjection(c: Camera) =
     Matrix.CreatePerspectiveFieldOfView(c.Fov, c.Aspect, c.Near, c.Far)
 
   /// <summary>
@@ -129,7 +114,12 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
-    { c with View = rebuildView c; Projection = rebuildProjection c }
+
+    {
+      c with
+          View = rebuildView c
+          Projection = rebuildProjection c
+    }
 
   /// <summary>
   /// Create an orthographic camera. (Backward compatibility)
@@ -154,6 +144,7 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.CreateOrthographic(width, height, near, far)
     }
+
     { c with View = rebuildView c }
 
   /// <summary>Sets the Field of View in radians.</summary>

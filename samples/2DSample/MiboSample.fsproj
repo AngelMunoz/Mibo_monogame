@@ -10,14 +10,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="DayNight.fs" />
     <Compile Include="Domain.fs" />
-    <Compile Include="DemoComponents.fs" />
-    <Compile Include="Crates.fs" />
-    <Compile Include="Particles.fs" />
-    <Compile Include="Physics.fs" />
-    <Compile Include="Player.fs" />
-    <Compile Include="HueColor.fs" />
+    <Compile Include="SpriteLoader.fs" />
     <Compile Include="Animation.fs" />
+    <Compile Include="Physics.fs" />
+    <Compile Include="Terrain.fs" />
+    <Compile Include="Camera.fs" />
+    <Compile Include="Particles.fs" />
+    <Compile Include="Player.fs" />
+    <Compile Include="UI.fs" />
+    <Compile Include="Sky.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

@@ -10,15 +10,15 @@ open Microsoft.Xna.Framework
 /// Shadow settings for a light.
 /// </summary>
 [<Struct>]
-type ShadowSettings = { 
-    /// <summary>
-    /// Constant depth bias to prevent shadow acne.
-    /// </summary>
-    Bias: float32
-    /// <summary>
-    /// Bias applied along the surface normal to prevent acne on curved surfaces.
-    /// </summary>
-    NormalBias: float32 
+type ShadowSettings = {
+  /// <summary>
+  /// Constant depth bias to prevent shadow acne.
+  /// </summary>
+  Bias: float32
+  /// <summary>
+  /// Bias applied along the surface normal to prevent acne on curved surfaces.
+  /// </summary>
+  NormalBias: float32
 }
 
 module ShadowSettings =

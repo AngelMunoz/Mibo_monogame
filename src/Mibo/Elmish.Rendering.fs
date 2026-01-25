@@ -36,7 +36,8 @@ type IRenderer<'Model> =
 /// </remarks>
 /// <typeparam name="Key">The sort key type (e.g., <c>int&lt;RenderLayer&gt;</c> for 2D, <c>unit</c> for 3D)</typeparam>
 /// <typeparam name="Cmd">The render command type</typeparam>
-type RenderBuffer<'Key, 'Cmd>(?capacity: int, ?keyComparer: IComparer<'Key>) =
+type RenderBuffer<'Key, 'Cmd when 'Key: comparison>
+  (?capacity: int, ?keyComparer: IComparer<'Key>) =
   let initialCapacity = defaultArg capacity 1024
 
   let mutable items =
@@ -45,20 +46,12 @@ type RenderBuffer<'Key, 'Cmd>(?capacity: int, ?keyComparer: IComparer<'Key>) =
   let mutable count = 0
   let keyComparer = defaultArg keyComparer Comparer<'Key>.Default
 
-  let comparer =
-    { new IComparer<struct ('Key * 'Cmd)> with
-        member _.Compare(x, y) =
-          let struct (kx, _) = x
-          let struct (ky, _) = y
-          keyComparer.Compare(kx, ky)
-    }
-
   let ensureCapacity(needed: int) =
     if count + needed > items.Length then
       let newSize = max (items.Length * 2) (count + needed)
       let newArr = Buffers.ArrayPool<struct ('Key * 'Cmd)>.Shared.Rent(newSize)
       items.AsSpan(0, count).CopyTo(newArr.AsSpan())
-      Buffers.ArrayPool<struct ('Key * 'Cmd)>.Shared.Return(items)
+      Buffers.ArrayPool<struct ('Key * 'Cmd)>.Shared.Return items
       items <- newArr
 
   /// Clears all commands from the buffer without deallocating.
@@ -73,8 +66,7 @@ type RenderBuffer<'Key, 'Cmd>(?capacity: int, ?keyComparer: IComparer<'Key>) =
   /// Sorts the buffer by key. Call this before iterating if order matters.
   member _.Sort() =
     // Sort only the used portion via Span
-    let span = items.AsSpan(0, count)
-    span.Sort comparer
+    items |> Array.take count |> Array.sortInPlaceBy(fun struct (k, _) -> k)
 
   /// The number of commands currently in the buffer.
   member _.Count = count

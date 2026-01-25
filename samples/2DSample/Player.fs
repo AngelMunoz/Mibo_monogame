@@ -1,52 +1,80 @@
 module MiboSample.Player
 
-open System
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
-open Microsoft.Xna.Framework.Input
-open FSharp.UMX
 open Mibo.Elmish
 open Mibo.Elmish.Graphics2D
-open Mibo.Animation
 open MiboSample.Domain
+open MiboSample.Animation
 
 // ─────────────────────────────────────────────────────────────
-// Player Module: Input handling and ReadonlySystem for actions
+// Player Module: Platformer-specific player logic
 // ─────────────────────────────────────────────────────────────
 
+/// Update player-specific state (separate from physics)
+let update (dt: float32) (model: Model) : struct (Model * Cmd<'Msg>) =
+  // Update player animations based on current state
+  Animation.update(dt, model), Cmd.none
 
-/// ReadonlySystem: processes player actions and generates commands
-let processActions<'Msg>(onFired: Guid<EntityId> -> Vector2 -> 'Msg) =
-  fun (snapshot: ModelSnapshot) ->
-    let playerId = snapshot.PlayerId
 
-    let cmd =
-      match snapshot.Positions.TryGetValue(playerId) with
-      | (true, position) when snapshot.Actions.Held.Contains Fire ->
-        Cmd.ofEffect(
-          Effect<'Msg>(fun dispatch -> dispatch(onFired playerId position))
-        )
-      | _ -> Cmd.none
-
-    struct (snapshot, cmd)
+/// Get the player's current animation state
+let getAnimationState(model: Model) : AnimationState =
+  Animation.getAnimationState
+    model.IsGrounded
+    model.PlayerVelocity
+    model.Actions
 
 // ─────────────────────────────────────────────────────────────
-// View: Render player entity with animated sprite
+// Player View
 // ─────────────────────────────────────────────────────────────
 
-let view
-  (ctx: GameContext)
-  (position: Vector2)
-  (playerSprite: AnimatedSprite)
-  (color: Color)
-  (buffer: RenderBuffer<RenderCmd2D>)
-  =
-  // Set up camera following player
-  let vp = ctx.GraphicsDevice.Viewport
-  let cam = Camera2D.create position 1.0f (Point(vp.Width, vp.Height))
-  Draw2D.camera cam 0<RenderLayer> buffer
+/// Draw the player character
+let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
+  let animationState = getAnimationState model
 
-  // Draw player sprite at position with color tint
-  playerSprite
-  |> AnimatedSprite.withColor color
-  |> AnimatedSprite.draw position 10<RenderLayer> buffer
+  Animation.view
+    ctx
+    model.PlayerPosition
+    model.PlayerFacing
+    animationState
+    model.PlayerAssets
+    buffer
+
+// ─────────────────────────────────────────────────────────────
+// Player Utilities
+// ─────────────────────────────────────────────────────────────
+
+/// Get the player's bounding box for collision checks
+let getBounds(model: Model) : Rectangle =
+  let size = 64.0f
+
+  Rectangle(
+    int model.PlayerPosition.X,
+    int model.PlayerPosition.Y,
+    int size,
+    int size
+  )
+
+/// Get the player's center position (for spawning effects, etc.)
+let getCenter(model: Model) : Vector2 =
+  let size = 64.0f
+
+  Vector2(
+    model.PlayerPosition.X + size / 2.0f,
+    model.PlayerPosition.Y + size / 2.0f
+  )
+
+/// Get the player's "feet" position (for landing effects, dust particles, etc.)
+let getFeetPosition(model: Model) : Vector2 =
+  let size = 64.0f
+  Vector2(model.PlayerPosition.X + size / 2.0f, model.PlayerPosition.Y + size)
+
+/// Check if player is moving horizontally
+let isMovingHorizontally(model: Model) : bool =
+  abs model.PlayerVelocity.X > 10.0f
+
+/// Check if player is in the air (not grounded and not climbing)
+let isInAir(model: Model) : bool = not model.IsGrounded
+
+/// Get player speed magnitude
+let getSpeed(model: Model) : float32 = model.PlayerVelocity.Length()

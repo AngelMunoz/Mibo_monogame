@@ -18,6 +18,7 @@ module internal LineBatch =
 
   let private ensureCapacity (numLines: int) (state: State) =
     let requiredVerts = (state.LineCount + numLines) * 2
+
     if requiredVerts > state.Vertices.Length then
       let newSize = max (state.Vertices.Length * 2) requiredVerts
       let newVerts = ArrayPool.Shared.Rent(newSize)
@@ -35,7 +36,9 @@ module internal LineBatch =
   }
 
   let dispose(state: State) =
-    if not(isNull state.Vertices) then ArrayPool.Shared.Return state.Vertices; state.Vertices <- null
+    if not(isNull state.Vertices) then
+      ArrayPool.Shared.Return state.Vertices
+      state.Vertices <- null
 
   let inline begin'(state: State) = state.LineCount <- 0
 
@@ -46,7 +49,11 @@ module internal LineBatch =
     state.Vertices[idx + 1] <- VertexPositionColor(p2, color)
     state.LineCount <- state.LineCount + 1
 
-  let addLines (vertices: VertexPositionColor[]) (lineCount: int) (state: State) =
+  let addLines
+    (vertices: VertexPositionColor[])
+    (lineCount: int)
+    (state: State)
+    =
     ensureCapacity lineCount state
     let idx = state.LineCount * 2
     let vertsToCopy = lineCount * 2
@@ -56,8 +63,15 @@ module internal LineBatch =
   let flush (effect: Effect) (state: State) =
     if state.LineCount > 0 then
       let gd = state.GraphicsDevice
+
       for pass in effect.CurrentTechnique.Passes do
         pass.Apply()
-        gd.DrawUserPrimitives(PrimitiveType.LineList, state.Vertices, 0, state.LineCount)
+
+        gd.DrawUserPrimitives(
+          PrimitiveType.LineList,
+          state.Vertices,
+          0,
+          state.LineCount
+        )
 
   let inline end' (effect: Effect) (state: State) = flush effect state

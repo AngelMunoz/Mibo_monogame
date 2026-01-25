@@ -2,6 +2,7 @@ namespace Mibo.Elmish.Graphics3D
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open Mibo.Rendering
 
 /// <summary>Coarse rendering pass selection for 3D.</summary>
 /// <remarks>
@@ -23,23 +24,6 @@ type EffectContext = {
 
 /// <summary>Callback for configuring an effect before a draw operation.</summary>
 type EffectSetup = Effect -> EffectContext -> unit
-
-/// <summary>UV rectangle in normalized texture coordinates.</summary>
-[<Struct>]
-type UvRect = {
-  U0: float32
-  V0: float32
-  U1: float32
-  V1: float32
-}
-
-module UvRect =
-  let full: UvRect = {
-    U0 = 0.0f
-    V0 = 0.0f
-    U1 = 1.0f
-    V1 = 1.0f
-  }
 
 /// <summary>Billboard facing mode.</summary>
 [<Struct>]

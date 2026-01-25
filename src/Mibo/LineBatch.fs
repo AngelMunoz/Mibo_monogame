@@ -1,4 +1,4 @@
-namespace Mibo.Elmish.Graphics3D
+namespace Mibo.Rendering
 
 open System
 open System.Buffers
@@ -6,7 +6,7 @@ open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 
 /// <summary>
-/// A simple batcher for drawing line primitives in 3D.
+/// A simple batcher for drawing line primitives in 2D and 3D.
 /// </summary>
 /// <remarks>
 /// Lines use <see cref="T:Microsoft.Xna.Framework.Graphics.VertexPositionColor"/> and are drawn
@@ -59,6 +59,40 @@ module LineBatch =
     state.Vertices[idx + 1] <- VertexPositionColor(p2, color)
 
     state.LineCount <- state.LineCount + 1
+
+  /// <summary>Adds a 2D line segment to the batch.</summary>
+  let addLine2D (p1: Vector2) (p2: Vector2) (color: Color) (state: State) =
+    addLine (Vector3(p1, 0f)) (Vector3(p2, 0f)) color state
+
+  /// <summary>Adds a 2D rectangle outline to the batch.</summary>
+  let addRect2D (rect: Rectangle) (color: Color) (state: State) =
+    let p1 = Vector2(float32 rect.Left, float32 rect.Top)
+    let p2 = Vector2(float32 rect.Right, float32 rect.Top)
+    let p3 = Vector2(float32 rect.Right, float32 rect.Bottom)
+    let p4 = Vector2(float32 rect.Left, float32 rect.Bottom)
+
+    addLine2D p1 p2 color state
+    addLine2D p2 p3 color state
+    addLine2D p3 p4 color state
+    addLine2D p4 p1 color state
+
+  /// <summary>Adds a 2D circle outline to the batch.</summary>
+  let addCircle2D
+    (center: Vector2)
+    (radius: float32)
+    (segments: int)
+    (color: Color)
+    (state: State)
+    =
+    let segments = max 3 segments
+    let step = (MathF.PI * 2.0f) / float32 segments
+
+    for i = 0 to segments - 1 do
+      let a1 = float32 i * step
+      let a2 = float32(i + 1) * step
+      let p1 = center + Vector2(MathF.Cos a1, MathF.Sin a1) * radius
+      let p2 = center + Vector2(MathF.Cos a2, MathF.Sin a2) * radius
+      addLine2D p1 p2 color state
 
   /// <summary>Adds multiple line segments from a pre-built vertex array.</summary>
   /// <param name="vertices">Array of vertices (2 per line segment).</param>
