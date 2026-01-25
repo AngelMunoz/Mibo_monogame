@@ -48,7 +48,31 @@ type Particle2DState = {
 }
 
 // ============================================================================
-// 2D Lighting System (Phase 3)
+// Internal Lighting Types (Must be defined early for RendererBuffers)
+// ============================================================================
+
+module Lighting2DInternal =
+  [<Struct>]
+  type LightType2D =
+    | Point
+    | Directional
+
+  [<Struct>]
+  type ShadowCasterEntry = {
+    Type: LightType2D
+    Index: int
+    Priority: float32
+  }
+
+  type ShadowCasterComparer() =
+    interface IComparer<ShadowCasterEntry> with
+      member _.Compare(a, b) = b.Priority.CompareTo(a.Priority)
+
+  let shadowCasterComparer =
+    ShadowCasterComparer() :> IComparer<ShadowCasterEntry>
+
+// ============================================================================
+// 2D Lighting System Types
 // ============================================================================
 
 /// <summary>Per-light shadow settings.</summary>
@@ -139,6 +163,81 @@ module Shadows2DConfig =
     ShadowBias = 0.001f
   }
 
+// ============================================================================
+// Core State & Buffer Types
+// ============================================================================
+
+/// <summary>Persistent buffers to avoid per-frame allocations.</summary>
+type RendererBuffers = {
+  mutable PointPositions: Vector2[]
+  mutable PointColors: Vector4[]
+  mutable PointRadii: float32[]
+  mutable PointFalloffs: float32[]
+  mutable DirDirections: Vector2[]
+  mutable DirColors: Vector4[]
+  mutable DirShadowOrigins: Vector2[]
+  mutable PointShadowIndices: float32[]
+  mutable DirShadowIndices: float32[]
+  mutable ScreenSpaceLights: PointLight2D[]
+  mutable ShadowIndicesPoint: int[]
+  mutable ShadowIndicesDirectional: int[]
+  mutable TileCounts: int[]
+  mutable TileData: int[]
+  mutable TileDataTex: Texture2D
+  mutable TileDataBuffer: float32[]
+  mutable LastViewMatrix: Matrix
+  mutable LastProjectionMatrix: Matrix
+  mutable LightingPrepared: bool
+  PointLights: ResizeArray<PointLight2D>
+  DirectionalLights: ResizeArray<DirectionalLight2D>
+  Occluders: ResizeArray<Occluder2D>
+  ShadowCasters: ResizeArray<Lighting2DInternal.ShadowCasterEntry>
+}
+
+module RendererBuffers =
+  let createEmpty() : RendererBuffers = {
+    PointPositions = Array.empty
+    PointColors = Array.empty
+    PointRadii = Array.empty
+    PointFalloffs = Array.empty
+    DirDirections = Array.empty
+    DirColors = Array.empty
+    DirShadowOrigins = Array.empty
+    PointShadowIndices = Array.empty
+    DirShadowIndices = Array.empty
+    ScreenSpaceLights = Array.empty
+    ShadowIndicesPoint = Array.zeroCreate 16
+    ShadowIndicesDirectional = Array.zeroCreate 8
+    TileCounts = Array.empty
+    TileData = Array.empty
+    TileDataTex = null
+    TileDataBuffer = Array.empty
+    LastViewMatrix = Matrix.Identity
+    LastProjectionMatrix = Matrix.Identity
+    LightingPrepared = false
+    PointLights = ResizeArray()
+    DirectionalLights = ResizeArray()
+    Occluders = ResizeArray()
+    ShadowCasters = ResizeArray()
+  }
+
+  let ensureCapacity (needed: int) (current: 'T[] byref) =
+    if current.Length < needed then
+      current <- Array.zeroCreate(Math.Max(current.Length * 2, needed))
+
+  let dispose (b: RendererBuffers) =
+    if not(isNull b.TileDataTex) then
+      b.TileDataTex.Dispose()
+
+/// <summary>Encapsulates core rendering services for the 2D pipeline.</summary>
+[<Struct>]
+type RenderingServices = {
+  Device: GraphicsDevice
+  Pool: IRenderTargetPool
+  SpriteBatch: SpriteBatch
+  DefaultNormalMap: Texture2D
+}
+
 /// <summary>Batcher for rendering 2D shadow occluders as line segments.</summary>
 module OccluderBatch =
 
@@ -179,6 +278,9 @@ module OccluderBatch =
       ArrayPool.Shared.Return(state.Vertices)
       state.Vertices <- newVerts
 
+      if not(isNull state.VertexBuffer) then
+        state.VertexBuffer.Dispose()
+
       state.VertexBuffer <-
         new DynamicVertexBuffer(
           state.GraphicsDevice,
@@ -201,6 +303,10 @@ module OccluderBatch =
     if not(isNull state.Vertices) then
       ArrayPool.Shared.Return state.Vertices
       state.Vertices <- null
+
+    if not(isNull state.VertexBuffer) then
+      state.VertexBuffer.Dispose()
+      state.VertexBuffer <- null
 
   let begin'(state: State) = state.VertexCount <- 0
 
@@ -226,6 +332,35 @@ module OccluderBatch =
         0,
         state.VertexCount / 2
       )
+
+/// <summary>Groups persistent hardware dependencies and stateful batchers.</summary>
+[<Struct>]
+type RendererEnvironment = {
+  Services: RenderingServices
+  Game: Game
+  OccluderBatch: OccluderBatch.State voption
+  BillboardBatch: BillboardBatch.State voption
+  LineBatch: LineBatch.State voption
+  PrimitiveEffect: BasicEffect
+  ShadowMinBlend: BlendState
+  Buffers: RendererBuffers
+}
+
+/// <summary>Current active state of the renderer during a Draw pass.</summary>
+[<Struct>]
+type ActiveRenderState = {
+  mutable Effect: Effect
+  mutable Transform: Nullable<Matrix>
+  mutable Camera: Camera
+  mutable ViewMatrix: Matrix
+  mutable NormalMap: Texture2D
+  mutable SortMode: SpriteSortMode
+  mutable Blend: BlendState
+  mutable Sampler: SamplerState
+  mutable DepthStencil: DepthStencilState
+  mutable Rasterizer: RasterizerState
+  mutable IsBatching: bool
+}
 
 /// <summary>Main configuration for 2D lighting.</summary>
 [<Struct>]
@@ -262,6 +397,410 @@ module Lighting2DConfig =
         Shadows = ValueSome cfg
   }
 
+// ============================================================================
+// Internal Lighting Logic
+// ============================================================================
+
+module Lighting2DInternalLogic =
+  open Lighting2DInternal
+
+  [<Struct>]
+  type LightBinResults = { TilesX: int; TilesY: int }
+
+  [<Struct>]
+  type LightingGrid = {
+    TW: int
+    TH: int
+    TileSize: int
+    MaxLightsPerTile: int
+  }
+
+  [<Struct>]
+  type ShadowBuffers = {
+    IndicesPoint: int[]
+    IndicesDirectional: int[]
+    OriginsDirectional: Vector2[]
+    Casters: ResizeArray<ShadowCasterEntry>
+  }
+
+  [<Struct>]
+  type LightingBuffers = {
+    PointPositions: Vector2[]
+    PointColors: Vector4[]
+    PointRadii: float32[]
+    PointFalloffs: float32[]
+    PointShadowIndices: float32[]
+    DirDirections: Vector2[]
+    DirColors: Vector4[]
+    DirShadowIndices: float32[]
+    OriginsDirectional: Vector2[]
+    IndicesPoint: int[]
+    IndicesDirectional: int[]
+    ScreenSpaceLights: PointLight2D[]
+    TileCounts: int[]
+    TileData: int[]
+    TileDataBuffer: float32[]
+  }
+
+  [<Struct>]
+  type LightingEnvironment = {
+    Device: GraphicsDevice
+    Pool: IRenderTargetPool
+    Camera: Camera
+    ViewMatrix: Matrix
+  }
+
+  [<Struct>]
+  type LightingScene = {
+    PointLights: ResizeArray<PointLight2D>
+    DirectionalLights: ResizeArray<DirectionalLight2D>
+    Occluders: ResizeArray<Occluder2D>
+  }
+
+  let binPointLights
+    (grid: inref<LightingGrid>)
+    (lights: PointLight2D[])
+    (lightCount: int)
+    (bufs: inref<LightingBuffers>)
+    : LightBinResults =
+    Array.Clear(bufs.TileCounts, 0, grid.TW * grid.TH)
+    Array.Fill(bufs.TileData, -1, 0, grid.TW * grid.TH * grid.MaxLightsPerTile)
+
+    for i = 0 to lightCount - 1 do
+      let l = lights.[i]
+      let r = l.Radius
+      let minX = Math.Max(0, int(l.Position.X - r) / grid.TileSize)
+      let maxX = Math.Min(grid.TW - 1, int(l.Position.X + r) / grid.TileSize)
+      let minY = Math.Max(0, int(l.Position.Y - r) / grid.TileSize)
+      let maxY = Math.Min(grid.TH - 1, int(l.Position.Y + r) / grid.TileSize)
+
+      for ty = minY to maxY do
+        let rowOffset = ty * grid.TW
+
+        for tx = minX to maxX do
+          let tileIdx = rowOffset + tx
+          let count = bufs.TileCounts.[tileIdx]
+
+          if count < grid.MaxLightsPerTile then
+            bufs.TileData.[tileIdx * grid.MaxLightsPerTile + count] <- i
+            bufs.TileCounts.[tileIdx] <- count + 1
+
+    { TilesX = grid.TW; TilesY = grid.TH }
+
+  module Shadows =
+    let private gatherCasters
+      (scene: inref<LightingScene>)
+      (bufs: inref<ShadowBuffers>)
+      =
+      bufs.Casters.Clear()
+
+      for i = 0 to scene.PointLights.Count - 1 do
+        let l = scene.PointLights.[i]
+
+        if l.Shadow.IsSome then
+          let distSq = Vector2.DistanceSquared(l.Position, Vector2.Zero)
+
+          bufs.Casters.Add(
+            {
+              Type = Point
+              Index = i
+              Priority = l.Intensity / (Math.Max(1.0f, distSq))
+            }
+          )
+
+      for i = 0 to scene.DirectionalLights.Count - 1 do
+        if scene.DirectionalLights.[i].Shadow.IsSome then
+          bufs.Casters.Add(
+            {
+              Type = Directional
+              Index = i
+              Priority = scene.DirectionalLights.[i].Intensity
+            }
+          )
+
+      bufs.Casters.Sort(shadowCasterComparer)
+
+    let private setupAtlas
+      (env: inref<LightingEnvironment>)
+      (cfg: inref<Shadows2DConfig>)
+      (atlas: RenderTarget2D voption byref)
+      =
+      let aw, ah = cfg.Resolution, cfg.MaxShadowLights
+
+      let mutable needsNew = false
+
+      match atlas with
+      | ValueSome rt when rt.Width = aw && rt.Height = ah -> ()
+      | ValueSome rt ->
+        rt.Dispose()
+        needsNew <- true
+      | ValueNone -> needsNew <- true
+
+      if needsNew then
+        atlas <-
+          ValueSome(
+            env.Pool.Acquire {
+              Width = aw
+              Height = ah
+              Format = SurfaceFormat.Single
+              DepthFormat = DepthFormat.Depth24
+            }
+          )
+
+    let render
+      (env: inref<LightingEnvironment>)
+      (cfg: inref<Shadows2DConfig>)
+      (shader: Effect)
+      (blend: BlendState)
+      (ocBatch: OccluderBatch.State)
+      (scene: inref<LightingScene>)
+      (bufs: inref<ShadowBuffers>)
+      (atlas: RenderTarget2D voption byref)
+      =
+      gatherCasters &scene &bufs
+      let count = Math.Min(bufs.Casters.Count, cfg.MaxShadowLights)
+      Array.Fill(bufs.IndicesPoint, -1)
+      Array.Fill(bufs.IndicesDirectional, -1)
+
+      let origin =
+        let inv = Matrix.Invert(env.Camera.View) in
+        let vp = env.Device.Viewport in
+
+        let cw =
+          Vector3.Transform(
+            Vector3(float32 vp.Width * 0.5f, float32 vp.Height * 0.5f, 0f),
+            inv
+          ) in
+
+        Vector2(float32(floor cw.X), float32(floor cw.Y))
+
+      for i = 0 to count - 1 do
+        let entry = bufs.Casters.[i]
+
+        match entry.Type with
+        | Point -> bufs.IndicesPoint.[entry.Index] <- i
+        | Directional ->
+          bufs.IndicesDirectional.[entry.Index] <- i
+          bufs.OriginsDirectional.[entry.Index] <- origin
+
+      setupAtlas &env &cfg &atlas
+      let sRt = atlas.Value in
+      env.Device.SetRenderTarget(sRt)
+      env.Device.Clear(Color.White)
+      env.Device.DepthStencilState <- DepthStencilState.None
+      env.Device.BlendState <- blend
+      let vp = env.Device.Viewport
+      let aw, ah = cfg.Resolution, cfg.MaxShadowLights
+
+      for i = 0 to count - 1 do
+        let entry = bufs.Casters.[i]
+
+        let r =
+          match entry.Type with
+          | Point -> bufs.IndicesPoint.[entry.Index]
+          | Directional -> bufs.IndicesDirectional.[entry.Index]
+
+        if r >= 0 then
+          env.Device.Viewport <- Viewport(0, r, aw, 1, 0f, 1f)
+          shader.SafeSetParam("AtlasWidth", float32 aw)
+          shader.SafeSetParam("AtlasHeight", float32 ah)
+
+          match entry.Type with
+          | Point ->
+            let l = scene.PointLights.[entry.Index] in
+            shader.SafeSetParam("LightPosition", l.Position)
+            shader.SafeSetParam("LightRadius", l.Radius)
+            shader.CurrentTechnique.Passes.[0].Apply()
+            OccluderBatch.begin' ocBatch
+
+            for j = 0 to scene.Occluders.Count - 1 do
+              let o = scene.Occluders.[j] in
+
+              for s = 0 to 7 do
+                let t1, t2 = float32 s / 8.0f, float32(s + 1) / 8.0f in
+
+                OccluderBatch.addLine
+                  (Vector2.Lerp(o.P1, o.P2, t1))
+                  (Vector2.Lerp(o.P1, o.P2, t2))
+                  o.Height
+                  ocBatch
+
+            OccluderBatch.end' ocBatch
+          | Directional ->
+            let l = scene.DirectionalLights.[entry.Index] in
+            shader.SafeSetParam("LightDirection", l.Direction)
+            shader.SafeSetParam("LightRadius", -1.0f)
+
+            shader.SafeSetParam(
+              "ShadowOrigin",
+              bufs.OriginsDirectional.[entry.Index]
+            )
+
+            shader.CurrentTechnique.Passes.[0].Apply()
+            OccluderBatch.begin' ocBatch
+
+            for j = 0 to scene.Occluders.Count - 1 do
+              OccluderBatch.addOccluder scene.Occluders.[j] ocBatch
+
+            OccluderBatch.end' ocBatch
+
+      env.Device.Viewport <- vp
+      env.Device.SetRenderTarget null
+
+  module Pipeline =
+    let prepare
+      (env: inref<LightingEnvironment>)
+      (grid: inref<LightingGrid>)
+      (scene: inref<LightingScene>)
+      (bufs: inref<LightingBuffers>)
+      (tileTex: Texture2D byref)
+      (tileBuf: float32[] byref)
+      =
+      let pCount = scene.PointLights.Count
+
+      for i = 0 to pCount - 1 do
+        bufs.ScreenSpaceLights.[i] <- {
+          scene.PointLights.[i] with
+              Position =
+                Vector2.Transform(
+                  scene.PointLights.[i].Position,
+                  env.ViewMatrix
+                )
+        }
+
+      let bin = binPointLights &grid bufs.ScreenSpaceLights pCount &bufs
+
+      for i = 0 to pCount - 1 do
+        let l = scene.PointLights.[i] in
+        bufs.PointPositions.[i] <- l.Position
+        bufs.PointColors.[i] <- l.Color.ToVector4() * l.Intensity
+        bufs.PointRadii.[i] <- l.Radius
+        bufs.PointFalloffs.[i] <- l.Falloff
+
+      let req = bin.TilesX * bin.TilesY * grid.MaxLightsPerTile
+
+      if isNull tileTex || tileTex.Width <> req then
+        (if not(isNull tileTex) then
+           tileTex.Dispose())
+
+        tileTex <-
+          new Texture2D(env.Device, req, 1, false, SurfaceFormat.Single)
+
+        RendererBuffers.ensureCapacity req &tileBuf
+
+      for j = 0 to req - 1 do
+        tileBuf.[j] <- float32 bufs.TileData.[j]
+
+      tileTex.SetData(tileBuf, 0, req)
+      bin
+
+    let apply
+      (env: inref<LightingEnvironment>)
+      (grid: inref<LightingGrid>)
+      (cfg: inref<Lighting2DConfig>)
+      (state: inref<LightingState2D>)
+      (scene: inref<LightingScene>)
+      (fx: Effect)
+      (bufs: inref<LightingBuffers>)
+      (tileTex: Texture2D)
+      (bin: LightBinResults)
+      (shadowAtlas: RenderTarget2D voption)
+      =
+      if state.Ambient.IsSome then
+        fx.SafeSetParam("AmbientColor", state.Ambient.Value.Color)
+
+      let pCount = scene.PointLights.Count
+      fx.SafeSetParam("PointLightPositions", bufs.PointPositions)
+      fx.SafeSetParam("PointLightColors", bufs.PointColors)
+      fx.SafeSetParam("PointLightRadii", bufs.PointRadii)
+      fx.SafeSetParam("PointLightFalloffs", bufs.PointFalloffs)
+      fx.SafeSetParam("PointLightCount", pCount)
+
+      let dCount = scene.DirectionalLights.Count in
+      fx.SafeSetParam("DirectionalLightCount", dCount)
+
+      if dCount > 0 then
+        for i = 0 to dCount - 1 do
+          let l = scene.DirectionalLights.[i] in
+
+          bufs.DirDirections.[i] <-
+            (if l.Direction.LengthSquared() > 0.0001f then
+               Vector2.Normalize(l.Direction)
+             else
+               l.Direction)
+
+          bufs.DirColors.[i] <- l.Color.ToVector4() * l.Intensity
+
+        fx.SafeSetParam("DirectionalLightDirections", bufs.DirDirections)
+        fx.SafeSetParam("DirectionalLightColors", bufs.DirColors)
+
+        fx.SafeSetParam(
+          "DirectionalLightShadowOrigins",
+          bufs.OriginsDirectional
+        )
+
+      fx.SafeSetParam("LightIndexBuffer", tileTex :> Texture)
+      fx.SafeSetParam("TileSize", float32 grid.TileSize)
+      fx.SafeSetParam("TilesX", float32 bin.TilesX)
+      fx.SafeSetParam("MaxLightsPerTile", grid.MaxLightsPerTile)
+      let vp = env.Device.Viewport in
+
+      fx.SafeSetParam(
+        "ViewportSize",
+        Vector2(float32 vp.Width, float32 vp.Height)
+      )
+
+      fx.SafeSetParam(
+        "ViewportSizeInv",
+        Vector2(1.0f / float32 vp.Width, 1.0f / float32 vp.Height)
+      )
+
+      fx.SafeSetParam("ViewMatrix", env.ViewMatrix)
+      fx.SafeSetParam("ProjectionMatrix", env.Camera.Projection)
+      fx.SafeSetParam("InverseViewMatrix", Matrix.Invert(env.ViewMatrix))
+
+      fx.SafeSetParam(
+        "InverseProjectionMatrix",
+        Matrix.Invert(env.Camera.Projection)
+      )
+
+      fx.SafeSetParam(
+        "ViewProjectionMatrix",
+        env.ViewMatrix * env.Camera.Projection
+      )
+
+      fx.SafeSetParam("LightIndexBufferWidth", float32 tileTex.Width)
+      fx.SafeSetParam("LightIndexBufferHeight", float32 tileTex.Height)
+
+      match cfg.Shadows, shadowAtlas with
+      | ValueSome sCfg, ValueSome atl ->
+        fx.SafeSetParam("ShadowAtlas", atl :> Texture)
+
+        fx.SafeSetParam(
+          "ShadowAtlasSize",
+          Vector2(float32 atl.Width, float32 atl.Height)
+        )
+
+        fx.SafeSetParam("ShadowBias", (sCfg.ShadowBias: float32))
+
+        let pc, dc =
+          Math.Min(bufs.IndicesPoint.Length, pCount),
+          Math.Min(bufs.IndicesDirectional.Length, dCount)
+
+        for i = 0 to pc - 1 do
+          bufs.PointShadowIndices.[i] <- float32 bufs.IndicesPoint.[i]
+
+        for i = 0 to dc - 1 do
+          bufs.DirShadowIndices.[i] <- float32 bufs.IndicesDirectional.[i]
+
+        fx.SafeSetParam("PointLightShadowIndices", bufs.PointShadowIndices)
+        fx.SafeSetParam("DirectionalLightShadowIndices", bufs.DirShadowIndices)
+      | _ -> ()
+
+// ============================================================================
+// Render Command Types
+// ============================================================================
+
 /// <summary>Unified state for a text draw call.</summary>
 [<Struct>]
 type TextState = {
@@ -276,6 +815,20 @@ type TextState = {
   Effects: SpriteEffects
   Layer: int<RenderLayer>
 }
+
+module Text =
+  let empty: TextState = {
+    Font = null
+    Text = ""
+    DestX = 0
+    DestY = 0
+    Color = Color.White
+    Scale = 1f
+    Rotation = 0f
+    Origin = Vector2.Zero
+    Effects = SpriteEffects.None
+    Layer = 0<RenderLayer>
+  }
 
 /// <summary>Legacy struct for text draw command parameters.</summary>
 [<Struct>]
@@ -292,10 +845,6 @@ type TextDrawCmd = {
 }
 
 /// <summary>Shader override types for 2D rendering stages.</summary>
-/// <remarks>
-/// Users provide custom effects via <see cref="T:Mibo.Elmish.Graphics2D.Batch2DConfig"/>.ShaderOverrides,
-/// and Mibo selects which effect to use for each rendering stage.
-/// </remarks>
 [<Struct>]
 type ShaderBase2D =
   | LitSprite
@@ -340,90 +889,38 @@ type DrawCircle2DCmd = {
 }
 
 /// <summary>A 2D render command.</summary>
-/// <remarks>These commands are queued to a <see cref="T:Mibo.Elmish.RenderBuffer`1"/> and executed by <see cref="T:Mibo.Elmish.Graphics2D.Batch2DRenderer`1"/>.</remarks>
 [<Struct>]
 type RenderCmd2D =
-  /// Set viewport for multi-camera rendering (split-screen, minimaps, etc).
   | SetViewport of viewport: Viewport
-
-  /// Clear the render target. Use between cameras in multi-camera setups.
   | ClearTarget of clearColor: Color voption * clearDepth: bool
-
-  /// Changes the camera transform for subsequent draws.
   | SetCamera of camera: Camera
-
-  /// Set the SpriteBatch effect for subsequent draws.
-  ///
-  /// ValueNone means "use the renderer's configured default".
   | SetEffect of effect: Effect voption
-
-  /// Set SpriteBatch blend state for subsequent draws.
   | SetBlendState of blendState: BlendState
-
-  /// Set SpriteBatch sampler state for subsequent draws.
   | SetSamplerState of samplerState: SamplerState
-
-  /// Set SpriteBatch depth-stencil state for subsequent draws.
   | SetDepthStencilState of depthStencilState: DepthStencilState
-
-  /// Set SpriteBatch rasterizer state for subsequent draws.
   | SetRasterizerState of rasterizerState: RasterizerState
-
-  /// Escape hatch: run an arbitrary draw function.
-  ///
-  /// The function is invoked outside of SpriteBatch (SpriteBatch is ended before calling it).
   | DrawCustom of draw: (GameContext -> unit)
-
-  /// Draws a textured quad via SpriteState.
   | DrawSprite of sprite: SpriteState
-
-  /// Draws text using a SpriteFont.
   | DrawText of text: TextState
-
-  /// Draws text (legacy).
-  | DrawTextLegacy of textCmd: TextDrawCmd
-
-  // --- Phase 3 Lighting Commands ---
-
-  /// Set the overall lighting state (tiered: overrides ambient, keeps accumulated lights).
   | SetLighting of lightingState: LightingState2D
-
-  /// Add to lighting state (tiered: ambient only, keeps accumulated lights).
   | AddLighting of ambient: AmbientLight2D
-
-  /// Add a point light to the current frame.
   | AddPointLight of pointLightVal: PointLight2D
-
-  /// Add a directional light to the current frame.
   | AddDirectionalLight of directionalLightVal: DirectionalLight2D
-
-  /// Add an occluder for shadows.
   | AddOccluder of occluderVal: Occluder2D
-
-  /// Draws a batch of 2D particles.
   | DrawParticles of particlesCmd: DrawParticlesCmd
-
-  /// Draws a 2D line.
   | DrawLine2D of lineCmd: DrawLine2DCmd
-
-  /// Draws a 2D rectangle outline.
   | DrawRect2D of rectCmd: DrawRect2DCmd
-
-  /// Draws a 2D circle outline.
   | DrawCircle2D of circleCmd: DrawCircle2DCmd
 
 // ============================================================================
-// Post-Processing Configuration (Phase 2)
+// Post-Processing Configuration
 // ============================================================================
 
 /// <summary>Configuration for vignette effect.</summary>
 [<Struct>]
 type VignetteConfig = {
-  /// The shader effect to use.
   Effect: Effect
-  /// Radius of the clear center area. Typical: 0.5f - 0.8f
   Radius: float32
-  /// Softness of the edge falloff. Typical: 0.2f - 0.5f
   Softness: float32
 }
 
@@ -437,17 +934,11 @@ module VignetteConfig =
 /// <summary>Configuration for bloom effect.</summary>
 [<Struct>]
 type BloomConfig2D = {
-  /// Effect that extracts bright areas.
   ExtractEffect: Effect
-  /// Effect that performs the blur pass.
   BlurEffect: Effect
-  /// Effect that composites bloom with scene.
   CompositeEffect: Effect
-  /// Minimum brightness for bloom contribution. Typical: 0.7f - 1.2f
   Threshold: float32
-  /// Bloom brightness multiplier. Typical: 0.5f - 2.0f
   Intensity: float32
-  /// How far bloom spreads. Typical: 0.5f - 1.0f
   Scatter: float32
 }
 
@@ -469,13 +960,9 @@ module BloomConfig2D =
 /// <summary>Configuration for color grading via LUT.</summary>
 [<Struct>]
 type ColorGradeConfig = {
-  /// The shader effect to use.
   Effect: Effect
-  /// The 3D LUT texture.
   LutTexture: Texture3D
-  /// Size of the LUT (typically 32).
   LutSize: int
-  /// Blend between original (0) and graded (1).
   Blend: float32
 }
 
@@ -500,7 +987,6 @@ type PostProcess2DConfig = {
   Vignette: VignetteConfig voption
   Bloom: BloomConfig2D voption
   ColorGrade: ColorGradeConfig voption
-  /// Custom passes executed after built-in effects.
   CustomPasses: CustomPostProcessPass[] voption
 }
 
@@ -543,46 +1029,29 @@ module PostProcess2D =
   let withColorGrade = PostProcess2DConfig.withColorGrade
   let withCustomPasses = PostProcess2DConfig.withCustomPasses
 
+// ============================================================================
+// Batcher Configuration
+// ============================================================================
+
 /// <summary>Configuration for <see cref="T:Mibo.Elmish.Graphics2D.Batch2DRenderer`1"/>.</summary>
-/// <remarks>These settings configure the *rendering pass* (Clear + SpriteBatch.Begin parameters), not individual sprites (those are controlled by <see cref="T:Mibo.Elmish.Graphics2D.RenderCmd2D"/> / <see cref="T:Mibo.Elmish.Graphics2D.Draw2DBuilder"/>).</remarks>
 [<Struct>]
 type Batch2DConfig = {
-  /// Optional color to clear the screen with before drawing.
   ClearColor: Color voption
-  /// Whether to sort the command buffer by `RenderLayer` before issuing draws.
-  /// Keep this enabled if you rely on `RenderLayer` for deterministic ordering.
   SortCommands: bool
-  /// SpriteBatch sort mode (Deferred, Immediate, etc).
   SortMode: SpriteSortMode
-  /// Blend state for sprite drawing.
   BlendState: BlendState
-  /// Sampler state for texture filtering.
   SamplerState: SamplerState
-  /// Depth stencil state.
   DepthStencilState: DepthStencilState
-  /// Rasterizer state.
   RasterizerState: RasterizerState
-  /// Optional shader effect for all sprites.
   Effect: Effect
-  /// Global transform matrix for the batch.
-  /// Note: If using `SetCamera` commands, this initial matrix might be overridden during the pass.
   TransformMatrix: Matrix voption
-  /// Post-processing configuration.
   PostProcess: PostProcess2DConfig voption
-  /// Lighting configuration.
   Lighting: Lighting2DConfig voption
-  /// Shader overrides for specific rendering stages.
-  /// Users provide their own effects; Mibo selects which to use for each stage.
   ShaderOverrides: Dictionary<ShaderBase2D, Effect>
-  /// Blend state for the final blit to screen (useful for layering/overlays).
-  /// Defaults to Opaque to match standard behavior.
   FinalBlendState: BlendState
 }
 
 module Batch2DConfig =
-
-  /// Sensible defaults for a typical 2D game.
-  /// Matches the current historical behavior of this renderer (clears CornflowerBlue).
   let defaults: Batch2DConfig = {
     ClearColor = ValueSome Color.CornflowerBlue
     SortCommands = true
@@ -673,346 +1142,479 @@ module Batch2DConfig =
         FinalBlendState = state
   }
 
-
-module Lighting2DInternal =
-  [<Struct>]
-  type LightType2D = Point | Directional
-
-  [<Struct>]
-  type ShadowCasterEntry = { Type: LightType2D; Index: int; Priority: float32 }
-
-  [<Struct>]
-  type LightBinResults = { TilesX: int; TilesY: int }
-
-  [<Struct>]
-  type LightingGrid = { TW: int; TH: int; TileSize: int; MaxLightsPerTile: int }
-
-  [<Struct>]
-  type ShadowBuffers = {
-    IndicesPoint: int[]
-    IndicesDirectional: int[]
-    OriginsDirectional: Vector2[]
-    Casters: ResizeArray<ShadowCasterEntry>
-  }
-
-  [<Struct>]
-  type LightingBuffers = {
-    PointPositions: Vector2[]; PointColors: Vector4[]; PointRadii: float32[]; PointFalloffs: float32[]; PointShadowIndices: float32[]
-    DirDirections: Vector2[]; DirColors: Vector4[]; DirShadowIndices: float32[]; OriginsDirectional: Vector2[]
-    IndicesPoint: int[]; IndicesDirectional: int[]; ScreenSpaceLights: PointLight2D[]; TileCounts: int[]; TileData: int[]; TileDataBuffer: float32[]
-  }
-
-  [<Struct>]
-  type LightingEnvironment = { Device: GraphicsDevice; Pool: IRenderTargetPool; Camera: Camera; ViewMatrix: Matrix }
-
-  [<Struct>]
-  type LightingScene = { PointLights: ResizeArray<PointLight2D>; DirectionalLights: ResizeArray<DirectionalLight2D>; Occluders: ResizeArray<Occluder2D> }
-
-  let binPointLights (grid: LightingGrid) (lights: PointLight2D[]) (lightCount: int) (bufs: LightingBuffers) : LightBinResults =
-    Array.Clear(bufs.TileCounts, 0, grid.TW * grid.TH)
-    Array.Fill(bufs.TileData, -1, 0, grid.TW * grid.TH * grid.MaxLightsPerTile)
-    for i = 0 to lightCount - 1 do
-      let l = lights.[i]
-      let r = l.Radius
-      let minX = Math.Max(0, int(l.Position.X - r) / grid.TileSize)
-      let maxX = Math.Min(grid.TW - 1, int(l.Position.X + r) / grid.TileSize)
-      let minY = Math.Max(0, int(l.Position.Y - r) / grid.TileSize)
-      let maxY = Math.Min(grid.TH - 1, int(l.Position.Y + r) / grid.TileSize)
-      for ty = minY to maxY do
-        let rowOffset = ty * grid.TW
-        for tx = minX to maxX do
-          let tileIdx = rowOffset + tx
-          let count = bufs.TileCounts.[tileIdx]
-          if count < grid.MaxLightsPerTile then
-            bufs.TileData.[tileIdx * grid.MaxLightsPerTile + count] <- i
-            bufs.TileCounts.[tileIdx] <- count + 1
-    { TilesX = grid.TW; TilesY = grid.TH }
-
-  module Shadows =
-    let render (env: LightingEnvironment) (cfg: Shadows2DConfig) (shader: Effect) (blend: BlendState) (ocBatch: OccluderBatch.State) (scene: LightingScene) (bufs: ShadowBuffers) (atlas: RenderTarget2D voption byref) =
-      bufs.Casters.Clear()
-      for i = 0 to scene.PointLights.Count - 1 do
-        let l = scene.PointLights.[i]
-        if l.Shadow.IsSome then
-          let distSq = Vector2.DistanceSquared(l.Position, Vector2.Zero)
-          bufs.Casters.Add({ Type = Point; Index = i; Priority = l.Intensity / (Math.Max(1.0f, distSq)) })
-      for i = 0 to scene.DirectionalLights.Count - 1 do
-        if scene.DirectionalLights.[i].Shadow.IsSome then
-          bufs.Casters.Add({ Type = Directional; Index = i; Priority = scene.DirectionalLights.[i].Intensity })
-      
-      bufs.Casters.Sort(Comparison(fun (a: ShadowCasterEntry) b -> b.Priority.CompareTo(a.Priority)))
-      let count = Math.Min(bufs.Casters.Count, cfg.MaxShadowLights)
-      Array.Fill(bufs.IndicesPoint, -1); Array.Fill(bufs.IndicesDirectional, -1)
-      let origin = 
-        let inv = Matrix.Invert(env.Camera.View) in let vp = env.Device.Viewport in let cw = Vector3.Transform(Vector3(float32 vp.Width * 0.5f, float32 vp.Height * 0.5f, 0f), inv) in Vector2(float32(floor cw.X), float32(floor cw.Y))
-      for i = 0 to count - 1 do
-        let entry = bufs.Casters.[i]
-        match entry.Type with | Point -> bufs.IndicesPoint.[entry.Index] <- i | Directional -> bufs.IndicesDirectional.[entry.Index] <- i; bufs.OriginsDirectional.[entry.Index] <- origin
-      let aw, ah = cfg.Resolution, cfg.MaxShadowLights
-      match atlas with | ValueSome rt when rt.Width = aw && rt.Height = ah -> () | ValueSome rt -> rt.Dispose(); atlas <- ValueSome(env.Pool.Acquire { Width = aw; Height = ah; Format = SurfaceFormat.Single; DepthFormat = DepthFormat.Depth24 }) | ValueNone -> atlas <- ValueSome(env.Pool.Acquire { Width = aw; Height = ah; Format = SurfaceFormat.Single; DepthFormat = DepthFormat.Depth24 })
-      let sRt = atlas.Value in env.Device.SetRenderTarget(sRt); env.Device.Clear(Color.White); env.Device.DepthStencilState <- DepthStencilState.None; env.Device.BlendState <- blend
-      let vp = env.Device.Viewport
-      for i = 0 to count - 1 do
-        let entry = bufs.Casters.[i]
-        let r = match entry.Type with | Point -> bufs.IndicesPoint.[entry.Index] | Directional -> bufs.IndicesDirectional.[entry.Index]
-        if r >= 0 then
-          env.Device.Viewport <- Viewport(0, r, aw, 1, 0f, 1f); shader.SafeSetParam("AtlasWidth", float32 aw); shader.SafeSetParam("AtlasHeight", float32 ah)
-          match entry.Type with
-          | Point ->
-            let l = scene.PointLights.[entry.Index] in shader.SafeSetParam("LightPosition", l.Position); shader.SafeSetParam("LightRadius", l.Radius); shader.CurrentTechnique.Passes.[0].Apply()
-            OccluderBatch.begin' ocBatch; for j = 0 to scene.Occluders.Count - 1 do let o = scene.Occluders.[j] in for s = 0 to 7 do let t1, t2 = float32 s / 8.0f, float32(s + 1) / 8.0f in OccluderBatch.addLine (Vector2.Lerp(o.P1, o.P2, t1)) (Vector2.Lerp(o.P1, o.P2, t2)) o.Height ocBatch
-            OccluderBatch.end' ocBatch
-          | Directional ->
-            let l = scene.DirectionalLights.[entry.Index] in shader.SafeSetParam("LightDirection", l.Direction); shader.SafeSetParam("LightRadius", -1.0f); shader.SafeSetParam("ShadowOrigin", bufs.OriginsDirectional.[entry.Index]); shader.CurrentTechnique.Passes.[0].Apply()
-            OccluderBatch.begin' ocBatch; for j = 0 to scene.Occluders.Count - 1 do OccluderBatch.addOccluder scene.Occluders.[j] ocBatch
-            OccluderBatch.end' ocBatch
-      env.Device.Viewport <- vp; env.Device.SetRenderTarget null
-
-  module Pipeline =
-    let apply (env: LightingEnvironment) (grid: LightingGrid) (cfg: Lighting2DConfig) (state: LightingState2D) (scene: LightingScene) (fx: Effect) (bufs: LightingBuffers) (tileTex: Texture2D byref) (tileBuf: float32[] byref) (shadowAtlas: RenderTarget2D voption) =
-      state.Ambient |> ValueOption.iter (fun a -> fx.SafeSetParam("AmbientColor", a.Color))
-      let pCount = scene.PointLights.Count
-      for i = 0 to pCount - 1 do bufs.ScreenSpaceLights.[i] <- { scene.PointLights.[i] with Position = Vector2.Transform(scene.PointLights.[i].Position, env.ViewMatrix) }
-      let bin = binPointLights grid bufs.ScreenSpaceLights pCount bufs
-      for i = 0 to pCount - 1 do let l = scene.PointLights.[i] in bufs.PointPositions.[i] <- l.Position; bufs.PointColors.[i] <- l.Color.ToVector4() * l.Intensity; bufs.PointRadii.[i] <- l.Radius; bufs.PointFalloffs.[i] <- l.Falloff
-      fx.SafeSetParam("PointLightPositions", bufs.PointPositions); fx.SafeSetParam("PointLightColors", bufs.PointColors); fx.SafeSetParam("PointLightRadii", bufs.PointRadii); fx.SafeSetParam("PointLightFalloffs", bufs.PointFalloffs); fx.SafeSetParam("PointLightCount", pCount)
-      let dCount = scene.DirectionalLights.Count in fx.SafeSetParam("DirectionalLightCount", dCount)
-      if dCount > 0 then
-        for i = 0 to dCount - 1 do let l = scene.DirectionalLights.[i] in bufs.DirDirections.[i] <- (if l.Direction.LengthSquared() > 0.0001f then Vector2.Normalize(l.Direction) else l.Direction); bufs.DirColors.[i] <- l.Color.ToVector4() * l.Intensity
-        fx.SafeSetParam("DirectionalLightDirections", bufs.DirDirections); fx.SafeSetParam("DirectionalLightColors", bufs.DirColors); fx.SafeSetParam("DirectionalLightShadowOrigins", bufs.OriginsDirectional)
-      let req = bin.TilesX * bin.TilesY * grid.MaxLightsPerTile
-      if isNull tileTex || tileTex.Width <> req then (if not(isNull tileTex) then tileTex.Dispose()); tileTex <- new Texture2D(env.Device, req, 1, false, SurfaceFormat.Single); tileBuf <- Array.zeroCreate req
-      for j = 0 to req - 1 do tileBuf.[j] <- float32 bufs.TileData.[j]
-      tileTex.SetData(tileBuf); fx.SafeSetParam("LightIndexBuffer", tileTex :> Texture); fx.SafeSetParam("TileSize", float32 grid.TileSize); fx.SafeSetParam("TilesX", float32 bin.TilesX); fx.SafeSetParam("MaxLightsPerTile", grid.MaxLightsPerTile)
-      let vp = env.Device.Viewport in fx.SafeSetParam("ViewportSize", Vector2(float32 vp.Width, float32 vp.Height)); fx.SafeSetParam("ViewportSizeInv", Vector2(1.0f / float32 vp.Width, 1.0f / float32 vp.Height)); fx.SafeSetParam("ViewMatrix", env.ViewMatrix); fx.SafeSetParam("ProjectionMatrix", env.Camera.Projection); fx.SafeSetParam("InverseViewMatrix", Matrix.Invert(env.ViewMatrix)); fx.SafeSetParam("InverseProjectionMatrix", Matrix.Invert(env.Camera.Projection)); fx.SafeSetParam("ViewProjectionMatrix", env.ViewMatrix * env.Camera.Projection); fx.SafeSetParam("LightIndexBufferWidth", float32 tileTex.Width); fx.SafeSetParam("LightIndexBufferHeight", float32 tileTex.Height)
-      match cfg.Shadows, shadowAtlas with
-      | ValueSome sCfg, ValueSome atl ->
-          fx.SafeSetParam("ShadowAtlas", atl :> Texture); fx.SafeSetParam("ShadowAtlasSize", Vector2(float32 atl.Width, float32 atl.Height)); fx.SafeSetParam("ShadowBias", (sCfg.ShadowBias: float32))
-          let pc, dc = Math.Min(bufs.IndicesPoint.Length, pCount), Math.Min(bufs.IndicesDirectional.Length, dCount)
-          for i = 0 to pc - 1 do bufs.PointShadowIndices.[i] <- float32 bufs.IndicesPoint.[i]
-          for i = 0 to dc - 1 do bufs.DirShadowIndices.[i] <- float32 bufs.IndicesDirectional.[i]
-          fx.SafeSetParam("PointLightShadowIndices", bufs.PointShadowIndices); fx.SafeSetParam("DirectionalLightShadowIndices", bufs.DirShadowIndices)
-      | _ -> ()
-
-/// <summary>Persistent buffers to avoid per-frame allocations.</summary>
-type RendererBuffers = {
-  mutable PointPositions: Vector2[]
-  mutable PointColors: Vector4[]
-  mutable PointRadii: float32[]
-  mutable PointFalloffs: float32[]
-  mutable DirDirections: Vector2[]
-  mutable DirColors: Vector4[]
-  mutable DirShadowOrigins: Vector2[]
-  mutable PointShadowIndices: float32[]
-  mutable DirShadowIndices: float32[]
-  mutable ScreenSpaceLights: PointLight2D[]
-  mutable ShadowIndicesPoint: int[]
-  mutable ShadowIndicesDirectional: int[]
-  mutable TileCounts: int[]
-  mutable TileData: int[]
-  mutable TileDataTex: Texture2D
-  mutable TileDataBuffer: float32[]
-  PointLights: ResizeArray<PointLight2D>
-  DirectionalLights: ResizeArray<DirectionalLight2D>
-  Occluders: ResizeArray<Occluder2D>
-  ShadowCasters: ResizeArray<Lighting2DInternal.ShadowCasterEntry>
-}
-
-module RendererBuffers =
-  let createEmpty() : RendererBuffers = {
-    PointPositions = Array.empty; PointColors = Array.empty; PointRadii = Array.empty; PointFalloffs = Array.empty
-    DirDirections = Array.empty; DirColors = Array.empty; DirShadowOrigins = Array.empty; PointShadowIndices = Array.empty
-    DirShadowIndices = Array.empty; ScreenSpaceLights = Array.empty; ShadowIndicesPoint = Array.zeroCreate 16
-    ShadowIndicesDirectional = Array.zeroCreate 8; TileCounts = Array.empty; TileData = Array.empty
-    TileDataTex = null; TileDataBuffer = Array.empty
-    PointLights = ResizeArray(); DirectionalLights = ResizeArray(); Occluders = ResizeArray()
-    ShadowCasters = ResizeArray()
-  }
-
-  let ensureCapacity (needed: int) (current: 'T[] byref) =
-    if current.Length < needed then
-      current <- Array.zeroCreate(Math.Max(current.Length * 2, needed))
-
-/// <summary>Groups persistent hardware dependencies and stateful batchers.</summary>
-[<Struct>]
-type RendererEnvironment = {
-  Device: GraphicsDevice
-  Pool: IRenderTargetPool
-  SpriteBatch: SpriteBatch
-  Game: Game
-  OccluderBatch: OccluderBatch.State voption
-  BillboardBatch: BillboardBatch.State voption
-  LineBatch: LineBatch.State voption
-  PrimitiveEffect: BasicEffect
-  DefaultNormalMap: Texture2D
-  ShadowMinBlend: BlendState
-  Buffers: RendererBuffers
-}
-
-/// <summary>Groups persistent collections used during a single frame.</summary>
-[<Struct>]
-type FrameData = {
-  PointLights: ResizeArray<PointLight2D>
-  DirectionalLights: ResizeArray<DirectionalLight2D>
-  Occluders: ResizeArray<Occluder2D>
-  ShadowCasters: ResizeArray<Lighting2DInternal.ShadowCasterEntry>
-}
-
-/// <summary>Current active state of the renderer during a Draw pass.</summary>
-[<Struct>]
-type ActiveRenderState = {
-  mutable Effect: Effect
-  mutable Transform: Nullable<Matrix>
-  mutable Camera: Camera
-  mutable ViewMatrix: Matrix
-  mutable NormalMap: Texture2D
-  mutable SortMode: SpriteSortMode
-  mutable Blend: BlendState
-  mutable Sampler: SamplerState
-  mutable DepthStencil: DepthStencilState
-  mutable Rasterizer: RasterizerState
-  mutable IsBatching: bool
-}
+// ============================================================================
+// Semantic Modules
+// ============================================================================
 
 module LightingProcessor =
-  let apply (env: inref<RendererEnvironment>) (state: inref<ActiveRenderState>) (lCfg: Lighting2DConfig) (fx: Effect) (shadowAtlas: RenderTarget2D voption) =
+  open Lighting2DInternalLogic
+
+  let apply
+    (env: inref<RendererEnvironment>)
+    (state: inref<ActiveRenderState>)
+    (lCfg: Lighting2DConfig)
+    (fx: Effect)
+    (shadowAtlas: RenderTarget2D voption)
+    =
     if fx <> null then
       let b = env.Buffers
-      let tw = (env.Device.Viewport.Width + lCfg.TileSize - 1) / lCfg.TileSize
-      let th = (env.Device.Viewport.Height + lCfg.TileSize - 1) / lCfg.TileSize
-      RendererBuffers.ensureCapacity (tw * th) &b.TileCounts
-      RendererBuffers.ensureCapacity (tw * th * lCfg.MaxLightsPerTile) &b.TileData
-      RendererBuffers.ensureCapacity b.PointLights.Count &b.PointPositions
-      RendererBuffers.ensureCapacity b.PointLights.Count &b.PointColors
-      RendererBuffers.ensureCapacity b.PointLights.Count &b.PointRadii
-      RendererBuffers.ensureCapacity b.PointLights.Count &b.PointFalloffs
-      RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirDirections
-      RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirColors
-      RendererBuffers.ensureCapacity b.PointLights.Count &b.PointShadowIndices
-      RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirShadowIndices
-      RendererBuffers.ensureCapacity b.PointLights.Count &b.ScreenSpaceLights
-      let lEnv: Lighting2DInternal.LightingEnvironment = { Device = env.Device; Pool = env.Pool; Camera = state.Camera; ViewMatrix = state.ViewMatrix }
-      let lGrid: Lighting2DInternal.LightingGrid = { TW = tw; TH = th; TileSize = lCfg.TileSize; MaxLightsPerTile = lCfg.MaxLightsPerTile }
-      let lScene: Lighting2DInternal.LightingScene = { PointLights = b.PointLights; DirectionalLights = b.DirectionalLights; Occluders = b.Occluders }
-      let lBufs: Lighting2DInternal.LightingBuffers = {
-        PointPositions = b.PointPositions; PointColors = b.PointColors; PointRadii = b.PointRadii; PointFalloffs = b.PointFalloffs; PointShadowIndices = b.PointShadowIndices
-        DirDirections = b.DirDirections; DirColors = b.DirColors; DirShadowIndices = b.DirShadowIndices; OriginsDirectional = b.DirShadowOrigins
-        IndicesPoint = b.ShadowIndicesPoint; IndicesDirectional = b.ShadowIndicesDirectional; ScreenSpaceLights = b.ScreenSpaceLights
-        TileCounts = b.TileCounts; TileData = b.TileData; TileDataBuffer = b.TileDataBuffer
-      }
-      Lighting2DInternal.Pipeline.apply lEnv lGrid lCfg { Ambient = lCfg.DefaultAmbient; PointLights = [||]; DirectionalLights = [||] } lScene fx lBufs &b.TileDataTex &b.TileDataBuffer shadowAtlas
 
-/// <summary>Semantic module for interpreting and executing render commands.</summary>
+      let tw =
+        (env.Services.Device.Viewport.Width + lCfg.TileSize - 1) / lCfg.TileSize
+
+      let th =
+        (env.Services.Device.Viewport.Height + lCfg.TileSize - 1)
+        / lCfg.TileSize
+
+      let lEnv: LightingEnvironment = {
+        Device = env.Services.Device
+        Pool = env.Services.Pool
+        Camera = state.Camera
+        ViewMatrix = state.ViewMatrix
+      }
+
+      let lGrid: LightingGrid = {
+        TW = tw
+        TH = th
+        TileSize = lCfg.TileSize
+        MaxLightsPerTile = lCfg.MaxLightsPerTile
+      }
+
+      let lScene: LightingScene = {
+        PointLights = b.PointLights
+        DirectionalLights = b.DirectionalLights
+        Occluders = b.Occluders
+      }
+
+      let lBufs: LightingBuffers = {
+        PointPositions = b.PointPositions
+        PointColors = b.PointColors
+        PointRadii = b.PointRadii
+        PointFalloffs = b.PointFalloffs
+        PointShadowIndices = b.PointShadowIndices
+        DirDirections = b.DirDirections
+        DirColors = b.DirColors
+        DirShadowIndices = b.DirShadowIndices
+        OriginsDirectional = b.DirShadowOrigins
+        IndicesPoint = b.ShadowIndicesPoint
+        IndicesDirectional = b.ShadowIndicesDirectional
+        ScreenSpaceLights = b.ScreenSpaceLights
+        TileCounts = b.TileCounts
+        TileData = b.TileData
+        TileDataBuffer = b.TileDataBuffer
+      }
+
+      if
+        not b.LightingPrepared
+        || b.LastViewMatrix <> state.ViewMatrix
+        || b.LastProjectionMatrix <> state.Camera.Projection
+      then
+        RendererBuffers.ensureCapacity (tw * th) &b.TileCounts
+
+        RendererBuffers.ensureCapacity
+          (tw * th * lCfg.MaxLightsPerTile)
+          &b.TileData
+
+        RendererBuffers.ensureCapacity b.PointLights.Count &b.PointPositions
+        RendererBuffers.ensureCapacity b.PointLights.Count &b.PointColors
+        RendererBuffers.ensureCapacity b.PointLights.Count &b.PointRadii
+        RendererBuffers.ensureCapacity b.PointLights.Count &b.PointFalloffs
+        RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirDirections
+        RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirColors
+        RendererBuffers.ensureCapacity b.PointLights.Count &b.PointShadowIndices
+
+        RendererBuffers.ensureCapacity
+          b.DirectionalLights.Count
+          &b.DirShadowIndices
+
+        RendererBuffers.ensureCapacity b.PointLights.Count &b.ScreenSpaceLights
+
+        let lBufsUpdated: LightingBuffers = {
+          PointPositions = b.PointPositions
+          PointColors = b.PointColors
+          PointRadii = b.PointRadii
+          PointFalloffs = b.PointFalloffs
+          PointShadowIndices = b.PointShadowIndices
+          DirDirections = b.DirDirections
+          DirColors = b.DirColors
+          DirShadowIndices = b.DirShadowIndices
+          OriginsDirectional = b.DirShadowOrigins
+          IndicesPoint = b.ShadowIndicesPoint
+          IndicesDirectional = b.ShadowIndicesDirectional
+          ScreenSpaceLights = b.ScreenSpaceLights
+          TileCounts = b.TileCounts
+          TileData = b.TileData
+          TileDataBuffer = b.TileDataBuffer
+        }
+
+        Pipeline.prepare
+          &lEnv
+          &lGrid
+          &lScene
+          &lBufsUpdated
+          &b.TileDataTex
+          &b.TileDataBuffer
+        |> ignore
+
+        b.LightingPrepared <- true
+        b.LastViewMatrix <- state.ViewMatrix
+        b.LastProjectionMatrix <- state.Camera.Projection
+
+      let lBufsFinal: LightingBuffers = {
+        PointPositions = b.PointPositions
+        PointColors = b.PointColors
+        PointRadii = b.PointRadii
+        PointFalloffs = b.PointFalloffs
+        PointShadowIndices = b.PointShadowIndices
+        DirDirections = b.DirDirections
+        DirColors = b.DirColors
+        DirShadowIndices = b.DirShadowIndices
+        OriginsDirectional = b.DirShadowOrigins
+        IndicesPoint = b.ShadowIndicesPoint
+        IndicesDirectional = b.ShadowIndicesDirectional
+        ScreenSpaceLights = b.ScreenSpaceLights
+        TileCounts = b.TileCounts
+        TileData = b.TileData
+        TileDataBuffer = b.TileDataBuffer
+      }
+
+      let bin: LightBinResults = { TilesX = tw; TilesY = th }
+
+      let lState: LightingState2D = {
+        Ambient = lCfg.DefaultAmbient
+        PointLights = [||]
+        DirectionalLights = [||]
+      }
+
+      Pipeline.apply
+        &lEnv
+        &lGrid
+        &lCfg
+        &lState
+        &lScene
+        fx
+        &lBufsFinal
+        b.TileDataTex
+        bin
+        shadowAtlas
+
 module CommandDispatcher =
-  let beginBatch (env: inref<RendererEnvironment>) (state: byref<ActiveRenderState>) (lCfg: Lighting2DConfig voption) (shadowAtlas: RenderTarget2D voption) =
-    if lCfg.IsSome then LightingProcessor.apply &env &state lCfg.Value state.Effect shadowAtlas
+  let beginBatch
+    (env: inref<RendererEnvironment>)
+    (state: byref<ActiveRenderState>)
+    (lCfg: Lighting2DConfig voption)
+    (shadowAtlas: RenderTarget2D voption)
+    =
+    if lCfg.IsSome then
+      LightingProcessor.apply &env &state lCfg.Value state.Effect shadowAtlas
+
     if state.Effect <> null then
-      state.Effect.SafeSetParam("World", Matrix.Identity); state.Effect.SafeSetParam("View", state.ViewMatrix); state.Effect.SafeSetParam("ViewMatrix", state.ViewMatrix)
-      state.Effect.SafeSetParam("Projection", state.Camera.Projection); state.Effect.SafeSetParam("ProjectionMatrix", state.Camera.Projection)
-    let transform = if state.Effect <> null && lCfg.IsSome then Nullable Matrix.Identity else state.Transform
-    env.SpriteBatch.Begin(state.SortMode, state.Blend, state.Sampler, state.DepthStencil, state.Rasterizer, state.Effect, transform)
+      state.Effect.SafeSetParam("World", Matrix.Identity)
+      state.Effect.SafeSetParam("View", state.ViewMatrix)
+      state.Effect.SafeSetParam("ViewMatrix", state.ViewMatrix)
+      state.Effect.SafeSetParam("Projection", state.Camera.Projection)
+      state.Effect.SafeSetParam("ProjectionMatrix", state.Camera.Projection)
+
+    let transform =
+      if state.Effect <> null && lCfg.IsSome then
+        Nullable Matrix.Identity
+      else
+        state.Transform
+
+    env.Services.SpriteBatch.Begin(
+      state.SortMode,
+      state.Blend,
+      state.Sampler,
+      state.DepthStencil,
+      state.Rasterizer,
+      state.Effect,
+      transform
+    )
+
     state.IsBatching <- true
 
-  let endBatch (env: inref<RendererEnvironment>) (state: byref<ActiveRenderState>) =
-    env.SpriteBatch.End(); state.IsBatching <- false
+  let endBatch
+    (env: inref<RendererEnvironment>)
+    (state: byref<ActiveRenderState>)
+    =
+    env.Services.SpriteBatch.End()
+    state.IsBatching <- false
 
-  let private renderSprite (env: inref<RendererEnvironment>) (state: byref<ActiveRenderState>) (lCfg: Lighting2DConfig voption) (shadowAtlas: RenderTarget2D voption) (s: SpriteState) =
-    let targetNM = s.NormalMap |> ValueOption.defaultValue env.DefaultNormalMap
-    if state.IsBatching && state.Effect <> null && targetNM <> state.NormalMap then endBatch &env &state
-    if not state.IsBatching then beginBatch &env &state lCfg shadowAtlas
-    if state.Effect <> null && targetNM <> state.NormalMap then 
-      state.Effect.SafeSetParam("NormalMap", targetNM :> Texture); state.NormalMap <- targetNM
-    env.SpriteBatch.Draw(s.Texture, Rectangle(s.DestX, s.DestY, s.Width, s.Height), (s.SourceRect |> ValueOption.toNullable), s.Color, s.Rotation, s.Origin, s.Effects, s.Depth)
+  let private renderSprite
+    (env: inref<RendererEnvironment>)
+    (state: byref<ActiveRenderState>)
+    (lCfg: Lighting2DConfig voption)
+    (shadowAtlas: RenderTarget2D voption)
+    (s: inref<SpriteState>)
+    =
+    let targetNM =
+      s.NormalMap |> ValueOption.defaultValue env.Services.DefaultNormalMap
 
-  let private renderText (env: inref<RendererEnvironment>) (state: byref<ActiveRenderState>) (lCfg: Lighting2DConfig voption) (shadowAtlas: RenderTarget2D voption) (font: SpriteFont) (text: string) (pos: Vector2) (color: Color) (rot: float32) (origin: Vector2) (scale: float32) (effects: SpriteEffects) (depth: float32) =
-    if state.IsBatching && state.Effect <> null && env.DefaultNormalMap <> state.NormalMap then endBatch &env &state
-    if not state.IsBatching then beginBatch &env &state lCfg shadowAtlas
-    if state.Effect <> null && env.DefaultNormalMap <> state.NormalMap then 
-      state.Effect.SafeSetParam("NormalMap", env.DefaultNormalMap :> Texture); state.NormalMap <- env.DefaultNormalMap
-    env.SpriteBatch.DrawString(font, text, pos, color, rot, origin, scale, effects, depth)
+    if
+      state.IsBatching && state.Effect <> null && targetNM <> state.NormalMap
+    then
+      endBatch &env &state
 
-  let private renderParticles (env: inref<RendererEnvironment>) (state: byref<ActiveRenderState>) (lCfg: Lighting2DConfig voption) (shadowAtlas: RenderTarget2D voption) (pCmd: DrawParticlesCmd) =
-    if state.IsBatching then endBatch &env &state
+    if not state.IsBatching then
+      beginBatch &env &state lCfg shadowAtlas
+
+    if state.Effect <> null && targetNM <> state.NormalMap then
+      state.Effect.SafeSetParam("NormalMap", targetNM :> Texture)
+      state.NormalMap <- targetNM
+
+    env.Services.SpriteBatch.Draw(
+      s.Texture,
+      Rectangle(s.DestX, s.DestY, s.Width, s.Height),
+      (s.SourceRect |> ValueOption.toNullable),
+      s.Color,
+      s.Rotation,
+      s.Origin,
+      s.Effects,
+      s.Depth
+    )
+
+  let private renderText
+    (env: inref<RendererEnvironment>)
+    (state: byref<ActiveRenderState>)
+    (lCfg: Lighting2DConfig voption)
+    (shadowAtlas: RenderTarget2D voption)
+    (s: inref<TextState>)
+    =
+    if
+      state.IsBatching
+      && state.Effect <> null
+      && env.Services.DefaultNormalMap <> state.NormalMap
+    then
+      endBatch &env &state
+
+    if not state.IsBatching then
+      beginBatch &env &state lCfg shadowAtlas
+
+    if
+      state.Effect <> null && env.Services.DefaultNormalMap <> state.NormalMap
+    then
+      state.Effect.SafeSetParam(
+        "NormalMap",
+        env.Services.DefaultNormalMap :> Texture
+      )
+
+      state.NormalMap <- env.Services.DefaultNormalMap
+
+    env.Services.SpriteBatch.DrawString(
+      s.Font,
+      s.Text,
+      Vector2(float32 s.DestX, float32 s.DestY),
+      s.Color,
+      s.Rotation,
+      s.Origin,
+      s.Scale,
+      s.Effects,
+      0f
+    )
+
+  let private renderParticles
+    (env: inref<RendererEnvironment>)
+    (state: byref<ActiveRenderState>)
+    (lCfg: Lighting2DConfig voption)
+    (shadowAtlas: RenderTarget2D voption)
+    (pCmd: inref<DrawParticlesCmd>)
+    =
+    if state.IsBatching then
+      endBatch &env &state
+
     let batch = env.BillboardBatch.Value
     let fx = pCmd.Effect
-    match fx with 
-    | :? BasicEffect as be -> be.World <- Matrix.Identity; be.View <- state.ViewMatrix; be.Projection <- state.Camera.Projection; be.Texture <- pCmd.Texture 
-    | _ -> 
-        fx.SafeSetParam("Texture", pCmd.Texture); fx.SafeSetParam("DiffuseTexture", pCmd.Texture)
-        fx.SafeSetParam("World", Matrix.Identity); fx.SafeSetParam("View", state.ViewMatrix); fx.SafeSetParam("Projection", state.Camera.Projection)
-    BillboardBatch.begin' batch
-    for pIdx = 0 to pCmd.Count - 1 do let p = pCmd.Particles.[pIdx] in BillboardBatch.draw2D p.Position p.Size p.Rotation p.Color p.Uv batch
-    BillboardBatch.end' fx batch; beginBatch &env &state lCfg shadowAtlas
 
-  let private renderShape (env: inref<RendererEnvironment>) (state: byref<ActiveRenderState>) (lCfg: Lighting2DConfig voption) (shadowAtlas: RenderTarget2D voption) (draw: LineBatch.State -> unit) =
-    if state.IsBatching then endBatch &env &state
+    match fx with
+    | :? BasicEffect as be ->
+      be.World <- Matrix.Identity
+      be.View <- state.ViewMatrix
+      be.Projection <- state.Camera.Projection
+      be.Texture <- pCmd.Texture
+    | _ ->
+      fx.SafeSetParam("Texture", pCmd.Texture)
+      fx.SafeSetParam("DiffuseTexture", pCmd.Texture)
+      fx.SafeSetParam("World", Matrix.Identity)
+      fx.SafeSetParam("View", state.ViewMatrix)
+      fx.SafeSetParam("Projection", state.Camera.Projection)
+
+    BillboardBatch.begin' batch
+
+    for pIdx = 0 to pCmd.Count - 1 do
+      let p = pCmd.Particles.[pIdx] in
+      BillboardBatch.draw2D p.Position p.Size p.Rotation p.Color p.Uv batch
+
+    BillboardBatch.end' fx batch
+    beginBatch &env &state lCfg shadowAtlas
+
+  let private renderShape
+    (env: inref<RendererEnvironment>)
+    (state: byref<ActiveRenderState>)
+    (lCfg: Lighting2DConfig voption)
+    (shadowAtlas: RenderTarget2D voption)
+    (draw: LineBatch.State -> unit)
+    =
+    if state.IsBatching then
+      endBatch &env &state
+
     let batch = env.LineBatch.Value
     let fx = env.PrimitiveEffect
-    fx.World <- Matrix.Identity; fx.View <- state.ViewMatrix; fx.Projection <- state.Camera.Projection
-    LineBatch.begin' batch; draw batch; LineBatch.end' fx batch; beginBatch &env &state lCfg shadowAtlas
+    fx.World <- Matrix.Identity
+    fx.View <- state.ViewMatrix
+    fx.Projection <- state.Camera.Projection
+    LineBatch.begin' batch
+    draw batch
+    LineBatch.end' fx batch
+    beginBatch &env &state lCfg shadowAtlas
 
-  let execute (env: inref<RendererEnvironment>) (state: byref<ActiveRenderState>) (lCfg: Lighting2DConfig voption) (shadowAtlas: RenderTarget2D voption) (cmd: RenderCmd2D) =
+  let execute
+    (env: inref<RendererEnvironment>)
+    (state: byref<ActiveRenderState>)
+    (lCfg: Lighting2DConfig voption)
+    (shadowAtlas: RenderTarget2D voption)
+    (cmd: inref<RenderCmd2D>)
+    =
     match cmd with
-    | SetViewport vp -> 
-        if state.IsBatching then endBatch &env &state
-        env.Device.Viewport <- vp
-        beginBatch &env &state lCfg shadowAtlas
+    | SetViewport vp ->
+      if state.IsBatching then
+        endBatch &env &state
+
+      env.Services.Device.Viewport <- vp
+      beginBatch &env &state lCfg shadowAtlas
     | ClearTarget(colorOpt, clearDepth) ->
-        if state.IsBatching then endBatch &env &state
-        match colorOpt, clearDepth with
-        | ValueSome c, true -> env.Device.Clear(ClearOptions.Target ||| ClearOptions.DepthBuffer, c, 1.0f, 0)
-        | ValueSome c, false -> env.Device.Clear(ClearOptions.Target, c, 1.0f, 0)
-        | ValueNone, true -> env.Device.Clear(ClearOptions.DepthBuffer, Color.Black, 1.0f, 0)
-        | ValueNone, false -> ()
+      if state.IsBatching then
+        endBatch &env &state
+
+      match colorOpt, clearDepth with
+      | ValueSome c, true ->
+        env.Services.Device.Clear(
+          ClearOptions.Target ||| ClearOptions.DepthBuffer,
+          c,
+          1.0f,
+          0
+        )
+      | ValueSome c, false ->
+        env.Services.Device.Clear(ClearOptions.Target, c, 1.0f, 0)
+      | ValueNone, true ->
+        env.Services.Device.Clear(
+          ClearOptions.DepthBuffer,
+          Color.Black,
+          1.0f,
+          0
+        )
+      | ValueNone, false -> ()
+
+      beginBatch &env &state lCfg shadowAtlas
+    | SetCamera cam ->
+      if state.IsBatching then
+        endBatch &env &state
+
+      state.Transform <- Nullable cam.View
+      state.ViewMatrix <- cam.View
+      state.Camera <- cam
+      beginBatch &env &state lCfg shadowAtlas
+    | SetEffect effectOpt ->
+      if state.IsBatching then
+        endBatch &env &state
+
+      state.Effect <-
+        match effectOpt with
+        | ValueSome e -> e
+        | ValueNone -> state.Effect
+
+      state.NormalMap <- null
+      beginBatch &env &state lCfg shadowAtlas
+    | SetBlendState bs ->
+      if state.IsBatching then
+        endBatch &env &state
+        state.Blend <- bs
         beginBatch &env &state lCfg shadowAtlas
-    | SetCamera cam -> 
-        if state.IsBatching then endBatch &env &state
-        state.Transform <- Nullable cam.View; state.ViewMatrix <- cam.View; state.Camera <- cam
+    | SetSamplerState ss ->
+      if state.IsBatching then
+        endBatch &env &state
+        state.Sampler <- ss
         beginBatch &env &state lCfg shadowAtlas
-    | SetEffect effectOpt -> 
-        if state.IsBatching then endBatch &env &state
-        state.Effect <- match effectOpt with | ValueSome e -> e | ValueNone -> state.Effect
-        state.NormalMap <- null
+    | SetDepthStencilState ds ->
+      if state.IsBatching then
+        endBatch &env &state
+        state.DepthStencil <- ds
         beginBatch &env &state lCfg shadowAtlas
-    | SetBlendState bs -> if state.IsBatching then endBatch &env &state; state.Blend <- bs; beginBatch &env &state lCfg shadowAtlas
-    | SetSamplerState ss -> if state.IsBatching then endBatch &env &state; state.Sampler <- ss; beginBatch &env &state lCfg shadowAtlas
-    | SetDepthStencilState ds -> if state.IsBatching then endBatch &env &state; state.DepthStencil <- ds; beginBatch &env &state lCfg shadowAtlas
-    | SetRasterizerState rs -> if state.IsBatching then endBatch &env &state; state.Rasterizer <- rs; beginBatch &env &state lCfg shadowAtlas
-    | DrawCustom draw -> 
-        if state.IsBatching then endBatch &env &state
-        draw { GraphicsDevice = env.Device; Content = env.Game.Content; Game = env.Game }
+    | SetRasterizerState rs ->
+      if state.IsBatching then
+        endBatch &env &state
+        state.Rasterizer <- rs
         beginBatch &env &state lCfg shadowAtlas
-    | DrawSprite s -> renderSprite &env &state lCfg shadowAtlas s
-    | DrawText s -> renderText &env &state lCfg shadowAtlas s.Font s.Text (Vector2(float32 s.DestX, float32 s.DestY)) s.Color s.Rotation s.Origin s.Scale s.Effects 0f
-    | DrawTextLegacy cmd -> renderText &env &state lCfg shadowAtlas cmd.Font cmd.Text cmd.Position cmd.Color cmd.Rotation cmd.Origin cmd.Scale cmd.Effects cmd.Depth
-    | DrawParticles pCmd -> renderParticles &env &state lCfg shadowAtlas pCmd
-    | DrawLine2D lCmd -> renderShape &env &state lCfg shadowAtlas (fun b -> LineBatch.addLine2D lCmd.P1 lCmd.P2 lCmd.LineColor b)
-    | DrawRect2D rCmd -> renderShape &env &state lCfg shadowAtlas (fun b -> LineBatch.addRect2D rCmd.Rect rCmd.RectColor b)
-    | DrawCircle2D cCmd -> renderShape &env &state lCfg shadowAtlas (fun b -> LineBatch.addCircle2D cCmd.Center cCmd.Radius cCmd.Segments cCmd.CircleColor b)
+    | DrawCustom draw ->
+      if state.IsBatching then
+        endBatch &env &state
+
+      draw {
+        GraphicsDevice = env.Services.Device
+        Content = env.Game.Content
+        Game = env.Game
+      }
+
+      beginBatch &env &state lCfg shadowAtlas
+    | DrawSprite s -> renderSprite &env &state lCfg shadowAtlas &s
+    | DrawText s -> renderText &env &state lCfg shadowAtlas &s
+    | DrawParticles pCmd -> renderParticles &env &state lCfg shadowAtlas &pCmd
+    | DrawLine2D lCmd ->
+      renderShape &env &state lCfg shadowAtlas (fun b ->
+        LineBatch.addLine2D lCmd.P1 lCmd.P2 lCmd.LineColor b)
+    | DrawRect2D rCmd ->
+      renderShape &env &state lCfg shadowAtlas (fun b ->
+        LineBatch.addRect2D rCmd.Rect rCmd.RectColor b)
+    | DrawCircle2D cCmd ->
+      renderShape &env &state lCfg shadowAtlas (fun b ->
+        LineBatch.addCircle2D
+          cCmd.Center
+          cCmd.Radius
+          cCmd.Segments
+          cCmd.CircleColor
+          b)
     | _ -> ()
 
-/// <summary>Semantic module for applying post-processing effects.</summary>
 module PostProcessPipeline =
-  let private drawPass (device: GraphicsDevice) (spriteBatch: SpriteBatch) (input: Texture2D) (output: RenderTarget2D voption) (effect: Effect) =
-    if output.IsSome then device.SetRenderTarget output.Value
-    device.Clear(Color.Transparent)
-    spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, SamplerState.LinearClamp, null, null, effect)
-    spriteBatch.Draw(input, device.Viewport.Bounds, Color.White)
-    spriteBatch.End()
-
-  let apply 
-    (env: RendererEnvironment) 
-    (cfg: PostProcess2DConfig) 
-    (sceneRt: RenderTarget2D) 
-    (gameTime: GameTime)
-    : RenderTarget2D
+  let private drawPass
+    (services: inref<RenderingServices>)
+    (input: Texture2D)
+    (output: RenderTarget2D voption)
+    (effect: Effect)
     =
-    let device = env.Device
-    let viewport = device.Viewport
+    if output.IsSome then
+      services.Device.SetRenderTarget output.Value
+
+    services.Device.Clear(Color.Transparent)
+
+    services.SpriteBatch.Begin(
+      SpriteSortMode.Immediate,
+      BlendState.Opaque,
+      SamplerState.LinearClamp,
+      null,
+      null,
+      effect
+    )
+
+    services.SpriteBatch.Draw(
+      input,
+      services.Device.Viewport.Bounds,
+      Color.White
+    )
+
+    services.SpriteBatch.End()
+
+  let apply
+    (env: inref<RendererEnvironment>)
+    (cfg: inref<PostProcess2DConfig>)
+    (sceneRt: RenderTarget2D)
+    (gameTime: GameTime)
+    : RenderTarget2D =
+    let services = env.Services
+    let viewport = services.Device.Viewport
     let mutable currentInput = sceneRt
 
     let getTempTarget() =
-      env.Pool.Acquire {
+      services.Pool.Acquire {
         Width = viewport.Width
         Height = viewport.Height
         Format = SurfaceFormat.Color
@@ -1022,71 +1624,72 @@ module PostProcessPipeline =
     let mutable currentOutput = ValueSome(getTempTarget())
 
     let swap() =
-      let tmp = currentInput
+      let tmp = currentInput in
+
       match currentOutput with
       | ValueSome out ->
-          currentInput <- out
-          currentOutput <- ValueSome tmp
+        currentInput <- out
+        currentOutput <- ValueSome tmp
       | ValueNone -> ()
 
-    // 1. Vignette
     if cfg.Vignette.IsSome then
-      let v = cfg.Vignette.Value
+      let v = cfg.Vignette.Value in
       v.Effect.SafeSetParam("Radius", v.Radius)
       v.Effect.SafeSetParam("Softness", v.Softness)
-      drawPass device env.SpriteBatch currentInput currentOutput v.Effect
+      drawPass &services currentInput currentOutput v.Effect
       swap()
 
-    // 2. Bloom (Simplified)
     if cfg.Bloom.IsSome then
-      let b = cfg.Bloom.Value
+      let b = cfg.Bloom.Value in
       let sceneInput = currentInput
-      // Extract
       b.ExtractEffect.SafeSetParam("Threshold", b.Threshold)
-      drawPass device env.SpriteBatch currentInput currentOutput b.ExtractEffect
+      drawPass &services currentInput currentOutput b.ExtractEffect
       swap()
-      // Blur
       b.BlurEffect.SafeSetParam("Intensity", b.Intensity)
-      drawPass device env.SpriteBatch currentInput currentOutput b.BlurEffect
-      swap()
-      // Composite
-      if currentOutput.IsSome then device.SetRenderTarget currentOutput.Value
-      device.Clear(Color.Transparent)
-      b.CompositeEffect.SafeSetParam("BloomTexture", currentInput :> Texture)
-      env.SpriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, SamplerState.LinearClamp, null, null, b.CompositeEffect)
-      env.SpriteBatch.Draw(sceneInput, viewport.Bounds, Color.White)
-      env.SpriteBatch.End()
+      drawPass &services currentInput currentOutput b.BlurEffect
       swap()
 
-    // 3. Color Grade
+      if currentOutput.IsSome then
+        services.Device.SetRenderTarget currentOutput.Value
+
+      services.Device.Clear(Color.Transparent)
+      b.CompositeEffect.SafeSetParam("BloomTexture", currentInput :> Texture)
+
+      services.SpriteBatch.Begin(
+        SpriteSortMode.Immediate,
+        BlendState.Opaque,
+        SamplerState.LinearClamp,
+        null,
+        null,
+        b.CompositeEffect
+      )
+
+      services.SpriteBatch.Draw(sceneInput, viewport.Bounds, Color.White)
+      services.SpriteBatch.End()
+      swap()
+
     if cfg.ColorGrade.IsSome then
-      let cg = cfg.ColorGrade.Value
+      let cg = cfg.ColorGrade.Value in
       cg.Effect.SafeSetParam("LutTexture", cg.LutTexture :> Texture)
       cg.Effect.SafeSetParam("LutSize", float32 cg.LutSize)
       cg.Effect.SafeSetParam("Blend", cg.Blend)
-      drawPass device env.SpriteBatch currentInput currentOutput cg.Effect
+      drawPass &services currentInput currentOutput cg.Effect
       swap()
 
-    // 4. Custom Passes
     if cfg.CustomPasses.IsSome then
       for pass in cfg.CustomPasses.Value do
         if pass.SetupEffect.IsSome then
           pass.SetupEffect.Value pass.Effect gameTime currentInput
-        drawPass device env.SpriteBatch currentInput currentOutput pass.Effect
+
+        drawPass &services currentInput currentOutput pass.Effect
         swap()
-    
+
     currentInput
 
-  /// <summary>Groups persistent collections used during a single frame.</summary>
-  [<Struct>]
-  type FrameData = {
-    PointLights: ResizeArray<PointLight2D>
-    DirectionalLights: ResizeArray<DirectionalLight2D>
-    Occluders: ResizeArray<Occluder2D>
-    ShadowCasters: ResizeArray<Lighting2DInternal.ShadowCasterEntry>
-  }
+// ============================================================================
+// Batch2DRenderer Class
+// ============================================================================
 
-/// <summary>Standard 2D Renderer using <see cref="T:Microsoft.Xna.Framework.Graphics.SpriteBatch"/>.</summary>
 type Batch2DRenderer<'Model>
   (
     game: Game,
@@ -1121,100 +1724,246 @@ type Batch2DRenderer<'Model>
     if isNull defaultNormalMap then
       defaultNormalMap <- new Texture2D(game.GraphicsDevice, 1, 1)
       defaultNormalMap.SetData [| Color(128, 128, 255, 255) |]
+
     defaultNormalMap
 
   interface IDisposable with
     member _.Dispose() =
-      if not(isNull spriteBatch) then spriteBatch.Dispose()
-      if not(isNull buffers.TileDataTex) then buffers.TileDataTex.Dispose()
-      if not(isNull defaultNormalMap) then defaultNormalMap.Dispose()
+      if not(isNull spriteBatch) then
+        spriteBatch.Dispose()
+
+      if not(isNull defaultNormalMap) then
+        defaultNormalMap.Dispose()
+
+      RendererBuffers.dispose buffers
       occluderBatch |> ValueOption.iter OccluderBatch.dispose
       billboardBatch |> ValueOption.iter BillboardBatch.dispose
       lineBatch |> ValueOption.iter LineBatch.dispose
-      if not(isNull primitiveEffect) then primitiveEffect.Dispose()
-      shadowMinBlend.Dispose()
+
+      if not(isNull primitiveEffect) then
+        primitiveEffect.Dispose()
+        shadowMinBlend.Dispose()
 
   interface IRenderer<'Model> with
     member _.Draw(ctx: GameContext, model: 'Model, gameTime: GameTime) =
-      if isNull spriteBatch then spriteBatch <- new SpriteBatch(ctx.GraphicsDevice)
-      buffer.Clear(); view(ctx, model, buffer)
-      if config.SortCommands then buffer.Sort()
-      if rtPool.IsNone then rtPool <- ValueSome(RenderTargetPool.create ctx.GraphicsDevice)
+      if isNull spriteBatch then
+        spriteBatch <- new SpriteBatch(ctx.GraphicsDevice)
 
-      buffers.PointLights.Clear(); buffers.DirectionalLights.Clear(); buffers.Occluders.Clear()
-      let mutable capturedCamera = ValueNone
-      let mutable needsBillboard = false
-      let mutable needsLine = false
+      buffer.Clear()
+      view(ctx, model, buffer)
+
+      if config.SortCommands then
+        buffer.Sort()
+
+      if rtPool.IsNone then
+        rtPool <- ValueSome(RenderTargetPool.create ctx.GraphicsDevice)
+
+      buffers.PointLights.Clear()
+      buffers.DirectionalLights.Clear()
+      buffers.Occluders.Clear()
+      buffers.LightingPrepared <- false
+
+      let mutable capturedCamera, needsBillboard, needsLine =
+        ValueNone, false, false
+
       for i = 0 to buffer.Count - 1 do
         let struct (_, cmd) = buffer.Item i
+
         match cmd with
         | AddPointLight l -> buffers.PointLights.Add l
         | AddDirectionalLight l -> buffers.DirectionalLights.Add l
         | AddOccluder o -> buffers.Occluders.Add o
-        | SetCamera c when capturedCamera.IsNone -> capturedCamera <- ValueSome c
+        | SetCamera c when capturedCamera.IsNone ->
+          capturedCamera <- ValueSome c
         | DrawParticles _ -> needsBillboard <- true
-        | DrawLine2D _ | DrawRect2D _ | DrawCircle2D _ -> needsLine <- true
+        | DrawLine2D _
+        | DrawRect2D _
+        | DrawCircle2D _ -> needsLine <- true
         | _ -> ()
 
-      let shadowsEnabled = config.Lighting.IsSome && config.Lighting.Value.Shadows.IsSome && config.ShaderOverrides.ContainsKey ShaderBase2D.ShadowCaster
-      if shadowsEnabled then
-        if occluderBatch.IsNone then occluderBatch <- ValueSome(OccluderBatch.create ctx.GraphicsDevice)
-        RendererBuffers.ensureCapacity buffers.PointLights.Count &buffers.ShadowIndicesPoint
-        RendererBuffers.ensureCapacity buffers.DirectionalLights.Count &buffers.ShadowIndicesDirectional
-        RendererBuffers.ensureCapacity buffers.DirectionalLights.Count &buffers.DirShadowOrigins
-        let lEnv: Lighting2DInternal.LightingEnvironment = { Device = ctx.GraphicsDevice; Pool = rtPool.Value; Camera = capturedCamera |> ValueOption.defaultValue { View = Matrix.Identity; Projection = Matrix.Identity }; ViewMatrix = Matrix.Identity }
-        let lScene: Lighting2DInternal.LightingScene = { PointLights = buffers.PointLights; DirectionalLights = buffers.DirectionalLights; Occluders = buffers.Occluders }
-        let lBufs: Lighting2DInternal.ShadowBuffers = { IndicesPoint = buffers.ShadowIndicesPoint; IndicesDirectional = buffers.ShadowIndicesDirectional; OriginsDirectional = buffers.DirShadowOrigins; Casters = buffers.ShadowCasters }
-        Lighting2DInternal.Shadows.render lEnv config.Lighting.Value.Shadows.Value config.ShaderOverrides.[ShaderBase2D.ShadowCaster] shadowMinBlend occluderBatch.Value lScene lBufs &shadowAtlas
+      if
+        config.Lighting.IsSome
+        && config.Lighting.Value.Shadows.IsSome
+        && config.ShaderOverrides.ContainsKey ShaderBase2D.ShadowCaster
+      then
+        if occluderBatch.IsNone then
+          occluderBatch <- ValueSome(OccluderBatch.create ctx.GraphicsDevice)
 
-      if needsBillboard && billboardBatch.IsNone then billboardBatch <- ValueSome(BillboardBatch.create ctx.GraphicsDevice)
+        RendererBuffers.ensureCapacity
+          buffers.PointLights.Count
+          &buffers.ShadowIndicesPoint
+
+        RendererBuffers.ensureCapacity
+          buffers.DirectionalLights.Count
+          &buffers.ShadowIndicesDirectional
+
+        RendererBuffers.ensureCapacity
+          buffers.DirectionalLights.Count
+          &buffers.DirShadowOrigins
+
+        let cam =
+          capturedCamera
+          |> ValueOption.defaultValue {
+            View = Matrix.Identity
+            Projection = Matrix.Identity
+          }
+
+        let lEnv: Lighting2DInternalLogic.LightingEnvironment = {
+          Device = ctx.GraphicsDevice
+          Pool = rtPool.Value
+          Camera = cam
+          ViewMatrix = cam.View
+        }
+
+        let lScene: Lighting2DInternalLogic.LightingScene = {
+          PointLights = buffers.PointLights
+          DirectionalLights = buffers.DirectionalLights
+          Occluders = buffers.Occluders
+        }
+
+        let lBufs: Lighting2DInternalLogic.ShadowBuffers = {
+          IndicesPoint = buffers.ShadowIndicesPoint
+          IndicesDirectional = buffers.ShadowIndicesDirectional
+          OriginsDirectional = buffers.DirShadowOrigins
+          Casters = buffers.ShadowCasters
+        }
+
+        let sCfg = config.Lighting.Value.Shadows.Value
+
+        Lighting2DInternalLogic.Shadows.render
+          &lEnv
+          &sCfg
+          config.ShaderOverrides.[ShaderBase2D.ShadowCaster]
+          shadowMinBlend
+          occluderBatch.Value
+          &lScene
+          &lBufs
+          &shadowAtlas
+
+      if needsBillboard && billboardBatch.IsNone then
+        billboardBatch <- ValueSome(BillboardBatch.create ctx.GraphicsDevice)
+
       if needsLine then
-        if lineBatch.IsNone then lineBatch <- ValueSome(LineBatch.create ctx.GraphicsDevice)
-        if isNull primitiveEffect then 
+        if lineBatch.IsNone then
+          lineBatch <- ValueSome(LineBatch.create ctx.GraphicsDevice)
+
+        if isNull primitiveEffect then
           primitiveEffect <- new BasicEffect(ctx.GraphicsDevice)
           primitiveEffect.LightingEnabled <- false
           primitiveEffect.TextureEnabled <- false
           primitiveEffect.VertexColorEnabled <- true
 
+      let services = {
+        Device = ctx.GraphicsDevice
+        Pool = rtPool.Value
+        SpriteBatch = spriteBatch
+        DefaultNormalMap = ensureDefaultNormalMap()
+      }
+
       let env: RendererEnvironment = {
-        Device = ctx.GraphicsDevice; Pool = rtPool.Value; SpriteBatch = spriteBatch; Game = game
-        OccluderBatch = occluderBatch; BillboardBatch = billboardBatch; LineBatch = lineBatch
-        PrimitiveEffect = primitiveEffect; DefaultNormalMap = ensureDefaultNormalMap()
-        ShadowMinBlend = shadowMinBlend; Buffers = buffers
+        Services = services
+        Game = game
+        OccluderBatch = occluderBatch
+        BillboardBatch = billboardBatch
+        LineBatch = lineBatch
+        PrimitiveEffect = primitiveEffect
+        ShadowMinBlend = shadowMinBlend
+        Buffers = buffers
       }
 
       if config.PostProcess.IsSome then
-        let rt = env.Pool.Acquire { Width = env.Device.PresentationParameters.BackBufferWidth; Height = env.Device.PresentationParameters.BackBufferHeight; Format = SurfaceFormat.Color; DepthFormat = DepthFormat.None }
-        env.Device.SetRenderTarget rt; env.Device.Clear(Color.Transparent); sceneTarget <- ValueSome rt
+        let rt =
+          services.Pool.Acquire {
+            Width = services.Device.PresentationParameters.BackBufferWidth
+            Height = services.Device.PresentationParameters.BackBufferHeight
+            Format = SurfaceFormat.Color
+            DepthFormat = DepthFormat.None
+          }
+
+        services.Device.SetRenderTarget rt
+        services.Device.Clear(Color.Transparent)
+        sceneTarget <- ValueSome rt
       else
-        env.Device.SetRenderTarget null; sceneTarget <- ValueNone
-      config.ClearColor |> ValueOption.iter env.Device.Clear
+        services.Device.SetRenderTarget null
+        sceneTarget <- ValueNone
+
+      config.ClearColor |> ValueOption.iter services.Device.Clear
 
       let mutable state = {
-        Effect = if config.Lighting.IsSome && config.ShaderOverrides.ContainsKey ShaderBase2D.LitSprite then config.ShaderOverrides.[ShaderBase2D.LitSprite] else config.Effect
+        Effect =
+          if
+            config.Lighting.IsSome
+            && config.ShaderOverrides.ContainsKey ShaderBase2D.LitSprite
+          then
+            config.ShaderOverrides.[ShaderBase2D.LitSprite]
+          else
+            config.Effect
         Transform = config.TransformMatrix |> ValueOption.toNullable
-        Camera = { View = Matrix.Identity; Projection = Matrix.CreateOrthographicOffCenter(0f, float32 env.Device.PresentationParameters.BackBufferWidth, float32 env.Device.PresentationParameters.BackBufferHeight, 0f, 0f, 1f) }
-        ViewMatrix = Matrix.Identity; NormalMap = null; SortMode = config.SortMode; Blend = config.BlendState
-        Sampler = config.SamplerState; DepthStencil = config.DepthStencilState; Rasterizer = config.RasterizerState; IsBatching = false
+        Camera = {
+          View = Matrix.Identity
+          Projection =
+            Matrix.CreateOrthographicOffCenter(
+              0f,
+              float32 services.Device.PresentationParameters.BackBufferWidth,
+              float32 services.Device.PresentationParameters.BackBufferHeight,
+              0f,
+              0f,
+              1f
+            )
+        }
+        ViewMatrix = Matrix.Identity
+        NormalMap = null
+        SortMode = config.SortMode
+        Blend = config.BlendState
+        Sampler = config.SamplerState
+        DepthStencil = config.DepthStencilState
+        Rasterizer = config.RasterizerState
+        IsBatching = false
       }
 
       CommandDispatcher.beginBatch &env &state config.Lighting shadowAtlas
+
       for i = 0 to buffer.Count - 1 do
-        let struct (_, cmd) = buffer.Item i
-        CommandDispatcher.execute &env &state config.Lighting shadowAtlas cmd
-      if state.IsBatching then CommandDispatcher.endBatch &env &state
+        let struct (_, cmd) = buffer.Item i in
+        CommandDispatcher.execute &env &state config.Lighting shadowAtlas &cmd
+
+      if state.IsBatching then
+        CommandDispatcher.endBatch &env &state
 
       match sceneTarget with
       | ValueSome sceneRt ->
-          let final = PostProcessPipeline.apply env config.PostProcess.Value sceneRt gameTime
-          env.Device.SetRenderTarget null
-          env.SpriteBatch.Begin(SpriteSortMode.Immediate, config.FinalBlendState, SamplerState.LinearClamp, null, null, null)
-          env.SpriteBatch.Draw(final, env.Device.Viewport.Bounds, Color.White); env.SpriteBatch.End()
+        let ppCfg = config.PostProcess.Value
+
+        let final =
+          PostProcessPipeline.apply
+            &env
+            &ppCfg
+            sceneRt
+            gameTime
+
+        services.Device.SetRenderTarget null
+
+        services.SpriteBatch.Begin(
+          SpriteSortMode.Immediate,
+          config.FinalBlendState,
+          SamplerState.LinearClamp,
+          null,
+          null,
+          null
+        )
+
+        services.SpriteBatch.Draw(
+          final,
+          services.Device.Viewport.Bounds,
+          Color.White
+        )
+
+        services.SpriteBatch.End()
       | ValueNone -> ()
-      env.Pool.ReleaseAll()
+
+      services.Pool.ReleaseAll()
 
 module Batch2DRenderer =
-  /// <summary>Creates a standard 2D renderer.</summary>
   let inline create<'Model>
     (game: Game)
     ([<InlineIfLambda>] view:
@@ -1226,7 +1975,6 @@ module Batch2DRenderer =
       fun (ctx, model, buffer) -> view ctx model buffer
     )
 
-  /// <summary>Creates a 2D renderer with custom configuration.</summary>
   let inline createWithConfig<'Model>
     (game: Game)
     (config: Batch2DConfig)
@@ -1239,8 +1987,10 @@ module Batch2DRenderer =
       fun (ctx, model, buffer) -> view ctx model buffer
     )
 
+// ============================================================================
+// Builder & DSL
+// ============================================================================
 
-/// <summary>Fluent builder for <see cref="T:Mibo.Elmish.Graphics2D.RenderCmd2D"/>.</summary>
 [<Struct>]
 type Draw2DBuilder = {
   Texture: Texture2D
@@ -1254,9 +2004,7 @@ type Draw2DBuilder = {
   Layer: int<RenderLayer>
 }
 
-/// <summary>Functions for building and submitting 2D draw commands.</summary>
 module Draw2D =
-  /// <summary>Starts a sprite drawing command.</summary>
   let sprite tex dest = {
     Texture = tex
     Dest = dest
@@ -1269,11 +2017,14 @@ module Draw2D =
     Layer = 0<RenderLayer>
   }
 
-  let withSource src (b: Draw2DBuilder) = { b with Source = Nullable src }
+  let withSource (src: Rectangle) (b: Draw2DBuilder) = {
+    b with
+        Source = Nullable src
+  }
+
   let withColor col (b: Draw2DBuilder) = { b with Color = col }
   let atLayer layer (b: Draw2DBuilder) = { b with Layer = layer }
 
-  /// <summary>Submits the draw command to the renderer's buffer.</summary>
   let submit (buffer: RenderBuffer<RenderCmd2D>) (b: Draw2DBuilder) =
     buffer.Add(
       b.Layer,
@@ -1294,7 +2045,6 @@ module Draw2D =
       }
     )
 
-  /// <summary>Submits a camera change command to the buffer.</summary>
   let camera
     (cam: Camera)
     (layer: int<RenderLayer>)
@@ -1302,7 +2052,6 @@ module Draw2D =
     =
     buffer.Add(layer, SetCamera cam)
 
-  /// <summary>Submits a viewport change command to the buffer.</summary>
   let viewport
     (vp: Viewport)
     (layer: int<RenderLayer>)
@@ -1310,7 +2059,6 @@ module Draw2D =
     =
     buffer.Add(layer, SetViewport vp)
 
-  /// <summary>Clear color and/or depth buffer. Useful between cameras in multi-camera setups.</summary>
   let clear
     (color: Color voption)
     (clearDepth: bool)
@@ -1319,8 +2067,6 @@ module Draw2D =
     =
     buffer.Add(layer, ClearTarget(color, clearDepth))
 
-  /// <summary>Set the SpriteBatch effect for subsequent draws.</summary>
-  /// <remarks>Use ValueNone to revert to the renderer's configured default.</remarks>
   let effect
     (effect: Effect voption)
     (layer: int<RenderLayer>)
@@ -1328,7 +2074,6 @@ module Draw2D =
     =
     buffer.Add(layer, SetEffect effect)
 
-  /// <summary>Set the SpriteBatch blend state for subsequent draws.</summary>
   let blendState
     (blendState: BlendState)
     (layer: int<RenderLayer>)
@@ -1336,7 +2081,6 @@ module Draw2D =
     =
     buffer.Add(layer, SetBlendState blendState)
 
-  /// <summary>Set the SpriteBatch sampler state for subsequent draws.</summary>
   let samplerState
     (samplerState: SamplerState)
     (layer: int<RenderLayer>)
@@ -1344,7 +2088,6 @@ module Draw2D =
     =
     buffer.Add(layer, SetSamplerState samplerState)
 
-  /// <summary>Set the SpriteBatch depth-stencil state for subsequent draws.</summary>
   let depthStencilState
     (depthStencilState: DepthStencilState)
     (layer: int<RenderLayer>)
@@ -1352,7 +2095,6 @@ module Draw2D =
     =
     buffer.Add(layer, SetDepthStencilState depthStencilState)
 
-  /// <summary>Set the SpriteBatch rasterizer state for subsequent draws.</summary>
   let rasterizerState
     (rasterizerState: RasterizerState)
     (layer: int<RenderLayer>)
@@ -1360,8 +2102,6 @@ module Draw2D =
     =
     buffer.Add(layer, SetRasterizerState rasterizerState)
 
-  /// <summary>Submits a custom drawing command to the buffer.</summary>
-  /// <remarks>The SpriteBatch is ended before calling <c>draw</c>, and restarted after.</remarks>
   let custom
     (draw: GameContext -> unit)
     (layer: int<RenderLayer>)
@@ -1369,28 +2109,10 @@ module Draw2D =
     =
     buffer.Add(layer, DrawCustom draw)
 
-// ============================================================================
-// Phase 1 DSL Module
-// ============================================================================
-
-/// <summary>
-/// DSL for building 2D sprites and text with computation expressions and pipeline-style functions.
-/// </summary>
-/// <remarks>
-/// This module contains all types, builders, and utilities for the declarative 2D rendering DSL.
-/// Use the View2D module for global access to the computation expression builders.
-/// </remarks>
 module DSL =
-
   open System.Runtime.CompilerServices
 
-  // --------------------------------------------------------------------------
-  // Sprite Types and Builder
-  // --------------------------------------------------------------------------
-
-  // Logic remains using top-level structs for performance and CMD consistency.
   module Sprite =
-    /// <summary>Creates a default empty sprite state.</summary>
     let empty: SpriteState = {
       Texture = null
       NormalMap = ValueNone
@@ -1407,7 +2129,6 @@ module DSL =
       Layer = 0<RenderLayer>
     }
 
-    /// <summary>Creates a sprite state from a texture.</summary>
     let inline fromTexture(tex: Texture2D) : SpriteState = {
       empty with
           Texture = tex
@@ -1444,7 +2165,6 @@ module DSL =
           Effects = s.Effects ||| SpriteEffects.FlipVertically
     }
 
-  /// <summary>Computation expression builder for sprites.</summary>
   type SpriteBuilder() =
     member inline _.Yield(_: unit) : SpriteState = Sprite.empty
 
@@ -1544,12 +2264,7 @@ module DSL =
 
     member inline _.Run(s: SpriteState) : SpriteState = s
 
-  // --------------------------------------------------------------------------
-  // Text Types and Builder
-  // --------------------------------------------------------------------------
-
   module Text =
-    /// <summary>Creates a default empty text state.</summary>
     let empty: TextState = {
       Font = null
       Text = ""
@@ -1568,7 +2283,6 @@ module DSL =
     let inline scale sc (s: TextState) = { s with Scale = sc }
     let inline layer l (s: TextState) = { s with Layer = l }
 
-  /// <summary>Computation expression builder for text.</summary>
   type TextBuilder() =
     member inline _.Yield(_: unit) : TextState = Text.empty
 
@@ -1622,14 +2336,8 @@ module DSL =
 
     member inline _.Run(s: TextState) : TextState = s
 
-  // --------------------------------------------------------------------------
-  // Buffer Extensions
-  // --------------------------------------------------------------------------
-
-  /// <summary>Fluent extension methods for RenderBuffer.</summary>
   [<Extension>]
   type RenderBuffer2DExtensions =
-
     [<Extension>]
     static member inline Sprite
       (this: RenderBuffer<RenderCmd2D>, s: SpriteState)
@@ -1651,11 +2359,11 @@ module DSL =
         0<RenderLayer>,
         DrawSprite {
           Sprite.empty with
-            Texture = tex
-            DestX = x
-            DestY = y
-            Width = w
-            Height = h
+              Texture = tex
+              DestX = x
+              DestY = y
+              Width = w
+              Height = h
         }
       )
 
@@ -1679,16 +2387,12 @@ module DSL =
       ) =
       this.Add(
         0<RenderLayer>,
-        DrawTextLegacy {
-          Font = font
-          Text = text
-          Position = Vector2(float32 x, float32 y)
-          Color = Color.White
-          Rotation = 0f
-          Origin = Vector2.Zero
-          Scale = 1f
-          Effects = SpriteEffects.None
-          Depth = 0f
+        DrawText {
+          Text.empty with
+              Font = font
+              Text = text
+              DestX = x
+              DestY = y
         }
       )
 
@@ -1914,11 +2618,6 @@ module DSL =
     [<Extension>]
     static member inline Submit(this: RenderBuffer<RenderCmd2D>) = ()
 
-  // --------------------------------------------------------------------------
-  // Pipeline-Style Functions
-  // --------------------------------------------------------------------------
-
-  /// <summary>Pipeline-style functions for buffer operations.</summary>
   module Buffer2D =
     let inline sprite s (buffer: RenderBuffer<RenderCmd2D>) = buffer.Sprite(s)
     let inline text t (buffer: RenderBuffer<RenderCmd2D>) = buffer.Text(t)
@@ -1969,15 +2668,7 @@ module DSL =
 
     let inline submit(buffer: RenderBuffer<RenderCmd2D>) = buffer.Submit()
 
-  // --------------------------------------------------------------------------
-  // Global Builder Instances
-  // --------------------------------------------------------------------------
-
-  /// <summary>Global computation expression builders.</summary>
   [<AutoOpen>]
   module View2D =
-    /// <summary>Builder for sprites. Usage: sprite { texture tex; at x y; ... }</summary>
     let sprite = SpriteBuilder()
-
-    /// <summary>Builder for text. Usage: text { font f; content "Hello"; at x y; ... }</summary>
     let text = TextBuilder()
