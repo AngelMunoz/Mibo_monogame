@@ -713,6 +713,7 @@ type Batch2DRenderer<'Model>
   let mutable pointFalloffs: float32[] = Array.empty
   let mutable dirDirections: Vector2[] = Array.empty
   let mutable dirColors: Vector4[] = Array.empty
+  let mutable dirShadowOrigins: Vector2[] = Array.empty
   let mutable pointShadowIndicesBuf: float32[] = Array.empty
   let mutable dirShadowIndicesBuf: float32[] = Array.empty
   let mutable screenSpaceLightsBuf: PointLight2D[] = Array.empty
@@ -807,6 +808,7 @@ type Batch2DRenderer<'Model>
       let occluders = ResizeArray<Occluder2D>()
 
       // 1. Initial collection pass (Phase 3) - Collect all lights/occluders for global shadows
+      let mutable capturedCamera: Camera voption = ValueNone
       for i = 0 to buffer.Count - 1 do
         let struct (_, cmd) = buffer.Item i
 
@@ -814,6 +816,7 @@ type Batch2DRenderer<'Model>
         | AddPointLight l -> pointLights.Add l
         | AddDirectionalLight l -> directionalLights.Add l
         | AddOccluder o -> occluders.Add o
+        | SetCamera c when capturedCamera.IsNone -> capturedCamera <- ValueSome c
         | _ -> ()
 
       let hasPostProcess = config.PostProcess.IsSome
@@ -880,12 +883,31 @@ type Batch2DRenderer<'Model>
 
           let mutable shadowRow = 0
 
+          // Initialize shadow origins buffer
+          ensureCapacity directionalLights.Count &dirShadowOrigins
+
+          // Calculate shadow origin based on camera center
+          let shadowOrigin = 
+            match capturedCamera with
+            | ValueSome cam -> 
+                let invView = Matrix.Invert(cam.View)
+                let viewport = ctx.GraphicsDevice.Viewport
+                // Center of the viewport in world space
+                let centerWorld = Vector3.Transform(Vector3(float32 viewport.Width * 0.5f, float32 viewport.Height * 0.5f, 0f), invView)
+                // Snap to integer to prevent shimmering
+                let snappedX = floor(centerWorld.X)
+                let snappedY = floor(centerWorld.Y)
+                Vector2(float32 snappedX, float32 snappedY)
+            | ValueNone -> Vector2.Zero
+
           for lightType, lightIdx, _ in sortedCasters do
             if lightType = 0 then
               if lightIdx < shadowIndicesPoint.Length then
                 shadowIndicesPoint.[lightIdx] <- shadowRow
             else if lightIdx < shadowIndicesDirectional.Length then
               shadowIndicesDirectional.[lightIdx] <- shadowRow
+              // Store origin for this light
+              dirShadowOrigins.[lightIdx] <- shadowOrigin
 
             shadowRow <- shadowRow + 1
 
@@ -973,6 +995,7 @@ type Batch2DRenderer<'Model>
                 shadowShader.SafeSetParam("LightRadius", -1.0f)
                 shadowShader.SafeSetParam("AtlasWidth", float32 atlasWidth)
                 shadowShader.SafeSetParam("AtlasHeight", float32 atlasHeight)
+                shadowShader.SafeSetParam("ShadowOrigin", dirShadowOrigins.[lightIdx])
 
                 shadowShader.CurrentTechnique.Passes.[0].Apply()
 
@@ -1116,6 +1139,7 @@ type Batch2DRenderer<'Model>
 
               fx.SafeSetParam("DirectionalLightDirections", dirDirections)
               fx.SafeSetParam("DirectionalLightColors", dirColors)
+              fx.SafeSetParam("DirectionalLightShadowOrigins", dirShadowOrigins)
 
             // Handle tiered tile data texture
             let requiredBufferSize = bin.TileData.Length

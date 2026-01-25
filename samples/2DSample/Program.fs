@@ -176,7 +176,7 @@ let main _ =
     |> Program.withRenderer(fun game ->
       let lightingConfig =
         Lighting2DConfig.enabled { Color = Color(40, 40, 60) }
-        |> Lighting2DConfig.withShadows { Shadows2DConfig.defaults with Resolution = 2048; SoftShadowQuality = SoftShadowQuality2D.High }
+        |> Lighting2DConfig.withShadows { Shadows2DConfig.defaults with Resolution = 2048; SoftShadowQuality = SoftShadowQuality2D.High; ShadowBias = 0.0001f }
 
       Batch2DConfig.defaults
       |> Batch2DConfig.withClearColor(ValueSome Color.Black)

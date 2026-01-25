@@ -18,6 +18,7 @@ float PointLightFalloffs[16];
 int DirectionalLightCount;
 float2 DirectionalLightDirections[8];
 float4 DirectionalLightColors[8];
+float2 DirectionalLightShadowOrigins[8];
 
 float TileSize;
 float TilesX;
@@ -137,13 +138,22 @@ float ComputeShadow(int lightIdx, int isPointLight, float2 worldPos)
 	else
 	{
 		// Directional Light: Orthographic sampling
+        float2 origin = DirectionalLightShadowOrigins[lightIdx];
+        float2 relPos = worldPos - origin;
+        
 		float2 perpDir = float2(DirectionalLightDirections[lightIdx].y, -DirectionalLightDirections[lightIdx].x);
-		float proj = dot(worldPos, perpDir);
+		float proj = dot(relPos, perpDir);
 		u = (proj / ShadowAtlasSize.x + 1.0) * 0.5;
-		dist = dot(worldPos, DirectionalLightDirections[lightIdx]) / ShadowAtlasSize.x;
+        
+        // Depth relative to origin (matches shadowcaster.fx)
+		dist = (dot(relPos, DirectionalLightDirections[lightIdx]) + ShadowAtlasSize.x) / (ShadowAtlasSize.x * 2.0);
 	}
 
 	float v = (float(shadowIndex) + 0.5) / ShadowAtlasSize.y;
+    
+    // Check if we are outside the shadow map bounds
+    if (u < 0.0 || u > 1.0) return 1.0;
+    
 	float occluderDist = tex2D(ShadowAtlasSampler, float2(u, v)).r;
 
 	if (dist > occluderDist + ShadowBias) return 0.0;

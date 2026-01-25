@@ -64,12 +64,12 @@ let view (ctx: Mibo.Elmish.GameContext) (model: Model) (buffer: RenderBuffer<Ren
     buffer.Add(-100<RenderLayer>, DrawCustom drawSky)
 
     // 2. Celestial Bodies Position
-    // Use Camera position as center to make them feel infinitely far (parallax)
-    // But we want them to move across the sky.
-    // Fixed orbit relative to camera center is good.
-    let center = Vector2(model.CameraX + w/2.0f, 300.0f) 
+    // Use Camera position X for centering, but fixed Y horizon (ground level approx)
+    let groundY = 650.0f 
+    let center = Vector2(model.CameraX + w/2.0f, groundY) 
     
-    let radius = Vector2(w * 0.6f, h * 0.7f)
+    // Large orbit radius to make it feel like it's coming from far away
+    let radius = Vector2(w * 0.8f, h * 0.8f)
     let sunPos = DayNight.getSunPosition time center radius
     let moonPos = DayNight.getMoonPosition time center radius
     
@@ -82,7 +82,7 @@ let view (ctx: Mibo.Elmish.GameContext) (model: Model) (buffer: RenderBuffer<Ren
         let sun = 
             model.TerrainAssets.SunSprite 
             |> AnimatedSprite.withColor sunColor
-            |> AnimatedSprite.withScale 2.0f // Make it big
+            |> AnimatedSprite.withScale 2.0f
             
         AnimatedSprite.draw sunPos -90<RenderLayer> buffer sun
         
@@ -100,24 +100,22 @@ let view (ctx: Mibo.Elmish.GameContext) (model: Model) (buffer: RenderBuffer<Ren
     let ambient = Color.Lerp(bot, Color.Black, 0.4f)
     buffer.AddLighting { Color = ambient } |> ignore
     
-    // Sun Light
+    // Sun Light (Directional for stable shadows)
     if sunColor.A > 0uy then
-        buffer.PointLight {
-            Position = sunPos
+        let direction = Vector2.Normalize(center - sunPos)
+        buffer.DirectionalLight {
+            Direction = direction
             Color = sunColor
             Intensity = 1.2f
-            Radius = 2500.0f // Cover entire screen effectively
-            Falloff = 0.5f
             Shadow = ValueSome { Bias = ValueNone }
         } |> ignore
         
-    // Moon Light
+    // Moon Light (Directional)
     if moonColor.A > 0uy then
-        buffer.PointLight {
-            Position = moonPos
+        let direction = Vector2.Normalize(center - moonPos)
+        buffer.DirectionalLight {
+            Direction = direction
             Color = Color.LightBlue
             Intensity = 0.6f
-            Radius = 2500.0f
-            Falloff = 0.5f
             Shadow = ValueSome { Bias = ValueNone }
         } |> ignore

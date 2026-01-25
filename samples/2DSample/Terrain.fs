@@ -593,7 +593,7 @@ let getVisibleTiles
   (screenWidth: float32)
   (tiles: Tile array)
   : Tile array =
-  let margin = Constants.tileSize * 5.0f
+  let margin = Constants.tileSize * 15.0f
   let left = cameraX - margin
   let right = cameraX + screenWidth + margin
 
