@@ -50,7 +50,7 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     SpriteLoader.load ctx
 
   // Generate random seed for procedural terrain
-  let seed = 78494612
+  let seed = System.Random.Shared.Next()
 
   // Generate initial terrain
   let initialTiles = Terrain.generateInitialTerrain seed
@@ -99,7 +99,12 @@ let private updateSystems dt model =
   |> System.pipe(Physics.update dt)
   |> System.pipe Terrain.update
   |> System.pipe(Player.update dt)
-  |> System.pipe(fun m -> { m with DayNight = DayNight.update dt m.DayNight }, Cmd.none)
+  |> System.pipe(fun m ->
+    {
+      m with
+          DayNight = DayNight.update dt m.DayNight
+    },
+    Cmd.none)
   |> System.pipe(fun model ->
     if
       Physics.checkKillPlane model || model.Actions.Started.Contains Respawn
@@ -176,7 +181,12 @@ let main _ =
     |> Program.withRenderer(fun game ->
       let lightingConfig =
         Lighting2DConfig.enabled { Color = Color(40, 40, 60) }
-        |> Lighting2DConfig.withShadows { Shadows2DConfig.defaults with Resolution = 2048; SoftShadowQuality = SoftShadowQuality2D.High; ShadowBias = 0.0001f }
+        |> Lighting2DConfig.withShadows {
+          Shadows2DConfig.defaults with
+              Resolution = 2048
+              SoftShadowQuality = SoftShadowQuality2D.High
+              ShadowBias = 0.0001f
+        }
 
       Batch2DConfig.defaults
       |> Batch2DConfig.withClearColor(ValueSome Color.Black)

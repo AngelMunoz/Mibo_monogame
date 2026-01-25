@@ -626,10 +626,6 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
       )
       |> ignore
 
-  // Add lights and occluders to the buffer for the renderer to process
-  for light in model.Map.PointLights do
-    () // buffer.Add(0<RenderLayer>, AddPointLight light)
-
   for occluder in model.Map.Occluders do
     buffer.Occluder(occluder) |> ignore
 
