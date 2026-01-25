@@ -10,6 +10,12 @@ open MiboSample.Domain
 // SpriteLoader: Load and organize Kenney platformer assets
 // ─────────────────────────────────────────────────────────────
 
+/// Create a simple 1x1 white texture for rendering
+let createWhiteTexture(device: GraphicsDevice) =
+  let texture = new Texture2D(device, 1, 1)
+  texture.SetData([| Color.White |])
+  texture
+
 /// Load all assets required for the platformer
 let load(ctx: GameContext) =
   // Load character spritesheet
@@ -118,16 +124,23 @@ let load(ctx: GameContext) =
 
   // Reuse the decoration sheet's star for sun/moon since it's the same texture
   // Just need a centered origin for rotation
-  let celestialSheet = 
+  let celestialSheet =
     SpriteSheet.fromFrames tileTex (Vector2(32.0f, 32.0f)) [|
-        "star", starAnim
+      "star", starAnim
     |]
+
+  let particleFx = new BasicEffect(ctx.GraphicsDevice)
+  particleFx.TextureEnabled <- true
+  particleFx.VertexColorEnabled <- true
 
   let terrainAssets = {
     GroundTile = tileTex
     PlatformTile = tileTex
     HazardTile = tileTex
+    WhiteTexture = createWhiteTexture ctx.GraphicsDevice
+    ParticleEffect = particleFx
     SkyEffect = Assets.effect "Shaders/Sky" ctx
+    LightingEffect = Assets.effect "Shaders/lighting" ctx
     SunSprite = AnimatedSprite.create celestialSheet "star"
     MoonSprite = AnimatedSprite.create celestialSheet "star"
   }

@@ -3,6 +3,8 @@ module Mibo.Tests.Sprite3D
 open Expecto
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open Mibo.Elmish.Graphics3D
+open Mibo.Rendering
 open Mibo.Elmish
 open Mibo.Rendering.Graphics3D
 

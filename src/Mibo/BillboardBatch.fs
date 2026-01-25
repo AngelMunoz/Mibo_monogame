@@ -1,4 +1,4 @@
-namespace Mibo.Elmish.Graphics3D
+namespace Mibo.Rendering
 
 open System
 open System.Buffers
@@ -122,10 +122,8 @@ module BillboardBatch =
       state.Indices <- null
 
   /// <summary>Begin a batch.</summary>
-  /// <remarks>Caller is responsible for configuring their effect before calling. The effect's first pass will be applied.</remarks>
-  let inline begin' (effect: Effect) (state: State) =
+  let inline begin' (state: State) =
     state.SpriteCount <- 0
-    effect.CurrentTechnique.Passes.[0].Apply()
 
   /// <summary>Adds a billboard to the batch with custom UVs (texture atlas).</summary>
   let drawUv
@@ -133,7 +131,7 @@ module BillboardBatch =
     (size: Vector2)
     (rotation: float32)
     (color: Color)
-    (uv: Mibo.Elmish.Graphics3D.UvRect)
+    (uv: UvRect)
     (camRight: Vector3)
     (camUp: Vector3)
     (state: State)
@@ -192,22 +190,56 @@ module BillboardBatch =
       size
       rotation
       color
-      Mibo.Elmish.Graphics3D.UvRect.full
+      UvRect.full
       camRight
       camUp
       state
 
-  /// <summary>Ends the batch and flushes all draw commands to the GPU.</summary>
-  let end'(state: State) =
+  /// <summary>Adds a screen-aligned 2D billboard to the batch.</summary>
+  let draw2D
+    (position: Vector2)
+    (size: Vector2)
+    (rotation: float32)
+    (color: Color)
+    (uv: UvRect)
+    (state: State)
+    =
+    drawUv
+      (Vector3(position, 0f))
+      size
+      rotation
+      color
+      uv
+      Vector3.UnitX
+      (Vector3(0f, -1f, 0f))
+      state
+
+  /// <summary>Adds a simple screen-aligned 2D billboard to the batch.</summary>
+  let draw2DSimple
+    (position: Vector2)
+    (size: Vector2)
+    (color: Color)
+    (state: State)
+    =
+    draw2D position size 0f color UvRect.full state
+
+  /// <summary>Flushes the current batch to the GPU.</summary>
+  let flush (effect: Effect) (state: State) =
     if state.SpriteCount > 0 then
       ensureBuffers state
       state.VertexBuffer.SetData(state.Vertices, 0, state.SpriteCount * 4)
       state.GraphicsDevice.SetVertexBuffer state.VertexBuffer
       state.GraphicsDevice.Indices <- state.IndexBuffer
 
-      state.GraphicsDevice.DrawIndexedPrimitives(
-        PrimitiveType.TriangleList,
-        0,
-        0,
-        state.SpriteCount * 2
-      )
+      for pass in effect.CurrentTechnique.Passes do
+        pass.Apply()
+
+        state.GraphicsDevice.DrawIndexedPrimitives(
+          PrimitiveType.TriangleList,
+          0,
+          0,
+          state.SpriteCount * 2
+        )
+
+  /// <summary>Ends the batch and flushes all draw commands to the GPU.</summary>
+  let inline end' (effect: Effect) (state: State) = flush effect state

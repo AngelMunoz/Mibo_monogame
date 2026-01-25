@@ -37,6 +37,16 @@ type SpriteState = {
   Layer: int<RenderLayer>
 }
 
+/// <summary>Unified state for a particle draw call.</summary>
+[<Struct>]
+type Particle2DState = {
+  Position: Vector2
+  Size: Vector2
+  Rotation: float32
+  Color: Color
+  Uv: UvRect
+}
+
 // ============================================================================
 // 2D Lighting System (Phase 3)
 // ============================================================================
@@ -292,6 +302,43 @@ type ShaderBase2D =
   | ShadowCaster
   | PostProcess
 
+/// <summary>Batch of 2D particles command parameters.</summary>
+[<Struct>]
+type DrawParticlesCmd = {
+  Particles: Particle2DState[]
+  Count: int
+  Texture: Texture2D
+  Effect: Effect
+  ParticlesLayer: int<RenderLayer>
+}
+
+/// <summary>2D line command parameters.</summary>
+[<Struct>]
+type DrawLine2DCmd = {
+  P1: Vector2
+  P2: Vector2
+  LineColor: Color
+  LineLayer: int<RenderLayer>
+}
+
+/// <summary>2D rectangle command parameters.</summary>
+[<Struct>]
+type DrawRect2DCmd = {
+  Rect: Rectangle
+  RectColor: Color
+  RectLayer: int<RenderLayer>
+}
+
+/// <summary>2D circle command parameters.</summary>
+[<Struct>]
+type DrawCircle2DCmd = {
+  Center: Vector2
+  Radius: float32
+  Segments: int
+  CircleColor: Color
+  CircleLayer: int<RenderLayer>
+}
+
 /// <summary>A 2D render command.</summary>
 /// <remarks>These commands are queued to a <see cref="T:Mibo.Elmish.RenderBuffer`1"/> and executed by <see cref="T:Mibo.Elmish.Graphics2D.Batch2DRenderer`1"/>.</remarks>
 [<Struct>]
@@ -363,6 +410,18 @@ type RenderCmd2D =
 
   /// Add an occluder for shadows.
   | AddOccluder of occluderVal: Occluder2D
+
+  /// Draws a batch of 2D particles.
+  | DrawParticles of particlesCmd: DrawParticlesCmd
+
+  /// Draws a 2D line.
+  | DrawLine2D of lineCmd: DrawLine2DCmd
+
+  /// Draws a 2D rectangle outline.
+  | DrawRect2D of rectCmd: DrawRect2DCmd
+
+  /// Draws a 2D circle outline.
+  | DrawCircle2D of circleCmd: DrawCircle2DCmd
 
 // ============================================================================
 // Post-Processing Configuration (Phase 2)
@@ -692,6 +751,9 @@ type Batch2DRenderer<'Model>
   let mutable shadowIndicesPoint: int[] = Array.zeroCreate 16
   let mutable shadowIndicesDirectional: int[] = Array.zeroCreate 8
   let mutable occluderBatch: OccluderBatch.State option = None
+  let mutable billboardBatch: BillboardBatch.State voption = ValueNone
+  let mutable lineBatch: LineBatch.State voption = ValueNone
+  let mutable primitiveEffect: BasicEffect = null
   let mutable defaultNormalMap: Texture2D = null
   let mutable currentNormalMap: Texture2D = null
 
@@ -748,6 +810,18 @@ type Batch2DRenderer<'Model>
       match occluderBatch with
       | Some s -> OccluderBatch.dispose s
       | None -> ()
+
+      match billboardBatch with
+      | ValueSome s -> BillboardBatch.dispose s
+      | ValueNone -> ()
+
+      match lineBatch with
+      | ValueSome s -> LineBatch.dispose s
+      | ValueNone -> ()
+
+      if not(isNull primitiveEffect) then
+        primitiveEffect.Dispose()
+        primitiveEffect <- null
 
   interface IRenderer<'Model> with
     member _.Draw(ctx: GameContext, model: 'Model, gameTime: GameTime) =
@@ -1567,6 +1641,135 @@ type Batch2DRenderer<'Model>
         | AddDirectionalLight _
         | AddOccluder _ -> ()
 
+        | DrawParticles pCmd ->
+          if isBatching then
+            endBatch()
+            isBatching <- false
+
+          // Ensure billboardBatch is initialized
+          let batch =
+            match billboardBatch with
+            | ValueSome b -> b
+            | ValueNone ->
+              let b = BillboardBatch.create ctx.GraphicsDevice
+              billboardBatch <- ValueSome b
+              b
+
+          // Set camera matrices and texture on the effect
+          match pCmd.Effect with
+          | :? BasicEffect as be ->
+            be.World <- Matrix.Identity
+            be.View <- activeViewMatrix
+            be.Projection <- currentCamera.Projection
+            be.Texture <- pCmd.Texture
+          | _ ->
+            pCmd.Effect.SafeSetParam("Texture", pCmd.Texture)
+            pCmd.Effect.SafeSetParam("DiffuseTexture", pCmd.Texture)
+            pCmd.Effect.SafeSetParam("World", Matrix.Identity)
+            pCmd.Effect.SafeSetParam("View", activeViewMatrix)
+            pCmd.Effect.SafeSetParam("Projection", currentCamera.Projection)
+
+          BillboardBatch.begin' batch
+
+          for pIdx = 0 to pCmd.Count - 1 do
+            let p = pCmd.Particles.[pIdx]
+            BillboardBatch.draw2D p.Position p.Size p.Rotation p.Color p.Uv batch
+
+          BillboardBatch.end' pCmd.Effect batch
+
+          beginBatch()
+          isBatching <- true
+
+        | DrawLine2D lCmd ->
+          if isBatching then
+            endBatch()
+            isBatching <- false
+
+          let batch =
+            match lineBatch with
+            | ValueSome b -> b
+            | ValueNone ->
+              let b = LineBatch.create ctx.GraphicsDevice
+              lineBatch <- ValueSome b
+              b
+
+          if isNull primitiveEffect then
+            primitiveEffect <- new BasicEffect(ctx.GraphicsDevice)
+            primitiveEffect.LightingEnabled <- false
+            primitiveEffect.TextureEnabled <- false
+            primitiveEffect.VertexColorEnabled <- true
+
+          primitiveEffect.World <- Matrix.Identity
+          primitiveEffect.View <- activeViewMatrix
+          primitiveEffect.Projection <- currentCamera.Projection
+
+          LineBatch.begin' batch
+          LineBatch.addLine2D lCmd.P1 lCmd.P2 lCmd.LineColor batch
+          LineBatch.end' primitiveEffect batch
+
+          beginBatch()
+          isBatching <- true
+
+        | DrawRect2D rCmd ->
+          if isBatching then
+            endBatch()
+            isBatching <- false
+
+          let batch =
+            match lineBatch with
+            | ValueSome b -> b
+            | ValueNone ->
+              let b = LineBatch.create ctx.GraphicsDevice
+              lineBatch <- ValueSome b
+              b
+
+          if isNull primitiveEffect then
+            primitiveEffect <- new BasicEffect(ctx.GraphicsDevice)
+            primitiveEffect.LightingEnabled <- false
+            primitiveEffect.TextureEnabled <- false
+            primitiveEffect.VertexColorEnabled <- true
+
+          primitiveEffect.World <- Matrix.Identity
+          primitiveEffect.View <- activeViewMatrix
+          primitiveEffect.Projection <- currentCamera.Projection
+
+          LineBatch.begin' batch
+          LineBatch.addRect2D rCmd.Rect rCmd.RectColor batch
+          LineBatch.end' primitiveEffect batch
+
+          beginBatch()
+          isBatching <- true
+
+        | DrawCircle2D cCmd ->
+          if isBatching then
+            endBatch()
+            isBatching <- false
+
+          let batch =
+            match lineBatch with
+            | ValueSome b -> b
+            | ValueNone ->
+              let b = LineBatch.create ctx.GraphicsDevice
+              lineBatch <- ValueSome b
+              b
+
+          if isNull primitiveEffect then
+            primitiveEffect <- new BasicEffect(ctx.GraphicsDevice)
+            primitiveEffect.LightingEnabled <- false
+            primitiveEffect.TextureEnabled <- false
+            primitiveEffect.VertexColorEnabled <- true
+
+          primitiveEffect.World <- Matrix.Identity
+          primitiveEffect.View <- activeViewMatrix
+          primitiveEffect.Projection <- currentCamera.Projection
+
+          LineBatch.begin' batch
+          LineBatch.addCircle2D cCmd.Center cCmd.Radius cCmd.Segments cCmd.CircleColor batch
+          LineBatch.end' primitiveEffect batch
+
+          beginBatch()
+          isBatching <- true
+
       if isBatching then
         endBatch()
 
@@ -2189,7 +2392,7 @@ module DSL =
         cam: Camera,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultValueArg layer 0<RenderLayer>, SetCamera cam)
+      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, SetCamera cam)
       this
 
     [<Extension>]
@@ -2204,7 +2407,7 @@ module DSL =
         bs: BlendState,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultValueArg layer 0<RenderLayer>, SetBlendState bs)
+      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, SetBlendState bs)
       this
 
     [<Extension>]
@@ -2215,7 +2418,7 @@ module DSL =
         [<Struct>] ?layer: int<RenderLayer>
       ) =
       this.Add(
-        defaultValueArg layer 0<RenderLayer>,
+        ValueOption.defaultValue 0<RenderLayer> layer,
         SetEffect(ValueSome effect)
       )
 
@@ -2228,7 +2431,7 @@ module DSL =
         lighting: LightingState2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultValueArg layer 0<RenderLayer>, SetLighting lighting)
+      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, SetLighting lighting)
       this
 
     [<Extension>]
@@ -2238,7 +2441,7 @@ module DSL =
         ambient: AmbientLight2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultValueArg layer 0<RenderLayer>, AddLighting ambient)
+      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddLighting ambient)
       this
 
     [<Extension>]
@@ -2248,7 +2451,7 @@ module DSL =
         light: PointLight2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultValueArg layer 0<RenderLayer>, AddPointLight light)
+      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddPointLight light)
       this
 
     [<Extension>]
@@ -2258,7 +2461,7 @@ module DSL =
         light: DirectionalLight2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultValueArg layer 0<RenderLayer>, AddDirectionalLight light)
+      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddDirectionalLight light)
       this
 
     [<Extension>]
@@ -2268,7 +2471,61 @@ module DSL =
         occluder: Occluder2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(defaultValueArg layer 0<RenderLayer>, AddOccluder occluder)
+      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddOccluder occluder)
+      this
+
+    [<Extension>]
+    static member inline Particles
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        texture: Texture2D,
+        effect: Effect,
+        particles: Particle2DState[],
+        count: int,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
+      this.Add(l, DrawParticles { Particles = particles; Count = count; Texture = texture; Effect = effect; ParticlesLayer = l })
+      this
+
+    [<Extension>]
+    static member inline Line
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        p1: Vector2,
+        p2: Vector2,
+        color: Color,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
+      this.Add(l, DrawLine2D { P1 = p1; P2 = p2; LineColor = color; LineLayer = l })
+      this
+
+    [<Extension>]
+    static member inline Rect
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        rect: Rectangle,
+        color: Color,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
+      this.Add(l, DrawRect2D { Rect = rect; RectColor = color; RectLayer = l })
+      this
+
+    [<Extension>]
+    static member inline Circle
+      (
+        this: RenderBuffer<RenderCmd2D>,
+        center: Vector2,
+        radius: float32,
+        color: Color,
+        [<Struct>] ?segments: int,
+        [<Struct>] ?layer: int<RenderLayer>
+      ) =
+      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
+      let s = ValueOption.defaultValue 16 segments
+      this.Add(l, DrawCircle2D { Center = center; Radius = radius; Segments = s; CircleColor = color; CircleLayer = l })
       this
 
     [<Extension>]
@@ -2308,6 +2565,18 @@ module DSL =
 
     let inline occluder o (buffer: RenderBuffer<RenderCmd2D>) =
       buffer.Occluder(o)
+
+    let inline particles texture effect particlesArr count (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Particles(texture, effect, particlesArr, count)
+
+    let inline line p1 p2 color (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Line(p1, p2, color)
+
+    let inline rect r color (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Rect(r, color)
+
+    let inline circle center radius color (buffer: RenderBuffer<RenderCmd2D>) =
+      buffer.Circle(center, radius, color)
 
     let inline submit(buffer: RenderBuffer<RenderCmd2D>) = buffer.Submit()
 

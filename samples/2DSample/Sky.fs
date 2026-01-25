@@ -5,35 +5,9 @@ open Microsoft.Xna.Framework.Graphics
 open Mibo.Animation
 open Mibo.Elmish.Graphics2D
 open Mibo.Elmish.Graphics2D.DSL
+open Mibo.Rendering
 open MiboSample.Domain
 open MiboSample.DayNight
-
-[<AutoOpen>]
-module EffectExtensions =
-  type Effect with
-    member this.SafeSet(name: string, value: Vector4) =
-      let p = this.Parameters.[name]
-
-      if not(isNull p) then
-        p.SetValue(value)
-
-    member this.SafeSet(name: string, value: float32) =
-      let p = this.Parameters.[name]
-
-      if not(isNull p) then
-        p.SetValue(value)
-
-    member this.SafeSet(name: string, value: Vector2) =
-      let p = this.Parameters.[name]
-
-      if not(isNull p) then
-        p.SetValue(value)
-
-    member this.SafeSet(name: string, value: Matrix) =
-      let p = this.Parameters.[name]
-
-      if not(isNull p) then
-        p.SetValue(value)
 
 let view
   (ctx: Mibo.Elmish.GameContext)
@@ -51,13 +25,13 @@ let view
     let fx = model.TerrainAssets.SkyEffect
 
     if fx <> null then
-      fx.SafeSet("TopColor", top.ToVector4())
-      fx.SafeSet("BottomColor", bot.ToVector4())
-      fx.SafeSet("StarIntensity", stars)
-      fx.SafeSet("Resolution", Vector2(w, h))
-      fx.SafeSet("World", Matrix.Identity)
-      fx.SafeSet("View", Matrix.Identity)
-      fx.SafeSet("Projection", Matrix.Identity)
+      fx.SafeSetParam("TopColor", top.ToVector4())
+      fx.SafeSetParam("BottomColor", bot.ToVector4())
+      fx.SafeSetParam("StarIntensity", stars)
+      fx.SafeSetParam("Resolution", Vector2(w, h))
+      fx.SafeSetParam("World", Matrix.Identity)
+      fx.SafeSetParam("View", Matrix.Identity)
+      fx.SafeSetParam("Projection", Matrix.Identity)
 
       // Full screen quad in Normalized Device Coordinates (-1 to 1)
       let quad = [|

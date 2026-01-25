@@ -9,7 +9,7 @@ open Microsoft.Xna.Framework.Graphics
 /// A simple batcher for drawing 3D textured quads.
 /// </summary>
 /// <remarks>
-/// Quads are axis-aligned (not camera-facing like <see cref="T:Mibo.Elmish.Graphics3D.BillboardBatch"/>).
+/// Quads are axis-aligned (not camera-facing like <see cref="T:Mibo.Rendering.BillboardBatch"/>).
 /// </remarks>
 module QuadBatch =
 

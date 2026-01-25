@@ -4,6 +4,7 @@ open System
 open System.Buffers
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open Mibo.Rendering
 
 /// <summary>
 /// A simple batcher for drawing textured, vertex-colored quads in 3D.

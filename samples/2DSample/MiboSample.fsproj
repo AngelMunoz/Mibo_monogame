@@ -16,8 +16,9 @@
     <Compile Include="Animation.fs" />
     <Compile Include="Physics.fs" />
     <Compile Include="Terrain.fs" />
-    <Compile Include="Player.fs" />
     <Compile Include="Camera.fs" />
+    <Compile Include="Particles.fs" />
+    <Compile Include="Player.fs" />
     <Compile Include="UI.fs" />
     <Compile Include="Sky.fs" />
     <Compile Include="Program.fs" />

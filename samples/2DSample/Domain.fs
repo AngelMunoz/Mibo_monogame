@@ -63,6 +63,18 @@ type Platform = {
   Variant: int
 }
 
+/// Simple particle structure
+[<Struct>]
+type Particle = {
+  Position: Vector2
+  Velocity: Vector2
+  Lifetime: float32
+  MaxLifetime: float32
+  Color: Color
+  Size: Vector2
+  Rotation: float32
+}
+
 // ─────────────────────────────────────────────────────────────
 // Physics Constants
 // ─────────────────────────────────────────────────────────────
@@ -100,7 +112,10 @@ type TerrainAssets = {
   GroundTile: Texture2D
   PlatformTile: Texture2D
   HazardTile: Texture2D
+  WhiteTexture: Texture2D
+  ParticleEffect: BasicEffect
   SkyEffect: Effect
+  LightingEffect: Effect
   SunSprite: AnimatedSprite
   MoonSprite: AnimatedSprite
 }
@@ -145,6 +160,7 @@ type Model = {
   Seed: int // For procedural generation
   LastGeneratedChunk: int
   DayNight: DayNight.State
+  Particles: Particle list
 }
 
 // ─────────────────────────────────────────────────────────────

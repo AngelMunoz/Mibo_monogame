@@ -5,6 +5,7 @@ open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
+open Mibo.Rendering
 
 // --- 3D Rendering Implementation ---
 
@@ -561,7 +562,7 @@ module internal SpriteRendering =
 
     // Reset batches
     SpriteQuadBatch.begin' ctx.SpriteQuadBatch
-    BillboardBatch.end' ctx.BillboardBatch
+    BillboardBatch.begin' ctx.BillboardBatch
 
     let applySpriteStates(pass: RenderPass) =
       ctx.GraphicsDevice |> DeviceState.applySpritePass ctx.Config pass
@@ -590,7 +591,8 @@ module internal SpriteRendering =
 
     let flushPendingBillboards() =
       if ctx.BillboardBatch.SpriteCount > 0 then
-        BillboardBatch.end' ctx.BillboardBatch
+        BillboardBatch.end' (ctx.SpriteEffect :> Effect) ctx.BillboardBatch
+        BillboardBatch.begin' ctx.BillboardBatch
 
     for i = 0 to items.Count - 1 do
       let struct (_, cmd) = items[i]
@@ -622,7 +624,7 @@ module internal SpriteRendering =
           ctx.SpriteEffect.View <- ctx.ViewMatrix
           ctx.SpriteEffect.Projection <- ctx.ProjectionMatrix
           ctx.SpriteEffect.Texture <- s.Texture
-          BillboardBatch.begin' (ctx.SpriteEffect :> Effect) ctx.BillboardBatch
+          BillboardBatch.begin' ctx.BillboardBatch
         else
           applySpriteStates pass
 
@@ -690,7 +692,7 @@ module internal SpriteRendering =
 
         applySpriteStates pass
 
-        BillboardBatch.begin' effect ctx.BillboardBatch
+        BillboardBatch.begin' ctx.BillboardBatch
         let b = e.Billboard
 
         let struct (right, up) =
@@ -706,7 +708,7 @@ module internal SpriteRendering =
           up
           ctx.BillboardBatch
 
-        BillboardBatch.end' ctx.BillboardBatch
+        BillboardBatch.end' effect ctx.BillboardBatch
 
       | DrawLine(struct (p1, p2, color), _) ->
         // Flush sprite batches before drawing lines
@@ -758,7 +760,8 @@ module internal SpriteRendering =
     // Final flush
     flushPendingQuads()
 
-    flushPendingBillboards()
+    if ctx.BillboardBatch.SpriteCount > 0 then
+      BillboardBatch.end' (ctx.SpriteEffect :> Effect) ctx.BillboardBatch
 
 
 /// <summary>Standard 3D Renderer using <see cref="T:Microsoft.Xna.Framework.Graphics.BasicEffect"/>.</summary>

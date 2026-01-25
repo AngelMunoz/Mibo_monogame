@@ -3,6 +3,7 @@ namespace Mibo.Rendering.Graphics3D
 open System
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open Mibo.Rendering
 
 // ============================================================================
 // Core Types for the Rendering Pipeline
@@ -25,23 +26,6 @@ type EffectContext = {
 
 /// <summary>Callback for configuring an effect before a draw operation.</summary>
 type EffectSetup = Effect -> EffectContext -> unit
-
-/// <summary>UV rectangle in normalized texture coordinates.</summary>
-[<Struct>]
-type UvRect = {
-  U0: float32
-  V0: float32
-  U1: float32
-  V1: float32
-}
-
-module UvRect =
-  let full: UvRect = {
-    U0 = 0.0f
-    V0 = 0.0f
-    U1 = 1.0f
-    V1 = 1.0f
-  }
 
 /// Shader base types for override mapping
 type ShaderBase =

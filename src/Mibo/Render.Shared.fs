@@ -192,3 +192,24 @@ module EffectHelpers =
     member inline this.SafeSetParam(name: string, value: Color) =
       findParam name this
       |> ValueOption.iter(fun p -> p.SetValue(value.ToVector4()))
+
+// ============================================================================
+// Shared Types
+// ============================================================================
+
+/// <summary>UV rectangle in normalized texture coordinates.</summary>
+[<Struct>]
+type UvRect = {
+  U0: float32
+  V0: float32
+  U1: float32
+  V1: float32
+}
+
+module UvRect =
+  let full: UvRect = {
+    U0 = 0.0f
+    V0 = 0.0f
+    U1 = 1.0f
+    V1 = 1.0f
+  }

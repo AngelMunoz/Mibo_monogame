@@ -1,9 +1,9 @@
 namespace Mibo.Rendering.Graphics3D
 
+open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
-open Mibo.Elmish
-open System.Runtime.CompilerServices
+open Mibo.Rendering
 
 // ============================================================================
 // DSL State Types

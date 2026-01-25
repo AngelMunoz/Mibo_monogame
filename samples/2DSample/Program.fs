@@ -13,6 +13,7 @@ open MiboSample.Domain
 open MiboSample.SpriteLoader
 open MiboSample.Physics
 open MiboSample.Terrain
+open MiboSample.Particles
 open MiboSample.Player
 open MiboSample.Camera
 open MiboSample.UI
@@ -84,12 +85,17 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     Seed = seed
     LastGeneratedChunk = 1
     DayNight = DayNight.initial
+    Particles = []
   },
   Cmd.none
 
 // ─────────────────────────────────────────────────────────────
+
 // Update: Orchestration using System Pipeline
+
 // ─────────────────────────────────────────────────────────────
+
+
 
 let private updateSystems dt model =
   System.start {
@@ -100,11 +106,15 @@ let private updateSystems dt model =
   |> System.pipe Terrain.update
   |> System.pipe(Player.update dt)
   |> System.pipe(fun m ->
+    let particles = Particles.update dt m
+
     {
       m with
           DayNight = DayNight.update dt m.DayNight
+          Particles = particles
     },
     Cmd.none)
+
   |> System.pipe(fun model ->
     if
       Physics.checkKillPlane model || model.Actions.Started.Contains Respawn
@@ -136,7 +146,7 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
 
   // 2. Draw World Elements
   // Sky
-  MiboSample.Sky.view ctx model buffer
+  Sky.view ctx model buffer
 
   // Terrain
   Terrain.view ctx model buffer
@@ -144,7 +154,11 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   // Player
   Player.view ctx model buffer
 
+  // Particles
+  Particles.view ctx model buffer
+
   // 3. Setup UI Camera
+
   let uiCamera = Camera.createUICamera ctx
   buffer.Camera(uiCamera, 100<RenderLayer>) |> ignore
 
