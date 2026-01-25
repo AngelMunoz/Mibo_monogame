@@ -688,8 +688,6 @@ module Batch2DConfig =
 module Lighting2DInternal =
   [<Struct>]
   type LightBinResults = {
-    TileData: int[]
-    TileCounts: int[]
     TilesX: int
     TilesY: int
   }
@@ -700,26 +698,29 @@ module Lighting2DInternal =
     (maxLightsPerTile: int)
     (lights: PointLight2D[])
     (lightCount: int)
+    (tileData: int[])
+    (tileCounts: int[])
     : LightBinResults =
     let viewport = device.Viewport
     let tw = (viewport.Width + tileSize - 1) / tileSize
     let th = (viewport.Height + tileSize - 1) / tileSize
 
-    let tileCounts = Array.zeroCreate<int>(tw * th)
-    // Initialize with -1 (no light marker) instead of 0 (which is a valid light index!)
-    let tileData = Array.create (tw * th * maxLightsPerTile) -1
+    // Reset counts and data for the active viewport area
+    Array.Clear(tileCounts, 0, tw * th)
+    Array.Fill(tileData, -1, 0, tw * th * maxLightsPerTile)
 
     for i = 0 to lightCount - 1 do
       let l = lights.[i]
       let r = l.Radius
-      let minX = max 0 (int(l.Position.X - r) / tileSize)
-      let maxX = min (tw - 1) (int(l.Position.X + r) / tileSize)
-      let minY = max 0 (int(l.Position.Y - r) / tileSize)
-      let maxY = min (th - 1) (int(l.Position.Y + r) / tileSize)
+      let minX = Math.Max(0, int(l.Position.X - r) / tileSize)
+      let maxX = Math.Min(tw - 1, int(l.Position.X + r) / tileSize)
+      let minY = Math.Max(0, int(l.Position.Y - r) / tileSize)
+      let maxY = Math.Min(th - 1, int(l.Position.Y + r) / tileSize)
 
       for ty = minY to maxY do
+        let rowOffset = ty * tw
         for tx = minX to maxX do
-          let tileIdx = ty * tw + tx
+          let tileIdx = rowOffset + tx
           let count = tileCounts.[tileIdx]
 
           if count < maxLightsPerTile then
@@ -727,8 +728,6 @@ module Lighting2DInternal =
             tileCounts.[tileIdx] <- count + 1
 
     {
-      TileData = tileData
-      TileCounts = tileCounts
       TilesX = tw
       TilesY = th
     }
@@ -779,6 +778,16 @@ type Batch2DRenderer<'Model>
   let mutable pointShadowIndicesBuf: float32[] = Array.empty
   let mutable dirShadowIndicesBuf: float32[] = Array.empty
   let mutable screenSpaceLightsBuf: PointLight2D[] = Array.empty
+
+  // Phase 3 collection buffers (Persistent to avoid per-frame allocations)
+  let pointLights = ResizeArray<PointLight2D>()
+  let directionalLights = ResizeArray<DirectionalLight2D>()
+  let occluders = ResizeArray<Occluder2D>()
+  let shadowCasters = ResizeArray<int * int * float32>()
+
+  // Tile binning buffers (Persistent to avoid per-frame allocations)
+  let mutable tileCounts: int[] = Array.empty
+  let mutable tileData: int[] = Array.empty
 
   let buffer = RenderBuffer<RenderCmd2D>()
 
@@ -877,9 +886,9 @@ type Batch2DRenderer<'Model>
         }
         |> ValueSome
 
-      let pointLights = ResizeArray<PointLight2D>()
-      let directionalLights = ResizeArray<DirectionalLight2D>()
-      let occluders = ResizeArray<Occluder2D>()
+      pointLights.Clear()
+      directionalLights.Clear()
+      occluders.Clear()
 
       // 1. Initial collection pass (Phase 3) - Collect all lights/occluders for global shadows
       let mutable capturedCamera: Camera voption = ValueNone
@@ -912,7 +921,7 @@ type Batch2DRenderer<'Model>
           | None -> occluderBatch <- Some(OccluderBatch.create device)
           | Some _ -> ()
 
-          let shadowCasters = ResizeArray<int * int * float32>()
+          shadowCasters.Clear()
 
           for i = 0 to pointLights.Count - 1 do
             let l = pointLights.[i]
@@ -1163,6 +1172,11 @@ type Batch2DRenderer<'Model>
               let screenPos = Vector2.Transform(l.Position, activeViewMatrix)
               screenSpaceLightsBuf.[i] <- { l with Position = screenPos }
 
+            let tw = (ctx.GraphicsDevice.Viewport.Width + lCfg.TileSize - 1) / lCfg.TileSize
+            let th = (ctx.GraphicsDevice.Viewport.Height + lCfg.TileSize - 1) / lCfg.TileSize
+            ensureCapacity (tw * th) &tileCounts
+            ensureCapacity (tw * th * lCfg.MaxLightsPerTile) &tileData
+
             let bin =
               Lighting2DInternal.binPointLights
                 ctx.GraphicsDevice
@@ -1170,6 +1184,8 @@ type Batch2DRenderer<'Model>
                 lCfg.MaxLightsPerTile
                 screenSpaceLightsBuf
                 pCount
+                tileData
+                tileCounts
 
             let pCounts = pCount
             ensureCapacity pCounts &pointPositions
@@ -1216,11 +1232,11 @@ type Batch2DRenderer<'Model>
               fx.SafeSetParam("DirectionalLightShadowOrigins", dirShadowOrigins)
 
             // Handle tiered tile data texture
-            let requiredBufferSize = bin.TileData.Length
+            let requiredBufferSize = tw * th * lCfg.MaxLightsPerTile
 
             if
               isNull lightTileDataTex
-              || lightTileDataTex.Width <> bin.TileData.Length
+              || lightTileDataTex.Width <> requiredBufferSize
             then
               if not(isNull lightTileDataTex) then
                 lightTileDataTex.Dispose()
@@ -1228,7 +1244,7 @@ type Batch2DRenderer<'Model>
               lightTileDataTex <-
                 new Texture2D(
                   ctx.GraphicsDevice,
-                  bin.TileData.Length,
+                  requiredBufferSize,
                   1,
                   false,
                   SurfaceFormat.Single
@@ -1236,9 +1252,9 @@ type Batch2DRenderer<'Model>
 
               lightTileDataBuffer <- Array.zeroCreate requiredBufferSize
 
-            // Zero-allocation copy (mostly)
-            for j = 0 to bin.TileData.Length - 1 do
-              lightTileDataBuffer.[j] <- float32 bin.TileData.[j]
+            // Zero-allocation copy
+            for j = 0 to requiredBufferSize - 1 do
+              lightTileDataBuffer.[j] <- float32 tileData.[j]
 
             lightTileDataTex.SetData(lightTileDataBuffer)
 
