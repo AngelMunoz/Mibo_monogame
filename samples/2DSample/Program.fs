@@ -55,30 +55,7 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
   // Generate initial terrain
   let initialTiles = Terrain.generateInitialTerrain seed
   let map = Terrain.createMapFromTiles initialTiles seed
-  let initialPlatforms = Terrain.createPlatformsFromTiles initialTiles
-
-  // Manual test setup: specific platforms and torches near spawn
-  // Spawn is at (200, 576). Ground is at Y=640.
-  let testTorches = [|
-    Vector2(300.0f, 576.0f), decorationAssets.Torch
-    Vector2(100.0f, 576.0f), decorationAssets.Torch
-    Vector2(500.0f, 448.0f), decorationAssets.Torch
-  |]
-
-  let testPlatforms = [|
-    {
-      Bounds = Rectangle(450, 512, 128, 32)
-      Type = TileType.Platform
-      Variant = 0
-    }
-    {
-      Bounds = Rectangle(50, 512, 128, 32)
-      Type = TileType.Platform
-      Variant = 0
-    }
-  |]
-
-  let platforms = Array.append initialPlatforms testPlatforms
+  let platforms = Terrain.createPlatformsFromTiles initialTiles
 
   // Create player
   let playerId = Helpers.newEntityId()
@@ -102,11 +79,11 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
     PlayerAssets = playerAssets
     TerrainAssets = terrainAssets
     DecorationAssets = decorationAssets
-    Torches = testTorches
     CameraX = 0.0f
     TotalTime = 0.0f
     Seed = seed
     LastGeneratedChunk = 1
+    DayNight = DayNight.initial
   },
   Cmd.none
 
@@ -122,6 +99,7 @@ let private updateSystems dt model =
   |> System.pipe(Physics.update dt)
   |> System.pipe Terrain.update
   |> System.pipe(Player.update dt)
+  |> System.pipe(fun m -> { m with DayNight = DayNight.update dt m.DayNight }, Cmd.none)
   |> System.pipe(fun model ->
     if
       Physics.checkKillPlane model || model.Actions.Started.Contains Respawn
@@ -133,14 +111,6 @@ let private updateSystems dt model =
       { model with Platforms = platforms }, Cmd.none
     else
       model, Cmd.none)
-  |> System.pipe(fun model ->
-    let dt = dt
-
-    let updatedTorches =
-      model.Torches
-      |> Array.map(fun (pos, sprite) -> pos, AnimatedSprite.update dt sprite)
-
-    { model with Torches = updatedTorches }, Cmd.none)
   |> System.finish Camera.update
 
 let update (msg: Msg) (model: Model) : struct (Model * Cmd<Msg>) =
@@ -157,27 +127,14 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
 
   // 1. Setup World Camera
   let worldCamera = Camera.createWorldCamera ctx model
-  buffer.Camera(worldCamera, 0<RenderLayer>) |> ignore
+  buffer.Camera(worldCamera, -1000<RenderLayer>) |> ignore
 
   // 2. Draw World Elements
+  // Sky
+  MiboSample.Sky.view ctx model buffer
+
   // Terrain
-  Terrain.view model buffer
-
-  // Torches and their lights
-  for (pos, sprite) in model.Torches do
-    // Draw torch sprite
-    AnimatedSprite.draw pos 0<RenderLayer> buffer sprite
-
-    // Add dynamic light for the torch
-    buffer.PointLight {
-      Position = pos
-      Color = Color.Orange
-      Intensity = 2.0f
-      Radius = 300.0f
-      Falloff = 1.5f
-      Shadow = ValueSome ShadowSettings2D.defaults
-    }
-    |> ignore
+  Terrain.view ctx model buffer
 
   // Player
   Player.view ctx model buffer
@@ -219,7 +176,7 @@ let main _ =
     |> Program.withRenderer(fun game ->
       let lightingConfig =
         Lighting2DConfig.enabled { Color = Color(40, 40, 60) }
-        |> Lighting2DConfig.withShadows Shadows2DConfig.defaults
+        |> Lighting2DConfig.withShadows { Shadows2DConfig.defaults with Resolution = 2048; SoftShadowQuality = SoftShadowQuality2D.High }
 
       Batch2DConfig.defaults
       |> Batch2DConfig.withClearColor(ValueSome Color.Black)

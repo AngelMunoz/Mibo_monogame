@@ -1057,15 +1057,14 @@ type Batch2DRenderer<'Model>
               |> ValueOption.iter(fun ambient ->
                 fx.SafeSetParam("AmbientColor", ambient.Color)))
 
-            // Transform lights to screen space FOR THIS VIEW
+            // Transform lights to screen space FOR THIS VIEW (Binning needs Screen Space)
             let pCount = pointLights.Count
             ensureCapacity pCount &screenSpaceLightsBuf
 
             for i = 0 to pCount - 1 do
               let l = pointLights.[i]
-
-              // Keep lights in world space - shader authors decide coordinate space
-              screenSpaceLightsBuf.[i] <- l
+              let screenPos = Vector2.Transform(l.Position, activeViewMatrix)
+              screenSpaceLightsBuf.[i] <- { l with Position = screenPos }
 
             let bin =
               Lighting2DInternal.binPointLights
@@ -1082,7 +1081,8 @@ type Batch2DRenderer<'Model>
             ensureCapacity pCounts &pointFalloffs
 
             for i = 0 to pCounts - 1 do
-              let l = screenSpaceLightsBuf.[i]
+              // Use ORIGINAL World Space lights for the shader
+              let l = pointLights.[i]
               pointPositions.[i] <- l.Position
               pointColors.[i] <- l.Color.ToVector4() * l.Intensity
               pointRadii.[i] <- l.Radius

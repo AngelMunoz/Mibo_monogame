@@ -124,8 +124,8 @@ let generateGroundHeight
     | Mountains -> baseHeight - variation // Max 3 tiles - within jump range
     | FloatingPlatforms -> baseHeight - 3 // Higher up (lower tile index)
     | Cavernous -> baseHeight - variation // Max 3 tiles - within jump range
-    | StaircaseUp -> baseHeight - (column % 3)
-    | StaircaseDown -> baseHeight + (column % 3)
+    | StaircaseUp -> baseHeight - column % 3
+    | StaircaseDown -> baseHeight + column % 3
 
   // Clamp height difference from previous column to ensure jumpability
   match prevHeight with
@@ -193,68 +193,21 @@ let getTileShape(x: int, y: int, seed: int) : int =
 /// Generate occluders for a tile if it is solid
 let generateOccluders(tile: Tile) : Occluder2D array =
   match tile.TileType with
-  | Ground
   | Platform ->
     let x, y = tile.Position.X, tile.Position.Y
     let size = Constants.tileSize
-    // For a simple square tile, we add 4 segments
+    // Only add occluder to the bottom part of the platform
     [|
-      {
-        P1 = Vector2(x, y)
-        P2 = Vector2(x + size, y)
-        Height = 1.0f
-      }
-      {
-        P1 = Vector2(x + size, y)
-        P2 = Vector2(x + size, y + size)
-        Height = 1.0f
-      }
       {
         P1 = Vector2(x + size, y + size)
         P2 = Vector2(x, y + size)
-        Height = 1.0f
-      }
-      {
-        P1 = Vector2(x, y + size)
-        P2 = Vector2(x, y)
-        Height = 1.0f
+        Height = 10.0f
       }
     |]
   | _ -> [||]
 
 /// Generate a light source for specific tile types
-let generateLight (tile: Tile) (seed: int) : PointLight2D option =
-  let x, y = tile.Position.X, tile.Position.Y
-  let tileX = int(x / Constants.tileSize)
-  let tileY = int(y / Constants.tileSize)
-
-  match tile.TileType with
-  | Hazard ->
-    // Glowing spikes?
-    Some {
-      Position = tile.Position + Vector2(Constants.tileSize * 0.5f)
-      Color = Color.Red
-      Intensity = 1.5f
-      Radius = 150.0f
-      Falloff = 2.0f
-      Shadow = ValueSome ShadowSettings2D.defaults
-    }
-  | Ground when
-    y = float32(getGlobalGroundHeight(tileX, seed)) * Constants.tileSize
-    ->
-    // Occasionally place a torch on the surface
-    if SimpleNoise.chance(0.05f, tileX, tileY, seed) then
-      Some {
-        Position = tile.Position + Vector2(Constants.tileSize * 0.5f, -20.0f)
-        Color = Color.Orange
-        Intensity = 2.0f
-        Radius = 300.0f
-        Falloff = 1.5f
-        Shadow = ValueSome ShadowSettings2D.defaults
-      }
-    else
-      None
-  | _ -> None
+let generateLight (tile: Tile) (seed: int) : PointLight2D option = None
 
 /// Generate a single tile at the given position
 let generateTile
@@ -640,7 +593,7 @@ let getVisibleTiles
   (screenWidth: float32)
   (tiles: Tile array)
   : Tile array =
-  let margin = Constants.tileSize * 2.0f
+  let margin = Constants.tileSize * 5.0f
   let left = cameraX - margin
   let right = cameraX + screenWidth + margin
 
@@ -649,8 +602,8 @@ let getVisibleTiles
     tile.Position.X >= left && tile.Position.X <= right)
 
 /// Render terrain tiles
-let view (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
-  let viewportWidth = 1280.0f // Default window width
+let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
+  let viewportWidth = float32 ctx.GraphicsDevice.Viewport.Width
   let visibleTiles = getVisibleTiles model.CameraX viewportWidth model.Map.Tiles
 
   for tile in visibleTiles do
@@ -678,7 +631,7 @@ let view (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
     () // buffer.Add(0<RenderLayer>, AddPointLight light)
 
   for occluder in model.Map.Occluders do
-    () // buffer.Add(0<RenderLayer>, AddOccluder occluder)
+    buffer.Occluder(occluder) |> ignore
 
 
 

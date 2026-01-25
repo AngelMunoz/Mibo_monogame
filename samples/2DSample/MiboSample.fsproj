@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="DayNight.fs" />
     <Compile Include="Domain.fs" />
     <Compile Include="SpriteLoader.fs" />
     <Compile Include="Animation.fs" />
@@ -18,6 +19,7 @@
     <Compile Include="Player.fs" />
     <Compile Include="Camera.fs" />
     <Compile Include="UI.fs" />
+    <Compile Include="Sky.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

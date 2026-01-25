@@ -24,12 +24,6 @@ let load(ctx: GameContext) =
       "kenney_platformer/Spritesheets/spritesheet-tiles-default"
       ctx
 
-  // Load background
-  let backgroundTex =
-    Assets.texture
-      "kenney_platformer/Spritesheets/spritesheet-backgrounds-default"
-      ctx
-
   // ─────────────────────────────────────────────────────────────
   // Player Animations
   // Origin is at bottom center of 128x128 sprite for proper ground alignment
@@ -101,9 +95,17 @@ let load(ctx: GameContext) =
     Loop = true
   }
 
+  // Star animation (for celestial bodies)
+  let starAnim: Animation = {
+    Frames = [| Rectangle(195, 455, 64, 64) |]
+    FrameDuration = 1.0f
+    Loop = false
+  }
+
   let decorationSheet =
     SpriteSheet.fromFrames tileTex (Vector2(32.0f, 64.0f)) [|
       "torch", torchAnim
+      "star", starAnim
     |]
 
   let decorationAssets = {
@@ -114,11 +116,20 @@ let load(ctx: GameContext) =
   // Terrain Assets
   // ─────────────────────────────────────────────────────────────
 
+  // Reuse the decoration sheet's star for sun/moon since it's the same texture
+  // Just need a centered origin for rotation
+  let celestialSheet = 
+    SpriteSheet.fromFrames tileTex (Vector2(32.0f, 32.0f)) [|
+        "star", starAnim
+    |]
+
   let terrainAssets = {
     GroundTile = tileTex
     PlatformTile = tileTex
     HazardTile = tileTex
-    Background = backgroundTex
+    SkyEffect = Assets.effect "Shaders/Sky" ctx
+    SunSprite = AnimatedSprite.create celestialSheet "star"
+    MoonSprite = AnimatedSprite.create celestialSheet "star"
   }
 
   struct (playerAssets, terrainAssets, decorationAssets)
@@ -240,16 +251,6 @@ module TileRegions =
 
   /// Get the source rectangle for hazard tiles
   let getHazardTile() : Rectangle = Rectangle(715, 0, 64, 64) // block_spikes
-
-  /// Get the source rectangle for background tiles
-  let getBackgroundVariant(variant: int) : Rectangle =
-    // Backgrounds from spritesheet-backgrounds-default.xml
-    // For now, use a simple placeholder - adjust based on actual sprite size
-    let variants = [|
-      Rectangle(0, 0, 128, 128) // First background tile
-    |]
-
-    variants[variant % variants.Length]
 
   // ─────────────────────────────────────────────────────────────
   // Asset Loading Utilities

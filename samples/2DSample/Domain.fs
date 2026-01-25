@@ -100,13 +100,13 @@ type TerrainAssets = {
   GroundTile: Texture2D
   PlatformTile: Texture2D
   HazardTile: Texture2D
-  Background: Texture2D
+  SkyEffect: Effect
+  SunSprite: AnimatedSprite
+  MoonSprite: AnimatedSprite
 }
 
 /// Loaded animation assets for decorative elements
-type DecorationAssets = {
-  Torch: AnimatedSprite
-}
+type DecorationAssets = { Torch: AnimatedSprite }
 
 // ─────────────────────────────────────────────────────────────
 // Model: The World State
@@ -139,14 +139,12 @@ type Model = {
   TerrainAssets: TerrainAssets
   DecorationAssets: DecorationAssets
 
-  // Active decorations
-  Torches: (Vector2 * AnimatedSprite) array
-
   // World state
   CameraX: float32 // Camera scroll position
   TotalTime: float32
   Seed: int // For procedural generation
   LastGeneratedChunk: int
+  DayNight: DayNight.State
 }
 
 // ─────────────────────────────────────────────────────────────
