@@ -53,6 +53,7 @@ sampler2D ShadowAtlasSampler = sampler_state
 
 float2 ShadowAtlasSize;
 float ShadowBias;
+float ProjectionSize; // World space size of the projection volume (half-extent)
 float PointLightShadowIndices[16];
 float DirectionalLightShadowIndices[8];
 
@@ -143,10 +144,10 @@ float ComputeShadow(int lightIdx, int isPointLight, float2 worldPos)
         
 		float2 perpDir = float2(DirectionalLightDirections[lightIdx].y, -DirectionalLightDirections[lightIdx].x);
 		float proj = dot(relPos, perpDir);
-		u = (proj / ShadowAtlasSize.x + 1.0) * 0.5;
+		u = (proj / ProjectionSize + 1.0) * 0.5;
         
         // Depth relative to origin (matches shadowcaster.fx)
-		dist = (dot(relPos, DirectionalLightDirections[lightIdx]) + ShadowAtlasSize.x) / (ShadowAtlasSize.x * 2.0);
+		dist = (dot(relPos, DirectionalLightDirections[lightIdx]) + ProjectionSize) / (ProjectionSize * 2.0);
 	}
 
 	float v = (float(shadowIndex) + 0.5) / ShadowAtlasSize.y;

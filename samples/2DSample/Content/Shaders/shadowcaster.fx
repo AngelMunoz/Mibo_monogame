@@ -18,6 +18,7 @@ float LightRadius;       // Maximum range for depth calculation
 // Directional Light (Orthographic Projection)
 float2 LightDirection;   // Normalized direction vector
 float2 ShadowOrigin;     // World space origin for shadow map (snapped)
+float ProjectionSize;    // World space size of the projection volume (half-extent)
 
 // Atlas dimensions
 float AtlasWidth;        // Width of shadow atlas (angular resolution for point lights)
@@ -63,12 +64,12 @@ VSOutput MainVS(VSInput input)
 		float proj = dot(relPos, perpDir);
 
 		// Map projection to clip space X ([-1, 1])
-		float x = (proj / AtlasWidth + 1.0) * 0.5;
+		float x = (proj / ProjectionSize + 1.0) * 0.5;
 		output.Position.x = x * 2.0 - 1.0;
 
 		// Depth along light direction (relative to ShadowOrigin)
-		// Map [-AtlasWidth, AtlasWidth] to [0, 1]
-		float depth = (dot(relPos, LightDirection) + AtlasWidth) / (AtlasWidth * 2.0);
+		// Map [-ProjectionSize, ProjectionSize] to [0, 1]
+		float depth = (dot(relPos, LightDirection) + ProjectionSize) / (ProjectionSize * 2.0);
 		output.Position.z = saturate(depth);
 
 		output.Depth = output.Position.z;
