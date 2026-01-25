@@ -649,16 +649,21 @@ module AnimatedSprite =
 
       buffer.Add(
         layer,
-        DrawTexture(
-          sprite.Sheet.Texture,
-          Rectangle(int position.X, int position.Y, scaledW, scaledH),
-          Nullable src,
-          sprite.Color,
-          sprite.Rotation,
-          sprite.Sheet.Origin,
-          toSpriteEffects sprite,
-          depth
-        )
+        DrawSprite {
+          Texture = sprite.Sheet.Texture
+          NormalMap = sprite.Sheet.NormalMap
+          DestX = int position.X
+          DestY = int position.Y
+          Width = scaledW
+          Height = scaledH
+          SourceRect = ValueSome src
+          Color = sprite.Color
+          Rotation = sprite.Rotation
+          Origin = sprite.Sheet.Origin
+          Effects = toSpriteEffects sprite
+          Depth = depth
+          Layer = layer
+        }
       )
 
   /// <summary>
@@ -681,14 +686,19 @@ module AnimatedSprite =
 
       buffer.Add(
         layer,
-        DrawTexture(
-          sprite.Sheet.Texture,
-          destRect,
-          Nullable src,
-          sprite.Color,
-          sprite.Rotation,
-          Vector2.Zero,
-          toSpriteEffects sprite,
-          0.0f
-        )
+        DrawSprite {
+          Texture = sprite.Sheet.Texture
+          NormalMap = sprite.Sheet.NormalMap
+          DestX = destRect.X
+          DestY = destRect.Y
+          Width = destRect.Width
+          Height = destRect.Height
+          SourceRect = ValueSome src
+          Color = sprite.Color
+          Rotation = sprite.Rotation
+          Origin = Vector2.Zero
+          Effects = toSpriteEffects sprite
+          Depth = 0.0f
+          Layer = layer
+        }
       )
