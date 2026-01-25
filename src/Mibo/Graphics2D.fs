@@ -687,6 +687,18 @@ module Batch2DConfig =
 
 module Lighting2DInternal =
   [<Struct>]
+  type LightType2D =
+    | Point
+    | Directional
+
+  [<Struct>]
+  type ShadowCasterEntry = {
+    Type: LightType2D
+    Index: int
+    Priority: float32
+  }
+
+  [<Struct>]
   type LightBinResults = {
     TilesX: int
     TilesY: int
@@ -783,7 +795,7 @@ type Batch2DRenderer<'Model>
   let pointLights = ResizeArray<PointLight2D>()
   let directionalLights = ResizeArray<DirectionalLight2D>()
   let occluders = ResizeArray<Occluder2D>()
-  let shadowCasters = ResizeArray<int * int * float32>()
+  let shadowCasters = ResizeArray<Lighting2DInternal.ShadowCasterEntry>()
 
   // Tile binning buffers (Persistent to avoid per-frame allocations)
   let mutable tileCounts: int[] = Array.empty
@@ -831,6 +843,8 @@ type Batch2DRenderer<'Model>
       if not(isNull primitiveEffect) then
         primitiveEffect.Dispose()
         primitiveEffect <- null
+
+      shadowMinBlend.Dispose()
 
   interface IRenderer<'Model> with
     member _.Draw(ctx: GameContext, model: 'Model, gameTime: GameTime) =
@@ -929,20 +943,18 @@ type Batch2DRenderer<'Model>
             if l.Shadow.IsSome then
               let distSq = Vector2.DistanceSquared(l.Position, Vector2.Zero)
               let priority = l.Intensity / (max 1.0f distSq)
-              shadowCasters.Add(0, i, priority)
+              shadowCasters.Add({ Type = Lighting2DInternal.Point; Index = i; Priority = priority })
 
           for i = 0 to directionalLights.Count - 1 do
             let l = directionalLights.[i]
 
             if l.Shadow.IsSome then
               let priority = l.Intensity
-              shadowCasters.Add(1, i, priority)
+              shadowCasters.Add({ Type = Lighting2DInternal.Directional; Index = i; Priority = priority })
 
-          let sortedCasters =
-            shadowCasters
-            |> Seq.sortByDescending(fun (_, _, p) -> p)
-            |> Seq.truncate shadowCfg.MaxShadowLights
-            |> Seq.toArray
+          // Sort by priority descending without allocations
+          shadowCasters.Sort(Comparison(fun (a: Lighting2DInternal.ShadowCasterEntry) b -> b.Priority.CompareTo(a.Priority)))
+          let casterCount = Math.Min(shadowCasters.Count, shadowCfg.MaxShadowLights)
 
           if shadowIndicesPoint.Length < pointLights.Count then
             shadowIndicesPoint <-
@@ -983,14 +995,18 @@ type Batch2DRenderer<'Model>
                 Vector2(float32 snappedX, float32 snappedY)
             | ValueNone -> Vector2.Zero
 
-          for lightType, lightIdx, _ in sortedCasters do
-            if lightType = 0 then
+          for i = 0 to casterCount - 1 do
+            let entry = shadowCasters.[i]
+            let lightIdx = entry.Index
+            match entry.Type with
+            | Lighting2DInternal.Point ->
               if lightIdx < shadowIndicesPoint.Length then
                 shadowIndicesPoint.[lightIdx] <- shadowRow
-            else if lightIdx < shadowIndicesDirectional.Length then
-              shadowIndicesDirectional.[lightIdx] <- shadowRow
-              // Store origin for this light
-              dirShadowOrigins.[lightIdx] <- shadowOrigin
+            | Lighting2DInternal.Directional ->
+              if lightIdx < shadowIndicesDirectional.Length then
+                shadowIndicesDirectional.[lightIdx] <- shadowRow
+                // Store origin for this light
+                dirShadowOrigins.[lightIdx] <- shadowOrigin
 
             shadowRow <- shadowRow + 1
 
@@ -1035,15 +1051,17 @@ type Batch2DRenderer<'Model>
 
           let viewport = device.Viewport
 
-          for lightType, lightIdx, _ in sortedCasters do
+          for i = 0 to casterCount - 1 do
+            let entry = shadowCasters.[i]
+            let lightIdx = entry.Index
             let row =
-              if lightType = 0 then
-                shadowIndicesPoint.[lightIdx]
-              else
-                shadowIndicesDirectional.[lightIdx]
+              match entry.Type with
+              | Lighting2DInternal.Point -> shadowIndicesPoint.[lightIdx]
+              | Lighting2DInternal.Directional -> shadowIndicesDirectional.[lightIdx]
 
             if row >= 0 then
-              if lightType = 0 then
+              match entry.Type with
+              | Lighting2DInternal.Point ->
                 let pl = pointLights.[lightIdx]
                 // Each light gets its own 1px row
                 device.Viewport <- Viewport(0, row, atlasWidth, 1, 0f, 1f)
@@ -1058,7 +1076,8 @@ type Batch2DRenderer<'Model>
                 let batchState = occluderBatch.Value
                 OccluderBatch.begin' batchState
 
-                for o in occluders do
+                for j = 0 to occluders.Count - 1 do
+                  let o = occluders.[j]
                   // Tessellate long occluders to handle polar distortion
                   let segments = 8
 
@@ -1070,7 +1089,7 @@ type Batch2DRenderer<'Model>
                     OccluderBatch.addLine p1 p2 o.Height batchState
 
                 OccluderBatch.end' batchState
-              else
+              | Lighting2DInternal.Directional ->
                 let dl = directionalLights.[lightIdx]
                 device.Viewport <- Viewport(0, row, atlasWidth, 1, 0f, 1f)
 
@@ -1085,8 +1104,8 @@ type Batch2DRenderer<'Model>
                 let batchState = occluderBatch.Value
                 OccluderBatch.begin' batchState
 
-                for o in occluders do
-                  OccluderBatch.addOccluder o batchState
+                for j = 0 to occluders.Count - 1 do
+                  OccluderBatch.addOccluder occluders.[j] batchState
 
                 OccluderBatch.end' batchState
 
