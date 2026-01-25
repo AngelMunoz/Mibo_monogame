@@ -1245,6 +1245,11 @@ module internal LightingProcessor =
           &b.DirShadowIndices
 
         RendererBuffers.ensureCapacity b.PointLights.Count &b.ScreenSpaceLights
+        
+        // Ensure shadow mapping arrays can hold an entry for every light
+        RendererBuffers.ensureCapacity b.PointLights.Count &b.ShadowIndicesPoint
+        RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.ShadowIndicesDirectional
+        RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirShadowOrigins
 
         let lBufsUpdated: LightingBuffers = {
           PointPositions = b.PointPositions
