@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-01-25
+
 ### Added
 
 - Rendering: **Enhanced 2D Render Pipeline**. Integrated a multi-pass post-processing system in `Batch2DRenderer` supporting global effects: **Vignette**, **Bloom**, and **Color Grading (3D LUT)**.
