@@ -51,7 +51,7 @@ type Particle2DState = {
 // Internal Lighting Types (Must be defined early for RendererBuffers)
 // ============================================================================
 
-module Lighting2DInternal =
+module internal Lighting2DInternal =
   [<Struct>]
   type LightType2D =
     | Point
@@ -131,15 +131,15 @@ type Occluder2D = {
 
 /// <summary>Custom vertex type for 2D line occluders.</summary>
 [<Struct>]
-[<StructLayout(LayoutKind.Sequential)>]
-type VertexPosition2D = { Position: Vector2 }
+type internal VertexPosition2D = { Position: Vector2 }
 
 /// <summary>Quality level for 2D soft shadows.</summary>
+[<Struct>]
 type SoftShadowQuality2D =
-  | None = 0
-  | Low = 1
-  | Medium = 3
-  | High = 5
+  | NoValue
+  | Low
+  | Medium
+  | High
 
 /// <summary>Configuration for 2D shadows.</summary>
 [<Struct>]
@@ -168,7 +168,7 @@ module Shadows2DConfig =
 // ============================================================================
 
 /// <summary>Persistent buffers to avoid per-frame allocations.</summary>
-type RendererBuffers = {
+type internal RendererBuffers = {
   mutable PointPositions: Vector2[]
   mutable PointColors: Vector4[]
   mutable PointRadii: float32[]
@@ -194,7 +194,7 @@ type RendererBuffers = {
   ShadowCasters: ResizeArray<Lighting2DInternal.ShadowCasterEntry>
 }
 
-module RendererBuffers =
+module internal RendererBuffers =
   let createEmpty() : RendererBuffers = {
     PointPositions = Array.empty
     PointColors = Array.empty
@@ -225,13 +225,13 @@ module RendererBuffers =
     if current.Length < needed then
       current <- Array.zeroCreate(Math.Max(current.Length * 2, needed))
 
-  let dispose (b: RendererBuffers) =
+  let dispose(b: RendererBuffers) =
     if not(isNull b.TileDataTex) then
       b.TileDataTex.Dispose()
 
 /// <summary>Encapsulates core rendering services for the 2D pipeline.</summary>
 [<Struct>]
-type RenderingServices = {
+type internal RenderingServices = {
   Device: GraphicsDevice
   Pool: IRenderTargetPool
   SpriteBatch: SpriteBatch
@@ -239,7 +239,7 @@ type RenderingServices = {
 }
 
 /// <summary>Batcher for rendering 2D shadow occluders as line segments.</summary>
-module OccluderBatch =
+module internal OccluderBatch =
 
   let private vertexDeclaration =
     new VertexDeclaration [|
@@ -335,7 +335,7 @@ module OccluderBatch =
 
 /// <summary>Groups persistent hardware dependencies and stateful batchers.</summary>
 [<Struct>]
-type RendererEnvironment = {
+type internal RendererEnvironment = {
   Services: RenderingServices
   Game: Game
   OccluderBatch: OccluderBatch.State voption
@@ -348,7 +348,7 @@ type RendererEnvironment = {
 
 /// <summary>Current active state of the renderer during a Draw pass.</summary>
 [<Struct>]
-type ActiveRenderState = {
+type internal ActiveRenderState = {
   mutable Effect: Effect
   mutable Transform: Nullable<Matrix>
   mutable Camera: Camera
@@ -401,7 +401,7 @@ module Lighting2DConfig =
 // Internal Lighting Logic
 // ============================================================================
 
-module Lighting2DInternalLogic =
+module internal Lighting2DInternalLogic =
   open Lighting2DInternal
 
   [<Struct>]
@@ -678,13 +678,14 @@ module Lighting2DInternalLogic =
         bufs.PointFalloffs.[i] <- l.Falloff
 
       let req = bin.TilesX * bin.TilesY * grid.MaxLightsPerTile
+      let texWidth = Math.Max(1, req)
 
-      if isNull tileTex || tileTex.Width <> req then
-        (if not(isNull tileTex) then
-           tileTex.Dispose())
+      if isNull tileTex || tileTex.Width <> texWidth then
+        if not(isNull tileTex) then
+          tileTex.Dispose()
 
         tileTex <-
-          new Texture2D(env.Device, req, 1, false, SurfaceFormat.Single)
+          new Texture2D(env.Device, texWidth, 1, false, SurfaceFormat.Single)
 
         RendererBuffers.ensureCapacity req &tileBuf
 
@@ -816,7 +817,7 @@ type TextState = {
   Layer: int<RenderLayer>
 }
 
-module Text =
+module internal Text =
   let empty: TextState = {
     Font = null
     Text = ""
@@ -832,7 +833,7 @@ module Text =
 
 /// <summary>Legacy struct for text draw command parameters.</summary>
 [<Struct>]
-type TextDrawCmd = {
+type internal TextDrawCmd = {
   Font: SpriteFont
   Text: string
   Position: Vector2
@@ -1024,10 +1025,14 @@ module PostProcess2DConfig =
 
 module PostProcess2D =
   let none = PostProcess2DConfig.none
-  let withVignette = PostProcess2DConfig.withVignette
-  let withBloom = PostProcess2DConfig.withBloom
-  let withColorGrade = PostProcess2DConfig.withColorGrade
-  let withCustomPasses = PostProcess2DConfig.withCustomPasses
+  let inline withVignette cfg pp = PostProcess2DConfig.withVignette cfg pp
+  let inline withBloom cfg pp = PostProcess2DConfig.withBloom cfg pp
+
+  let inline withColorGrade cfg pp =
+    PostProcess2DConfig.withColorGrade cfg pp
+
+  let inline withCustomPasses cfg pp =
+    PostProcess2DConfig.withCustomPasses cfg pp
 
 // ============================================================================
 // Batcher Configuration
@@ -1068,62 +1073,63 @@ module Batch2DConfig =
     FinalBlendState = BlendState.Opaque
   }
 
-  let withClearColor (color: Color voption) (cfg: Batch2DConfig) = {
+  let inline withClearColor (color: Color voption) (cfg: Batch2DConfig) = {
     cfg with
         ClearColor = color
   }
 
-  let withSortCommands (sort: bool) (cfg: Batch2DConfig) = {
+  let inline withSortCommands (sort: bool) (cfg: Batch2DConfig) = {
     cfg with
         SortCommands = sort
   }
 
-  let withSortMode (mode: SpriteSortMode) (cfg: Batch2DConfig) = {
+  let inline withSortMode (mode: SpriteSortMode) (cfg: Batch2DConfig) = {
     cfg with
         SortMode = mode
   }
 
-  let withBlendState (state: BlendState) (cfg: Batch2DConfig) = {
+  let inline withBlendState (state: BlendState) (cfg: Batch2DConfig) = {
     cfg with
         BlendState = state
   }
 
-  let withSamplerState (state: SamplerState) (cfg: Batch2DConfig) = {
+  let inline withSamplerState (state: SamplerState) (cfg: Batch2DConfig) = {
     cfg with
         SamplerState = state
   }
 
-  let withDepthStencilState (state: DepthStencilState) (cfg: Batch2DConfig) = {
-    cfg with
-        DepthStencilState = state
-  }
+  let inline withDepthStencilState
+    (state: DepthStencilState)
+    (cfg: Batch2DConfig)
+    =
+    { cfg with DepthStencilState = state }
 
-  let withRasterizerState (state: RasterizerState) (cfg: Batch2DConfig) = {
+  let inline withRasterizerState (state: RasterizerState) (cfg: Batch2DConfig) = {
     cfg with
         RasterizerState = state
   }
 
-  let withEffect (effect: Effect) (cfg: Batch2DConfig) = {
+  let inline withEffect (effect: Effect) (cfg: Batch2DConfig) = {
     cfg with
         Effect = effect
   }
 
-  let withTransform (matrix: Matrix voption) (cfg: Batch2DConfig) = {
+  let inline withTransform (matrix: Matrix voption) (cfg: Batch2DConfig) = {
     cfg with
         TransformMatrix = matrix
   }
 
-  let withPostProcess (pp: PostProcess2DConfig) (cfg: Batch2DConfig) = {
+  let inline withPostProcess (pp: PostProcess2DConfig) (cfg: Batch2DConfig) = {
     cfg with
         PostProcess = ValueSome pp
   }
 
-  let withLighting (lighting: Lighting2DConfig) (cfg: Batch2DConfig) = {
+  let inline withLighting (lighting: Lighting2DConfig) (cfg: Batch2DConfig) = {
     cfg with
         Lighting = ValueSome lighting
   }
 
-  let withShader
+  let inline withShader
     (baseType: ShaderBase2D)
     (effect: Effect)
     (cfg: Batch2DConfig)
@@ -1131,13 +1137,13 @@ module Batch2DConfig =
     cfg.ShaderOverrides.Add(baseType, effect)
     cfg
 
-  let withLitSprite (effect: Effect) (cfg: Batch2DConfig) =
+  let inline withLitSprite (effect: Effect) (cfg: Batch2DConfig) =
     withShader ShaderBase2D.LitSprite effect cfg
 
-  let withShadowCaster (effect: Effect) (cfg: Batch2DConfig) =
+  let inline withShadowCaster (effect: Effect) (cfg: Batch2DConfig) =
     withShader ShaderBase2D.ShadowCaster effect cfg
 
-  let withFinalBlendState (state: BlendState) (cfg: Batch2DConfig) = {
+  let inline withFinalBlendState (state: BlendState) (cfg: Batch2DConfig) = {
     cfg with
         FinalBlendState = state
   }
@@ -1146,7 +1152,7 @@ module Batch2DConfig =
 // Semantic Modules
 // ============================================================================
 
-module LightingProcessor =
+module internal LightingProcessor =
   open Lighting2DInternalLogic
 
   let apply
@@ -1219,7 +1225,11 @@ module LightingProcessor =
         RendererBuffers.ensureCapacity b.PointLights.Count &b.PointColors
         RendererBuffers.ensureCapacity b.PointLights.Count &b.PointRadii
         RendererBuffers.ensureCapacity b.PointLights.Count &b.PointFalloffs
-        RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirDirections
+
+        RendererBuffers.ensureCapacity
+          b.DirectionalLights.Count
+          &b.DirDirections
+
         RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirColors
         RendererBuffers.ensureCapacity b.PointLights.Count &b.PointShadowIndices
 
@@ -1298,7 +1308,7 @@ module LightingProcessor =
         bin
         shadowAtlas
 
-module CommandDispatcher =
+module internal CommandDispatcher =
   let beginBatch
     (env: inref<RendererEnvironment>)
     (state: byref<ActiveRenderState>)
@@ -1574,7 +1584,7 @@ module CommandDispatcher =
           b)
     | _ -> ()
 
-module PostProcessPipeline =
+module internal PostProcessPipeline =
   let private drawPass
     (services: inref<RenderingServices>)
     (input: Texture2D)
@@ -1934,12 +1944,7 @@ type Batch2DRenderer<'Model>
       | ValueSome sceneRt ->
         let ppCfg = config.PostProcess.Value
 
-        let final =
-          PostProcessPipeline.apply
-            &env
-            &ppCfg
-            sceneRt
-            gameTime
+        let final = PostProcessPipeline.apply &env &ppCfg sceneRt gameTime
 
         services.Device.SetRenderTarget null
 
@@ -2336,287 +2341,277 @@ module DSL =
 
     member inline _.Run(s: TextState) : TextState = s
 
-  [<Extension>]
-  type RenderBuffer2DExtensions =
+  [<AutoOpen>]
+  module RB2DExtensions =
     [<Extension>]
-    static member inline Sprite
-      (this: RenderBuffer<RenderCmd2D>, s: SpriteState)
-      =
-      if not(isNull s.Texture) then
+    type RenderBuffer2DExtensions =
+      [<Extension>]
+      static member inline Sprite
+        (this: RenderBuffer<RenderCmd2D>, s: SpriteState)
+        =
         this.Add(s.Layer, DrawSprite s)
 
-      this
+        this
 
-    [<Extension>]
-    static member inline Sprite
-      (this: RenderBuffer<RenderCmd2D>, tex: Texture2D, x: int, y: int)
-      =
-      let w, h =
-        (if isNull tex then 0 else tex.Width),
-        (if isNull tex then 0 else tex.Height)
+      [<Extension>]
+      static member inline Sprite
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          tex: Texture2D,
+          x: int,
+          y: int,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(
+          defaultValueArg layer 0<RenderLayer>,
+          DrawSprite {
+            Sprite.empty with
+                Texture = tex
+                DestX = x
+                DestY = y
+                Width = tex.Width
+                Height = tex.Height
+          }
+        )
 
-      this.Add(
-        0<RenderLayer>,
-        DrawSprite {
-          Sprite.empty with
-              Texture = tex
-              DestX = x
-              DestY = y
-              Width = w
-              Height = h
-        }
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline Text(this: RenderBuffer<RenderCmd2D>, t: TextState) =
+        if not(isNull t.Font) then
+          this.Add(t.Layer, DrawText t)
 
-    [<Extension>]
-    static member inline Text(this: RenderBuffer<RenderCmd2D>, t: TextState) =
-      if not(isNull t.Font) then
-        this.Add(t.Layer, DrawText t)
+        this
 
-      this
+      [<Extension>]
+      static member inline Text
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          font: SpriteFont,
+          text: string,
+          x: int,
+          y: int,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(
+          defaultValueArg layer 0<RenderLayer>,
+          DrawText {
+            Text.empty with
+                Font = font
+                Text = text
+                DestX = x
+                DestY = y
+          }
+        )
 
-    [<Extension>]
-    static member inline Text
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        font: SpriteFont,
-        text: string,
-        x: int,
-        y: int
-      ) =
-      this.Add(
-        0<RenderLayer>,
-        DrawText {
-          Text.empty with
-              Font = font
-              Text = text
-              DestX = x
-              DestY = y
-        }
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline Camera
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          cam: Camera,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(defaultValueArg layer 0<RenderLayer>, SetCamera cam)
+        this
 
-    [<Extension>]
-    static member inline Camera
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        cam: Camera,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, SetCamera cam)
-      this
+      [<Extension>]
+      static member inline Clear
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          color: Color,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(
+          defaultValueArg layer 0<RenderLayer>,
+          ClearTarget(ValueSome color, false)
+        )
 
-    [<Extension>]
-    static member inline Clear(this: RenderBuffer<RenderCmd2D>, color: Color) =
-      this.Add(0<RenderLayer>, ClearTarget(ValueSome color, false))
-      this
+        this
 
-    [<Extension>]
-    static member inline BlendState
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        bs: BlendState,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, SetBlendState bs)
-      this
+      [<Extension>]
+      static member inline BlendState
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          bs: BlendState,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(defaultValueArg layer 0<RenderLayer>, SetBlendState bs)
 
-    [<Extension>]
-    static member inline Effect
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        effect: Effect,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(
-        ValueOption.defaultValue 0<RenderLayer> layer,
-        SetEffect(ValueSome effect)
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline Effect
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          effect: Effect,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(
+          defaultValueArg layer 0<RenderLayer>,
+          SetEffect(ValueSome effect)
+        )
 
-    [<Extension>]
-    static member inline Lighting
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        lighting: LightingState2D,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(
-        ValueOption.defaultValue 0<RenderLayer> layer,
-        SetLighting lighting
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline Lighting
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          lighting: LightingState2D,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(defaultValueArg layer 0<RenderLayer>, SetLighting lighting)
 
-    [<Extension>]
-    static member inline AddLighting
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        ambient: AmbientLight2D,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(
-        ValueOption.defaultValue 0<RenderLayer> layer,
-        AddLighting ambient
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline AddLighting
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          ambient: AmbientLight2D,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(defaultValueArg layer 0<RenderLayer>, AddLighting ambient)
 
-    [<Extension>]
-    static member inline PointLight
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        light: PointLight2D,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(
-        ValueOption.defaultValue 0<RenderLayer> layer,
-        AddPointLight light
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline PointLight
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          light: PointLight2D,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(defaultValueArg layer 0<RenderLayer>, AddPointLight light)
 
-    [<Extension>]
-    static member inline DirectionalLight
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        light: DirectionalLight2D,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(
-        ValueOption.defaultValue 0<RenderLayer> layer,
-        AddDirectionalLight light
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline DirectionalLight
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          light: DirectionalLight2D,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(
+          defaultValueArg layer 0<RenderLayer>,
+          AddDirectionalLight light
+        )
 
-    [<Extension>]
-    static member inline Occluder
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        occluder: Occluder2D,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      this.Add(
-        ValueOption.defaultValue 0<RenderLayer> layer,
-        AddOccluder occluder
-      )
+        this
 
-      this
+      [<Extension>]
+      static member inline Occluder
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          occluder: Occluder2D,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        this.Add(defaultValueArg layer 0<RenderLayer>, AddOccluder occluder)
 
-    [<Extension>]
-    static member inline Particles
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        texture: Texture2D,
-        effect: Effect,
-        particles: Particle2DState[],
-        count: int,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      let l =
-        match layer with
-        | ValueSome l -> l
-        | ValueNone -> 0<RenderLayer>
+        this
 
-      this.Add(
-        l,
-        DrawParticles {
-          Particles = particles
-          Count = count
-          Texture = texture
-          Effect = effect
-          ParticlesLayer = l
-        }
-      )
+      [<Extension>]
+      static member inline Particles
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          texture: Texture2D,
+          effect: Effect,
+          particles: Particle2DState[],
+          count: int,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        let l = defaultValueArg layer 0<RenderLayer>
 
-      this
+        this.Add(
+          l,
+          DrawParticles {
+            Particles = particles
+            Count = count
+            Texture = texture
+            Effect = effect
+            ParticlesLayer = l
+          }
+        )
 
-    [<Extension>]
-    static member inline Line
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        p1: Vector2,
-        p2: Vector2,
-        color: Color,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      let l =
-        match layer with
-        | ValueSome l -> l
-        | ValueNone -> 0<RenderLayer>
+        this
 
-      this.Add(
-        l,
-        DrawLine2D {
-          P1 = p1
-          P2 = p2
-          LineColor = color
-          LineLayer = l
-        }
-      )
+      [<Extension>]
+      static member inline Line
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          p1: Vector2,
+          p2: Vector2,
+          color: Color,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        let l = defaultValueArg layer 0<RenderLayer>
 
-      this
+        this.Add(
+          l,
+          DrawLine2D {
+            P1 = p1
+            P2 = p2
+            LineColor = color
+            LineLayer = l
+          }
+        )
 
-    [<Extension>]
-    static member inline Rect
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        rect: Rectangle,
-        color: Color,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      let l =
-        match layer with
-        | ValueSome l -> l
-        | ValueNone -> 0<RenderLayer>
+        this
 
-      this.Add(
-        l,
-        DrawRect2D {
-          Rect = rect
-          RectColor = color
-          RectLayer = l
-        }
-      )
+      [<Extension>]
+      static member inline Rect
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          rect: Rectangle,
+          color: Color,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        let l = defaultValueArg layer 0<RenderLayer>
 
-      this
+        this.Add(
+          l,
+          DrawRect2D {
+            Rect = rect
+            RectColor = color
+            RectLayer = l
+          }
+        )
 
-    [<Extension>]
-    static member inline Circle
-      (
-        this: RenderBuffer<RenderCmd2D>,
-        center: Vector2,
-        radius: float32,
-        color: Color,
-        [<Struct>] ?segments: int,
-        [<Struct>] ?layer: int<RenderLayer>
-      ) =
-      let l =
-        match layer with
-        | ValueSome l -> l
-        | ValueNone -> 0<RenderLayer>
+        this
 
-      let s = ValueOption.defaultValue 16 segments
+      [<Extension>]
+      static member inline Circle
+        (
+          this: RenderBuffer<RenderCmd2D>,
+          center: Vector2,
+          radius: float32,
+          color: Color,
+          [<Struct>] ?segments: int,
+          [<Struct>] ?layer: int<RenderLayer>
+        ) =
+        let l = defaultValueArg layer 0<RenderLayer>
 
-      this.Add(
-        l,
-        DrawCircle2D {
-          Center = center
-          Radius = radius
-          Segments = s
-          CircleColor = color
-          CircleLayer = l
-        }
-      )
+        this.Add(
+          l,
+          DrawCircle2D {
+            Center = center
+            Radius = radius
+            Segments = defaultValueArg segments 16
+            CircleColor = color
+            CircleLayer = l
+          }
+        )
 
-      this
+        this
 
-    [<Extension>]
-    static member inline Submit(this: RenderBuffer<RenderCmd2D>) = ()
+      [<Extension>]
+      static member inline Submit(this: RenderBuffer<RenderCmd2D>) = ()
+
+    let sprite = SpriteBuilder()
+    let text = TextBuilder()
 
   module Buffer2D =
     let inline sprite s (buffer: RenderBuffer<RenderCmd2D>) = buffer.Sprite(s)
@@ -2667,8 +2662,3 @@ module DSL =
       buffer.Circle(center, radius, color)
 
     let inline submit(buffer: RenderBuffer<RenderCmd2D>) = buffer.Submit()
-
-  [<AutoOpen>]
-  module View2D =
-    let sprite = SpriteBuilder()
-    let text = TextBuilder()

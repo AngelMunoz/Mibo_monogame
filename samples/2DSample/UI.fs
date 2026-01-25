@@ -31,8 +31,10 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   buffer.Text(
     text {
       font uiFont
+
       content
         $"Position: ({int model.PlayerPosition.X}, {int model.PlayerPosition.Y})"
+
       at 10.0f 30.0f
       color Color.White
       layer 100<RenderLayer>

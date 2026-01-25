@@ -250,13 +250,13 @@ let update (dt: float32) (model: Model) : struct (Model * Cmd<'Msg>) =
   // Phase X
   let posAfterX = previousPosition + Vector2(velocity.X * dt, 0.0f)
   let resolvedPosX = resolveX posAfterX velocity model.Platforms
-  
+
   // Constrain to left side of map (camera view)
-  let constrainedPosX = 
+  let constrainedPosX =
     if resolvedPosX.X < model.CameraX then
-        Vector2(model.CameraX, resolvedPosX.Y)
+      Vector2(model.CameraX, resolvedPosX.Y)
     else
-        resolvedPosX
+      resolvedPosX
 
   // Phase Y
   let posAfterY = constrainedPosX + Vector2(0.0f, velocity.Y * dt)
@@ -312,4 +312,3 @@ let respawnPlayer(model: Model) : Model =
         JumpBufferTimer = 0.0f
         CameraX = 0.0f
   }
-

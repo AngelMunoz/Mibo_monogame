@@ -122,8 +122,7 @@ module BillboardBatch =
       state.Indices <- null
 
   /// <summary>Begin a batch.</summary>
-  let inline begin' (state: State) =
-    state.SpriteCount <- 0
+  let inline begin'(state: State) = state.SpriteCount <- 0
 
   /// <summary>Adds a billboard to the batch with custom UVs (texture atlas).</summary>
   let drawUv
@@ -185,15 +184,7 @@ module BillboardBatch =
     (camUp: Vector3)
     (state: State)
     =
-    drawUv
-      position
-      size
-      rotation
-      color
-      UvRect.full
-      camRight
-      camUp
-      state
+    drawUv position size rotation color UvRect.full camRight camUp state
 
   /// <summary>Adds a screen-aligned 2D billboard to the batch.</summary>
   let draw2D
