@@ -2,14 +2,12 @@
 	#define SV_POSITION POSITION
 	#define VS_SHADERMODEL vs_3_0
 	#define PS_SHADERMODEL ps_3_0
-    #define VPOS_SEMANTIC VPOS
 #else
 	#define VS_SHADERMODEL vs_5_0
 	#define PS_SHADERMODEL ps_5_0
-    #define VPOS_SEMANTIC SV_Position
 #endif
 
-// --- Phase 3 Tiled Lighting Contract ---
+// Lighting Uniforms
 float4 AmbientColor;
 int PointLightCount;
 float2 PointLightPositions[16];
@@ -27,6 +25,15 @@ float TilesX;
 int MaxLightsPerTile;
 float LightIndexBufferWidth;
 
+// Viewport dimensions
+float2 ViewportSize;
+float2 ViewportSizeInv;
+
+// Camera matrices
+matrix World;
+matrix View;
+matrix Projection;
+
 Texture2D LightIndexBuffer;
 Texture2D SpriteTexture;
 Texture2D NormalMap;
@@ -35,11 +42,43 @@ sampler2D SpriteSampler = sampler_state { Texture = <SpriteTexture>; };
 sampler2D NormalSampler = sampler_state { Texture = <NormalMap>; AddressU = Clamp; AddressV = Clamp; };
 sampler2D TileSampler = sampler_state { Texture = <LightIndexBuffer>; Filter = Point; AddressU = Clamp; AddressV = Clamp; };
 
+// Vertex Shader Input
+struct VSInput
+{
+	float4 Position : POSITION0;
+	float4 Color : COLOR0;
+	float2 TexCoord : TEXCOORD0;
+};
+
+// Vertex Shader Output
+struct VSOutput
+{
+	float4 Position : SV_POSITION;
+	float4 Color : COLOR0;
+	float2 TexCoord : TEXCOORD0;
+	float2 WorldPos : TEXCOORD1;
+};
+
+// Vertex Shader - transforms to clip space and passes world position
+VSOutput MainVS(VSInput input)
+{
+	VSOutput output;
+	// Standard transform: World * View * Projection
+	float4 worldPos = mul(input.Position, World);
+	float4 viewPos = mul(worldPos, View);
+	output.Position = mul(viewPos, Projection);
+	output.Color = input.Color;
+	output.TexCoord = input.TexCoord;
+	// Pass original world position to pixel shader
+	output.WorldPos = input.Position.xy;
+	return output;
+}
+
 // --- Pixel Shader ---
 
-float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord : TEXCOORD0) : COLOR
+float4 MainPS(VSOutput input) : COLOR
 {
-	float4 texColor = tex2D(SpriteSampler, texCoord) * color;
+	float4 texColor = tex2D(SpriteSampler, input.TexCoord) * input.Color;
     if (texColor.a < 0.1) discard;
 
     // 1. Apply Grayscale (The core purpose of this shader)
@@ -48,15 +87,16 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
 
     // 2. Apply Lighting (Contract Fulfillment)
     float3 normal = float3(0, 0, 1);
-    float4 nData = tex2D(NormalSampler, texCoord);
+    float4 nData = tex2D(NormalSampler, input.TexCoord);
     if (any(nData.rgb)) {
         normal = normalize(nData.rgb * 2.0 - 1.0);
     }
 
     float3 finalLight = AmbientColor.rgb;
-    float2 pixelPos = pos.xy;
+    float2 worldPos = input.WorldPos;
 
-    float2 tileCoord = floor(pixelPos / TileSize);
+    // World-space tiled lookup
+    float2 tileCoord = floor(worldPos / TileSize);
     int tileIdx = (int)(tileCoord.y * TilesX + tileCoord.x);
     int startOffset = tileIdx * MaxLightsPerTile;
 
@@ -82,7 +122,7 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
         if (lightIdx < 0) break;
         if (lightIdx >= 16) continue;
 
-        float2 lightDir = PointLightPositions[lightIdx] - pixelPos;
+        float2 lightDir = PointLightPositions[lightIdx] - worldPos;
         float dist = length(lightDir);
 
         if (dist < PointLightRadii[lightIdx])
@@ -101,7 +141,7 @@ float4 MainPS(float4 pos : VPOS_SEMANTIC, float4 color : COLOR0, float2 texCoord
     {
         if (d >= DirectionalLightCount) break;
 
-        float2 lightDir = -DirectionalLightDirections[d]; // Negate for "coming from" direction
+        float2 lightDir = -DirectionalLightDirections[d];
         float dotNL = max(0.0, dot(normal, float3(lightDir, 0.5)));
         finalLight += DirectionalLightColors[d].rgb * dotNL;
     }
@@ -116,6 +156,7 @@ technique SpriteBatch
 {
 	pass P0
 	{
+		VertexShader = compile VS_SHADERMODEL MainVS();
 		PixelShader = compile PS_SHADERMODEL MainPS();
 	}
 };

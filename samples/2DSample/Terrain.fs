@@ -191,7 +191,7 @@ let getTileShape(x: int, y: int, seed: int) : int =
     1 // Center (Full fill)
 
 /// Generate occluders for a tile if it is solid
-let generateOccluders (tile: Tile) : Occluder2D array =
+let generateOccluders(tile: Tile) : Occluder2D array =
   match tile.TileType with
   | Ground
   | Platform ->
@@ -199,10 +199,26 @@ let generateOccluders (tile: Tile) : Occluder2D array =
     let size = Constants.tileSize
     // For a simple square tile, we add 4 segments
     [|
-      { P1 = Vector2(x, y); P2 = Vector2(x + size, y); Height = 1.0f }
-      { P1 = Vector2(x + size, y); P2 = Vector2(x + size, y + size); Height = 1.0f }
-      { P1 = Vector2(x + size, y + size); P2 = Vector2(x, y + size); Height = 1.0f }
-      { P1 = Vector2(x, y + size); P2 = Vector2(x, y); Height = 1.0f }
+      {
+        P1 = Vector2(x, y)
+        P2 = Vector2(x + size, y)
+        Height = 1.0f
+      }
+      {
+        P1 = Vector2(x + size, y)
+        P2 = Vector2(x + size, y + size)
+        Height = 1.0f
+      }
+      {
+        P1 = Vector2(x + size, y + size)
+        P2 = Vector2(x, y + size)
+        Height = 1.0f
+      }
+      {
+        P1 = Vector2(x, y + size)
+        P2 = Vector2(x, y)
+        Height = 1.0f
+      }
     |]
   | _ -> [||]
 
@@ -223,7 +239,9 @@ let generateLight (tile: Tile) (seed: int) : PointLight2D option =
       Falloff = 2.0f
       Shadow = ValueSome ShadowSettings2D.defaults
     }
-  | Ground when y = float32(getGlobalGroundHeight(tileX, seed)) * Constants.tileSize ->
+  | Ground when
+    y = float32(getGlobalGroundHeight(tileX, seed)) * Constants.tileSize
+    ->
     // Occasionally place a torch on the surface
     if SimpleNoise.chance(0.05f, tileX, tileY, seed) then
       Some {
@@ -234,7 +252,8 @@ let generateLight (tile: Tile) (seed: int) : PointLight2D option =
         Falloff = 1.5f
         Shadow = ValueSome ShadowSettings2D.defaults
       }
-    else None
+    else
+      None
   | _ -> None
 
 /// Generate a single tile at the given position
@@ -430,7 +449,8 @@ let generateTile
 /// Create a GameMap from a collection of tiles
 let createMapFromTiles (tiles: Tile array) (seed: int) : GameMap =
   let occluders = tiles |> Array.collect generateOccluders
-  let lights = tiles |> Array.choose (fun t -> generateLight t seed)
+  let lights = tiles |> Array.choose(fun t -> generateLight t seed)
+
   {
     Tiles = tiles
     Occluders = occluders
@@ -550,7 +570,10 @@ let cleanupOldTiles(model: Model) : Model =
   if filteredTiles.Length = model.Map.Tiles.Length then
     model
   else
-    { model with Map = createMapFromTiles filteredTiles model.Seed }
+    {
+      model with
+          Map = createMapFromTiles filteredTiles model.Seed
+    }
 
 /// Create platforms array from tiles array
 let createPlatformsFromTiles(tiles: Tile array) : Platform array =
@@ -569,7 +592,7 @@ let createPlatformsFromTiles(tiles: Tile array) : Platform array =
   })
 
 /// Ensure terrain is generated as player moves
-let update (model: Model) : struct (Model * Cmd<'Msg>) =
+let update(model: Model) : struct (Model * Cmd<'Msg>) =
 
   let model =
     if needsTerrainGeneration model then
@@ -586,8 +609,9 @@ let update (model: Model) : struct (Model * Cmd<'Msg>) =
 
 
 /// Reset terrain to initial state
-let reset (model: Model) : Model =
+let reset(model: Model) : Model =
   let tiles = generateInitialTerrain model.Seed
+
   {
     model with
         Map = createMapFromTiles tiles model.Seed
@@ -651,10 +675,10 @@ let view (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
 
   // Add lights and occluders to the buffer for the renderer to process
   for light in model.Map.PointLights do
-    buffer.Add(0<RenderLayer>, AddPointLight light)
+    () // buffer.Add(0<RenderLayer>, AddPointLight light)
 
   for occluder in model.Map.Occluders do
-    buffer.Add(0<RenderLayer>, AddOccluder occluder)
+    () // buffer.Add(0<RenderLayer>, AddOccluder occluder)
 
 
 

@@ -1017,6 +1017,20 @@ type Batch2DRenderer<'Model>
         | ValueSome m -> m
         | ValueNone -> Matrix.Identity
 
+      // 2D identity camera (used before first SetCamera command)
+      let mutable currentCamera = {
+        View = Matrix.Identity
+        Projection =
+          Matrix.CreateOrthographicOffCenter(
+            0.0f,
+            1280.0f,
+            720.0f,
+            0.0f,
+            0.0f,
+            1.0f
+          )
+      }
+
       // Lighting tracking (Phase 3)
       let mutable currentLightingState: LightingState2D voption =
         config.Lighting
@@ -1050,10 +1064,8 @@ type Batch2DRenderer<'Model>
             for i = 0 to pCount - 1 do
               let l = pointLights.[i]
 
-              screenSpaceLightsBuf.[i] <- {
-                l with
-                    Position = Vector2.Transform(l.Position, viewMatrix)
-              }
+              // Keep lights in world space - shader authors decide coordinate space
+              screenSpaceLightsBuf.[i] <- l
 
             let bin =
               Lighting2DInternal.binPointLights
@@ -1092,13 +1104,13 @@ type Batch2DRenderer<'Model>
 
               for i = 0 to dirCounts - 1 do
                 let l = directionalLights.[i]
-                let viewDir = Vector2.Transform(l.Direction, viewMatrix)
 
+                // Keep directional lights in world space
                 dirDirections.[i] <-
-                  if viewDir.LengthSquared() > 0.0001f then
-                    Vector2.Normalize(viewDir)
+                  if l.Direction.LengthSquared() > 0.0001f then
+                    Vector2.Normalize(l.Direction)
                   else
-                    viewDir
+                    l.Direction
 
                 dirColors.[i] <- l.Color.ToVector4() * l.Intensity
 
@@ -1132,16 +1144,44 @@ type Batch2DRenderer<'Model>
 
             lightTileDataTex.SetData(lightTileDataBuffer)
 
+            fx.SafeSetParam("LightIndexBuffer", lightTileDataTex :> Texture)
             fx.SafeSetParam("TileSize", float32 lCfg.TileSize)
             fx.SafeSetParam("TilesX", float32 bin.TilesX)
             fx.SafeSetParam("MaxLightsPerTile", lCfg.MaxLightsPerTile)
+
+            // Viewport dimensions (for screen-space calculations)
+            let vpW = float32 ctx.GraphicsDevice.Viewport.Width
+            let vpH = float32 ctx.GraphicsDevice.Viewport.Height
+            let viewportSize = Vector2(vpW, vpH)
+
+            fx.SafeSetParam("ViewportSize", viewportSize)
+            fx.SafeSetParam("ViewportSizeInv", Vector2(1.0f / vpW, 1.0f / vpH))
+
+            // Camera matrices - shader authors choose coordinate space
+            fx.SafeSetParam("ViewMatrix", viewMatrix)
+            fx.SafeSetParam("ProjectionMatrix", currentCamera.Projection)
+            fx.SafeSetParam("InverseViewMatrix", Matrix.Invert(viewMatrix))
+
+            fx.SafeSetParam(
+              "InverseProjectionMatrix",
+              Matrix.Invert(currentCamera.Projection)
+            )
+
+            fx.SafeSetParam(
+              "ViewProjectionMatrix",
+              viewMatrix * currentCamera.Projection
+            )
 
             fx.SafeSetParam(
               "LightIndexBufferWidth",
               float32 lightTileDataTex.Width
             )
 
-            fx.SafeSetParam("LightIndexBuffer", lightTileDataTex :> Texture)
+            fx.SafeSetParam(
+              "LightIndexBufferHeight",
+              float32 lightTileDataTex.Height
+            )
+
 
             lCfg.Shadows
             |> ValueOption.iter(fun shadowCfg ->
@@ -1163,8 +1203,7 @@ type Batch2DRenderer<'Model>
                 ensureCapacity dIndicesCount &dirShadowIndicesBuf
 
                 for i = 0 to pIndicesCount - 1 do
-                  pointShadowIndicesBuf.[i] <-
-                    float32 shadowIndicesPoint.[i]
+                  pointShadowIndicesBuf.[i] <- float32 shadowIndicesPoint.[i]
 
                 for i = 0 to dIndicesCount - 1 do
                   dirShadowIndicesBuf.[i] <-
@@ -1180,9 +1219,9 @@ type Batch2DRenderer<'Model>
                   dirShadowIndicesBuf
                 ))))
 
-      
 
-                
+
+
 
       // CRITICAL: Set RenderTarget BEFORE Clear to avoid accumulation trails
       if hasPostProcess then
@@ -1211,6 +1250,28 @@ type Batch2DRenderer<'Model>
       let beginBatch() =
         updateLighting(currentEffect, activeViewMatrix)
 
+        // Explicitly set all matrix parameters for maximum compatibility
+        if currentEffect <> null then
+          currentEffect.SafeSetParam("World", Matrix.Identity)
+          currentEffect.SafeSetParam("View", activeViewMatrix)
+          currentEffect.SafeSetParam("ViewMatrix", activeViewMatrix)
+          currentEffect.SafeSetParam("Projection", currentCamera.Projection)
+
+          currentEffect.SafeSetParam(
+            "ProjectionMatrix",
+            currentCamera.Projection
+          )
+
+        // If using a custom lighting effect, we must pass Identity to SpriteBatch
+        // because the shader handles the View transform itself.
+        // If we pass currentTransform, SpriteBatch applies it to the vertices first,
+        // causing a double-transform (and wrong WorldPos for lighting).
+        let transformToUse =
+          if currentEffect <> null && config.Lighting.IsSome then
+            Nullable Matrix.Identity
+          else
+            currentTransform
+
         spriteBatch.Begin(
           currentSortMode,
           currentBlend,
@@ -1218,7 +1279,7 @@ type Batch2DRenderer<'Model>
           currentDepthStencil,
           currentRasterizer,
           currentEffect,
-          currentTransform
+          transformToUse
         )
 
       let endBatch() = spriteBatch.End()
@@ -1274,6 +1335,7 @@ type Batch2DRenderer<'Model>
 
           currentTransform <- Nullable cam.View
           activeViewMatrix <- cam.View
+          currentCamera <- cam
           beginBatch()
           isBatching <- true
 
