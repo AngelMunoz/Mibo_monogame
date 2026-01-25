@@ -728,6 +728,23 @@ module Lighting2DInternal =
     TileDataBuffer: float32[]
   }
 
+  /// <summary>Groups global rendering dependencies.</summary>
+  [<Struct>]
+  type LightingEnvironment = {
+    Device: GraphicsDevice
+    Pool: IRenderTargetPool
+    Camera: Camera
+    ViewMatrix: Matrix
+  }
+
+  /// <summary>Groups the current frame's light and occluder data.</summary>
+  [<Struct>]
+  type LightingScene = {
+    PointLights: ResizeArray<PointLight2D>
+    DirectionalLights: ResizeArray<DirectionalLight2D>
+    Occluders: ResizeArray<Occluder2D>
+  }
+
   let binPointLights
     (tw: int)
     (th: int)
@@ -764,188 +781,112 @@ module Lighting2DInternal =
     { TilesX = tw; TilesY = th }
 
   module Shadows =
-    let render
-      (device: GraphicsDevice)
-      (cfg: Shadows2DConfig)
-      (shader: Effect)
-      (blend: BlendState)
-      (pool: IRenderTargetPool)
-      (ocBatch: OccluderBatch.State)
-      (cam: Camera voption)
-      (pLights: ResizeArray<PointLight2D>)
-      (dLights: ResizeArray<DirectionalLight2D>)
-      (occluders: ResizeArray<Occluder2D>)
-      (bufs: ShadowBuffers)
+    let render 
+      (env: LightingEnvironment) 
+      (cfg: Shadows2DConfig) 
+      (shader: Effect) 
+      (blend: BlendState) 
+      (ocBatch: OccluderBatch.State) 
+      (scene: LightingScene) 
+      (bufs: ShadowBuffers) 
       (atlas: RenderTarget2D voption byref)
       =
       bufs.Casters.Clear()
 
-      for i = 0 to pLights.Count - 1 do
-        let l = pLights.[i]
-
+      for i = 0 to scene.PointLights.Count - 1 do
+        let l = scene.PointLights.[i]
         if l.Shadow.IsSome then
           let distSq = Vector2.DistanceSquared(l.Position, Vector2.Zero)
           let priority = l.Intensity / (Math.Max(1.0f, distSq))
+          bufs.Casters.Add({ Type = Point; Index = i; Priority = priority })
 
-          bufs.Casters.Add(
-            {
-              Type = Point
-              Index = i
-              Priority = priority
-            }
-          )
-
-      for i = 0 to dLights.Count - 1 do
-        let l = dLights.[i]
-
+      for i = 0 to scene.DirectionalLights.Count - 1 do
+        let l = scene.DirectionalLights.[i]
         if l.Shadow.IsSome then
-          bufs.Casters.Add(
-            {
-              Type = Directional
-              Index = i
-              Priority = l.Intensity
-            }
-          )
+          bufs.Casters.Add({ Type = Directional; Index = i; Priority = l.Intensity })
 
-      bufs.Casters.Sort(
-        Comparison(fun (a: ShadowCasterEntry) b ->
-          b.Priority.CompareTo(a.Priority))
-      )
-
+      bufs.Casters.Sort(Comparison(fun (a: ShadowCasterEntry) b -> b.Priority.CompareTo(a.Priority)))
       let count = Math.Min(bufs.Casters.Count, cfg.MaxShadowLights)
 
       Array.Fill(bufs.IndicesPoint, -1)
       Array.Fill(bufs.IndicesDirectional, -1)
 
-      let shadowOrigin =
-        match cam with
-        | ValueSome c ->
-          let inv = Matrix.Invert(c.View)
-          let vp = device.Viewport
-
-          let cw =
-            Vector3.Transform(
-              Vector3(float32 vp.Width * 0.5f, float32 vp.Height * 0.5f, 0f),
-              inv
-            )
-
-          Vector2(float32(floor cw.X), float32(floor cw.Y))
-        | ValueNone -> Vector2.Zero
+      // Calculate shadow origin based on camera world center
+      let inv = Matrix.Invert(env.Camera.View)
+      let vp = env.Device.Viewport
+      let cw = Vector3.Transform(Vector3(float32 vp.Width * 0.5f, float32 vp.Height * 0.5f, 0f), inv)
+      let shadowOrigin = Vector2(float32(floor cw.X), float32(floor cw.Y))
 
       let mutable row = 0
-
       for i = 0 to count - 1 do
         let entry = bufs.Casters.[i]
-
         match entry.Type with
         | Point -> bufs.IndicesPoint.[entry.Index] <- row
-        | Directional ->
-          bufs.IndicesDirectional.[entry.Index] <- row
-          bufs.OriginsDirectional.[entry.Index] <- shadowOrigin
-
+        | Directional -> 
+            bufs.IndicesDirectional.[entry.Index] <- row
+            bufs.OriginsDirectional.[entry.Index] <- shadowOrigin
         row <- row + 1
 
       let aw, ah = cfg.Resolution, cfg.MaxShadowLights
-
       match atlas with
       | ValueSome rt when rt.Width = aw && rt.Height = ah -> ()
       | ValueSome rt ->
-        rt.Dispose()
-
-        atlas <-
-          ValueSome(
-            pool.Acquire {
-              Width = aw
-              Height = ah
-              Format = SurfaceFormat.Single
-              DepthFormat = DepthFormat.Depth24
-            }
-          )
+          rt.Dispose()
+          atlas <- ValueSome(env.Pool.Acquire { Width = aw; Height = ah; Format = SurfaceFormat.Single; DepthFormat = DepthFormat.Depth24 })
       | ValueNone ->
-        atlas <-
-          ValueSome(
-            pool.Acquire {
-              Width = aw
-              Height = ah
-              Format = SurfaceFormat.Single
-              DepthFormat = DepthFormat.Depth24
-            }
-          )
+          atlas <- ValueSome(env.Pool.Acquire { Width = aw; Height = ah; Format = SurfaceFormat.Single; DepthFormat = DepthFormat.Depth24 })
 
       let sRt = atlas.Value
-      device.SetRenderTarget(sRt)
-      device.Clear(Color.White)
-      device.DepthStencilState <- DepthStencilState.None
-      device.BlendState <- blend
+      env.Device.SetRenderTarget(sRt)
+      env.Device.Clear(Color.White)
+      env.Device.DepthStencilState <- DepthStencilState.None
+      env.Device.BlendState <- blend
 
-      let vp = device.Viewport
-
+      let oldVp = env.Device.Viewport
       for i = 0 to count - 1 do
         let entry = bufs.Casters.[i]
-
-        let r =
-          match entry.Type with
-          | Point -> bufs.IndicesPoint.[entry.Index]
-          | Directional -> bufs.IndicesDirectional.[entry.Index]
+        let r = match entry.Type with | Point -> bufs.IndicesPoint.[entry.Index] | Directional -> bufs.IndicesDirectional.[entry.Index]
 
         if r >= 0 then
-          device.Viewport <- Viewport(0, r, aw, 1, 0f, 1f)
+          env.Device.Viewport <- Viewport(0, r, aw, 1, 0f, 1f)
           shader.SafeSetParam("AtlasWidth", float32 aw)
           shader.SafeSetParam("AtlasHeight", float32 ah)
 
           match entry.Type with
           | Point ->
-            let l = pLights.[entry.Index]
+            let l = scene.PointLights.[entry.Index]
             shader.SafeSetParam("LightPosition", l.Position)
             shader.SafeSetParam("LightRadius", l.Radius)
             shader.CurrentTechnique.Passes.[0].Apply()
             OccluderBatch.begin' ocBatch
-
-            for j = 0 to occluders.Count - 1 do
-              let o = occluders.[j]
-
+            for j = 0 to scene.Occluders.Count - 1 do
+              let o = scene.Occluders.[j]
               for s = 0 to 7 do
                 let t1, t2 = float32 s / 8.0f, float32(s + 1) / 8.0f
-
-                OccluderBatch.addLine
-                  (Vector2.Lerp(o.P1, o.P2, t1))
-                  (Vector2.Lerp(o.P1, o.P2, t2))
-                  o.Height
-                  ocBatch
-
+                OccluderBatch.addLine (Vector2.Lerp(o.P1, o.P2, t1)) (Vector2.Lerp(o.P1, o.P2, t2)) o.Height ocBatch
             OccluderBatch.end' ocBatch
           | Directional ->
-            let l = dLights.[entry.Index]
+            let l = scene.DirectionalLights.[entry.Index]
             shader.SafeSetParam("LightDirection", l.Direction)
             shader.SafeSetParam("LightRadius", -1.0f)
-
-            shader.SafeSetParam(
-              "ShadowOrigin",
-              bufs.OriginsDirectional.[entry.Index]
-            )
-
+            shader.SafeSetParam("ShadowOrigin", bufs.OriginsDirectional.[entry.Index])
             shader.CurrentTechnique.Passes.[0].Apply()
             OccluderBatch.begin' ocBatch
-
-            for j = 0 to occluders.Count - 1 do
-              OccluderBatch.addOccluder occluders.[j] ocBatch
-
+            for j = 0 to scene.Occluders.Count - 1 do
+              OccluderBatch.addOccluder scene.Occluders.[j] ocBatch
             OccluderBatch.end' ocBatch
 
-      device.Viewport <- vp
-      device.SetRenderTarget null
+      env.Device.Viewport <- oldVp
+      env.Device.SetRenderTarget null
 
   module Pipeline =
     let apply
-      (device: GraphicsDevice)
+      (env: LightingEnvironment)
       (tw: int)
       (th: int)
       (cfg: Lighting2DConfig)
       (state: LightingState2D)
-      (pLights: ResizeArray<PointLight2D>)
-      (dLights: ResizeArray<DirectionalLight2D>)
-      (view: Matrix)
-      (camera: Camera)
+      (scene: LightingScene)
       (fx: Effect)
       (bufs: LightingBuffers)
       (tileTex: Texture2D byref)
@@ -956,12 +897,12 @@ module Lighting2DInternal =
       | ValueSome a -> fx.SafeSetParam("AmbientColor", a.Color)
       | ValueNone -> ()
 
-      let pCount = pLights.Count
+      let pCount = scene.PointLights.Count
 
       for i = 0 to pCount - 1 do
         bufs.ScreenSpaceLights.[i] <- {
-          pLights.[i] with
-              Position = Vector2.Transform(pLights.[i].Position, view)
+          scene.PointLights.[i] with
+              Position = Vector2.Transform(scene.PointLights.[i].Position, env.ViewMatrix)
         }
 
       let bin =
@@ -976,7 +917,7 @@ module Lighting2DInternal =
           bufs.TileCounts
 
       for i = 0 to pCount - 1 do
-        let l = pLights.[i]
+        let l = scene.PointLights.[i]
         bufs.PointPositions.[i] <- l.Position
         bufs.PointColors.[i] <- l.Color.ToVector4() * l.Intensity
         bufs.PointRadii.[i] <- l.Radius
@@ -988,12 +929,12 @@ module Lighting2DInternal =
       fx.SafeSetParam("PointLightFalloffs", bufs.PointFalloffs)
       fx.SafeSetParam("PointLightCount", pCount)
 
-      let dCount = dLights.Count
+      let dCount = scene.DirectionalLights.Count
       fx.SafeSetParam("DirectionalLightCount", dCount)
 
       if dCount > 0 then
         for i = 0 to dCount - 1 do
-          let l = dLights.[i]
+          let l = scene.DirectionalLights.[i]
 
           bufs.DirDirections.[i] <-
             if l.Direction.LengthSquared() > 0.0001f then
@@ -1017,7 +958,7 @@ module Lighting2DInternal =
         if not(isNull tileTex) then
           tileTex.Dispose()
 
-        tileTex <- new Texture2D(device, req, 1, false, SurfaceFormat.Single)
+        tileTex <- new Texture2D(env.Device, req, 1, false, SurfaceFormat.Single)
         tileBuf <- Array.zeroCreate req
 
       for j = 0 to req - 1 do
@@ -1030,7 +971,7 @@ module Lighting2DInternal =
       fx.SafeSetParam("TilesX", float32 bin.TilesX)
       fx.SafeSetParam("MaxLightsPerTile", cfg.MaxLightsPerTile)
 
-      let vp = device.Viewport
+      let vp = env.Device.Viewport
 
       fx.SafeSetParam(
         "ViewportSize",
@@ -1042,16 +983,16 @@ module Lighting2DInternal =
         Vector2(1.0f / float32 vp.Width, 1.0f / float32 vp.Height)
       )
 
-      fx.SafeSetParam("ViewMatrix", view)
-      fx.SafeSetParam("ProjectionMatrix", camera.Projection)
-      fx.SafeSetParam("InverseViewMatrix", Matrix.Invert(view))
+      fx.SafeSetParam("ViewMatrix", env.ViewMatrix)
+      fx.SafeSetParam("ProjectionMatrix", env.Camera.Projection)
+      fx.SafeSetParam("InverseViewMatrix", Matrix.Invert(env.ViewMatrix))
 
       fx.SafeSetParam(
         "InverseProjectionMatrix",
-        Matrix.Invert(camera.Projection)
+        Matrix.Invert(env.Camera.Projection)
       )
 
-      fx.SafeSetParam("ViewProjectionMatrix", view * camera.Projection)
+      fx.SafeSetParam("ViewProjectionMatrix", env.ViewMatrix * env.Camera.Projection)
       fx.SafeSetParam("LightIndexBufferWidth", float32 tileTex.Width)
       fx.SafeSetParam("LightIndexBufferHeight", float32 tileTex.Height)
 
@@ -1219,20 +1160,24 @@ type Batch2DRenderer<'Model>
         | ValueSome m -> Nullable m
         | ValueNone -> Nullable()
 
-      // Lighting tracking (Phase 3)
-      let mutable currentLightingState: LightingState2D voption =
-        config.Lighting
-        |> ValueOption.map(fun l -> {
-          Ambient = l.DefaultAmbient
-          PointLights = [||]
-          DirectionalLights = [||]
-        })
-        |> ValueOption.defaultValue {
-          Ambient = ValueNone
-          PointLights = [||]
-          DirectionalLights = [||]
-        }
-        |> ValueSome
+      let mutable activeViewMatrix =
+        match config.TransformMatrix with
+        | ValueSome m -> m
+        | ValueNone -> Matrix.Identity
+
+      // 2D identity camera (used before first SetCamera command)
+      let mutable currentCamera = {
+        View = Matrix.Identity
+        Projection =
+          Matrix.CreateOrthographicOffCenter(
+            0.0f,
+            1280.0f,
+            720.0f,
+            0.0f,
+            0.0f,
+            1.0f
+          )
+      }
 
       pointLights.Clear()
       directionalLights.Clear()
@@ -1273,6 +1218,17 @@ type Batch2DRenderer<'Model>
           ensureCapacity directionalLights.Count &shadowIndicesDirectional
           ensureCapacity directionalLights.Count &dirShadowOrigins
 
+          let env: Lighting2DInternal.LightingEnvironment = {
+            Device = ctx.GraphicsDevice
+            Pool = rtPool.Value
+            Camera = capturedCamera |> ValueOption.defaultValue currentCamera
+            ViewMatrix = activeViewMatrix
+          }
+          let scene: Lighting2DInternal.LightingScene = {
+            PointLights = pointLights
+            DirectionalLights = directionalLights
+            Occluders = occluders
+          }
           let bufs: Lighting2DInternal.ShadowBuffers = {
             IndicesPoint = shadowIndicesPoint
             IndicesDirectional = shadowIndicesDirectional
@@ -1281,16 +1237,12 @@ type Batch2DRenderer<'Model>
           }
 
           Lighting2DInternal.Shadows.render
-            ctx.GraphicsDevice
+            env
             shadowCfg
             config.ShaderOverrides.[ShaderBase2D.ShadowCaster]
             shadowMinBlend
-            rtPool.Value
             occluderBatch.Value
-            capturedCamera
-            pointLights
-            directionalLights
-            occluders
+            scene
             bufs
             &shadowAtlas
 
@@ -1313,30 +1265,6 @@ type Batch2DRenderer<'Model>
           config.Effect
       // Reset tracked state at start of frame
       currentNormalMap <- null
-
-      let mutable currentTransform =
-        match config.TransformMatrix with
-        | ValueSome m -> Nullable m
-        | ValueNone -> Nullable()
-
-      let mutable activeViewMatrix =
-        match config.TransformMatrix with
-        | ValueSome m -> m
-        | ValueNone -> Matrix.Identity
-
-      // 2D identity camera (used before first SetCamera command)
-      let mutable currentCamera = {
-        View = Matrix.Identity
-        Projection =
-          Matrix.CreateOrthographicOffCenter(
-            0.0f,
-            1280.0f,
-            720.0f,
-            0.0f,
-            0.0f,
-            1.0f
-          )
-      }
 
       // Lighting tracking (Phase 3)
       let mutable currentLightingState: LightingState2D voption =
@@ -1379,6 +1307,17 @@ type Batch2DRenderer<'Model>
             ensureCapacity pointLights.Count &pointShadowIndicesBuf
             ensureCapacity directionalLights.Count &dirShadowIndicesBuf
 
+            let env: Lighting2DInternal.LightingEnvironment = {
+              Device = ctx.GraphicsDevice
+              Pool = rtPool.Value
+              Camera = currentCamera
+              ViewMatrix = viewMatrix
+            }
+            let scene: Lighting2DInternal.LightingScene = {
+              PointLights = pointLights
+              DirectionalLights = directionalLights
+              Occluders = occluders
+            }
             let bufs: Lighting2DInternal.LightingBuffers = {
               PointPositions = pointPositions
               PointColors = pointColors
@@ -1398,15 +1337,12 @@ type Batch2DRenderer<'Model>
             }
 
             Lighting2DInternal.Pipeline.apply
-              ctx.GraphicsDevice
+              env
               tw
               th
               lCfg
               currentLightingState.Value
-              pointLights
-              directionalLights
-              viewMatrix
-              currentCamera
+              scene
               fx
               bufs
               &lightTileDataTex
