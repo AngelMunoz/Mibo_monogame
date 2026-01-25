@@ -699,13 +699,38 @@ module Lighting2DInternal =
   }
 
   [<Struct>]
-  type LightBinResults = {
-    TilesX: int
-    TilesY: int
+  type LightBinResults = { TilesX: int; TilesY: int }
+
+  [<Struct>]
+  type ShadowBuffers = {
+    IndicesPoint: int[]
+    IndicesDirectional: int[]
+    OriginsDirectional: Vector2[]
+    Casters: ResizeArray<ShadowCasterEntry>
+  }
+
+  [<Struct>]
+  type LightingBuffers = {
+    PointPositions: Vector2[]
+    PointColors: Vector4[]
+    PointRadii: float32[]
+    PointFalloffs: float32[]
+    PointShadowIndices: float32[]
+    DirDirections: Vector2[]
+    DirColors: Vector4[]
+    DirShadowIndices: float32[]
+    OriginsDirectional: Vector2[]
+    IndicesPoint: int[]
+    IndicesDirectional: int[]
+    ScreenSpaceLights: PointLight2D[]
+    TileCounts: int[]
+    TileData: int[]
+    TileDataBuffer: float32[]
   }
 
   let binPointLights
-    (device: GraphicsDevice)
+    (tw: int)
+    (th: int)
     (tileSize: int)
     (maxLightsPerTile: int)
     (lights: PointLight2D[])
@@ -713,10 +738,6 @@ module Lighting2DInternal =
     (tileData: int[])
     (tileCounts: int[])
     : LightBinResults =
-    let viewport = device.Viewport
-    let tw = (viewport.Width + tileSize - 1) / tileSize
-    let th = (viewport.Height + tileSize - 1) / tileSize
-
     // Reset counts and data for the active viewport area
     Array.Clear(tileCounts, 0, tw * th)
     Array.Fill(tileData, -1, 0, tw * th * maxLightsPerTile)
@@ -731,6 +752,7 @@ module Lighting2DInternal =
 
       for ty = minY to maxY do
         let rowOffset = ty * tw
+
         for tx = minX to maxX do
           let tileIdx = rowOffset + tx
           let count = tileCounts.[tileIdx]
@@ -739,10 +761,322 @@ module Lighting2DInternal =
             tileData.[tileIdx * maxLightsPerTile + count] <- i
             tileCounts.[tileIdx] <- count + 1
 
-    {
-      TilesX = tw
-      TilesY = th
-    }
+    { TilesX = tw; TilesY = th }
+
+  module Shadows =
+    let render
+      (device: GraphicsDevice)
+      (cfg: Shadows2DConfig)
+      (shader: Effect)
+      (blend: BlendState)
+      (pool: IRenderTargetPool)
+      (ocBatch: OccluderBatch.State)
+      (cam: Camera voption)
+      (pLights: ResizeArray<PointLight2D>)
+      (dLights: ResizeArray<DirectionalLight2D>)
+      (occluders: ResizeArray<Occluder2D>)
+      (bufs: ShadowBuffers)
+      (atlas: RenderTarget2D voption byref)
+      =
+      bufs.Casters.Clear()
+
+      for i = 0 to pLights.Count - 1 do
+        let l = pLights.[i]
+
+        if l.Shadow.IsSome then
+          let distSq = Vector2.DistanceSquared(l.Position, Vector2.Zero)
+          let priority = l.Intensity / (Math.Max(1.0f, distSq))
+
+          bufs.Casters.Add(
+            {
+              Type = Point
+              Index = i
+              Priority = priority
+            }
+          )
+
+      for i = 0 to dLights.Count - 1 do
+        let l = dLights.[i]
+
+        if l.Shadow.IsSome then
+          bufs.Casters.Add(
+            {
+              Type = Directional
+              Index = i
+              Priority = l.Intensity
+            }
+          )
+
+      bufs.Casters.Sort(
+        Comparison(fun (a: ShadowCasterEntry) b ->
+          b.Priority.CompareTo(a.Priority))
+      )
+
+      let count = Math.Min(bufs.Casters.Count, cfg.MaxShadowLights)
+
+      Array.Fill(bufs.IndicesPoint, -1)
+      Array.Fill(bufs.IndicesDirectional, -1)
+
+      let shadowOrigin =
+        match cam with
+        | ValueSome c ->
+          let inv = Matrix.Invert(c.View)
+          let vp = device.Viewport
+
+          let cw =
+            Vector3.Transform(
+              Vector3(float32 vp.Width * 0.5f, float32 vp.Height * 0.5f, 0f),
+              inv
+            )
+
+          Vector2(float32(floor cw.X), float32(floor cw.Y))
+        | ValueNone -> Vector2.Zero
+
+      let mutable row = 0
+
+      for i = 0 to count - 1 do
+        let entry = bufs.Casters.[i]
+
+        match entry.Type with
+        | Point -> bufs.IndicesPoint.[entry.Index] <- row
+        | Directional ->
+          bufs.IndicesDirectional.[entry.Index] <- row
+          bufs.OriginsDirectional.[entry.Index] <- shadowOrigin
+
+        row <- row + 1
+
+      let aw, ah = cfg.Resolution, cfg.MaxShadowLights
+
+      match atlas with
+      | ValueSome rt when rt.Width = aw && rt.Height = ah -> ()
+      | ValueSome rt ->
+        rt.Dispose()
+
+        atlas <-
+          ValueSome(
+            pool.Acquire {
+              Width = aw
+              Height = ah
+              Format = SurfaceFormat.Single
+              DepthFormat = DepthFormat.Depth24
+            }
+          )
+      | ValueNone ->
+        atlas <-
+          ValueSome(
+            pool.Acquire {
+              Width = aw
+              Height = ah
+              Format = SurfaceFormat.Single
+              DepthFormat = DepthFormat.Depth24
+            }
+          )
+
+      let sRt = atlas.Value
+      device.SetRenderTarget(sRt)
+      device.Clear(Color.White)
+      device.DepthStencilState <- DepthStencilState.None
+      device.BlendState <- blend
+
+      let vp = device.Viewport
+
+      for i = 0 to count - 1 do
+        let entry = bufs.Casters.[i]
+
+        let r =
+          match entry.Type with
+          | Point -> bufs.IndicesPoint.[entry.Index]
+          | Directional -> bufs.IndicesDirectional.[entry.Index]
+
+        if r >= 0 then
+          device.Viewport <- Viewport(0, r, aw, 1, 0f, 1f)
+          shader.SafeSetParam("AtlasWidth", float32 aw)
+          shader.SafeSetParam("AtlasHeight", float32 ah)
+
+          match entry.Type with
+          | Point ->
+            let l = pLights.[entry.Index]
+            shader.SafeSetParam("LightPosition", l.Position)
+            shader.SafeSetParam("LightRadius", l.Radius)
+            shader.CurrentTechnique.Passes.[0].Apply()
+            OccluderBatch.begin' ocBatch
+
+            for j = 0 to occluders.Count - 1 do
+              let o = occluders.[j]
+
+              for s = 0 to 7 do
+                let t1, t2 = float32 s / 8.0f, float32(s + 1) / 8.0f
+
+                OccluderBatch.addLine
+                  (Vector2.Lerp(o.P1, o.P2, t1))
+                  (Vector2.Lerp(o.P1, o.P2, t2))
+                  o.Height
+                  ocBatch
+
+            OccluderBatch.end' ocBatch
+          | Directional ->
+            let l = dLights.[entry.Index]
+            shader.SafeSetParam("LightDirection", l.Direction)
+            shader.SafeSetParam("LightRadius", -1.0f)
+
+            shader.SafeSetParam(
+              "ShadowOrigin",
+              bufs.OriginsDirectional.[entry.Index]
+            )
+
+            shader.CurrentTechnique.Passes.[0].Apply()
+            OccluderBatch.begin' ocBatch
+
+            for j = 0 to occluders.Count - 1 do
+              OccluderBatch.addOccluder occluders.[j] ocBatch
+
+            OccluderBatch.end' ocBatch
+
+      device.Viewport <- vp
+      device.SetRenderTarget null
+
+  module Pipeline =
+    let apply
+      (device: GraphicsDevice)
+      (tw: int)
+      (th: int)
+      (cfg: Lighting2DConfig)
+      (state: LightingState2D)
+      (pLights: ResizeArray<PointLight2D>)
+      (dLights: ResizeArray<DirectionalLight2D>)
+      (view: Matrix)
+      (camera: Camera)
+      (fx: Effect)
+      (bufs: LightingBuffers)
+      (tileTex: Texture2D byref)
+      (tileBuf: float32[] byref)
+      (shadowAtlas: RenderTarget2D voption)
+      =
+      match state.Ambient with
+      | ValueSome a -> fx.SafeSetParam("AmbientColor", a.Color)
+      | ValueNone -> ()
+
+      let pCount = pLights.Count
+
+      for i = 0 to pCount - 1 do
+        bufs.ScreenSpaceLights.[i] <- {
+          pLights.[i] with
+              Position = Vector2.Transform(pLights.[i].Position, view)
+        }
+
+      let bin =
+        binPointLights
+          tw
+          th
+          cfg.TileSize
+          cfg.MaxLightsPerTile
+          bufs.ScreenSpaceLights
+          pCount
+          bufs.TileData
+          bufs.TileCounts
+
+      for i = 0 to pCount - 1 do
+        let l = pLights.[i]
+        bufs.PointPositions.[i] <- l.Position
+        bufs.PointColors.[i] <- l.Color.ToVector4() * l.Intensity
+        bufs.PointRadii.[i] <- l.Radius
+        bufs.PointFalloffs.[i] <- l.Falloff
+
+      fx.SafeSetParam("PointLightPositions", bufs.PointPositions)
+      fx.SafeSetParam("PointLightColors", bufs.PointColors)
+      fx.SafeSetParam("PointLightRadii", bufs.PointRadii)
+      fx.SafeSetParam("PointLightFalloffs", bufs.PointFalloffs)
+      fx.SafeSetParam("PointLightCount", pCount)
+
+      let dCount = dLights.Count
+      fx.SafeSetParam("DirectionalLightCount", dCount)
+
+      if dCount > 0 then
+        for i = 0 to dCount - 1 do
+          let l = dLights.[i]
+
+          bufs.DirDirections.[i] <-
+            if l.Direction.LengthSquared() > 0.0001f then
+              Vector2.Normalize(l.Direction)
+            else
+              l.Direction
+
+          bufs.DirColors.[i] <- l.Color.ToVector4() * l.Intensity
+
+        fx.SafeSetParam("DirectionalLightDirections", bufs.DirDirections)
+        fx.SafeSetParam("DirectionalLightColors", bufs.DirColors)
+
+        fx.SafeSetParam(
+          "DirectionalLightShadowOrigins",
+          bufs.OriginsDirectional
+        )
+
+      let req = bin.TilesX * bin.TilesY * cfg.MaxLightsPerTile
+
+      if isNull tileTex || tileTex.Width <> req then
+        if not(isNull tileTex) then
+          tileTex.Dispose()
+
+        tileTex <- new Texture2D(device, req, 1, false, SurfaceFormat.Single)
+        tileBuf <- Array.zeroCreate req
+
+      for j = 0 to req - 1 do
+        tileBuf.[j] <- float32 bufs.TileData.[j]
+
+      tileTex.SetData(tileBuf)
+
+      fx.SafeSetParam("LightIndexBuffer", tileTex :> Texture)
+      fx.SafeSetParam("TileSize", float32 cfg.TileSize)
+      fx.SafeSetParam("TilesX", float32 bin.TilesX)
+      fx.SafeSetParam("MaxLightsPerTile", cfg.MaxLightsPerTile)
+
+      let vp = device.Viewport
+
+      fx.SafeSetParam(
+        "ViewportSize",
+        Vector2(float32 vp.Width, float32 vp.Height)
+      )
+
+      fx.SafeSetParam(
+        "ViewportSizeInv",
+        Vector2(1.0f / float32 vp.Width, 1.0f / float32 vp.Height)
+      )
+
+      fx.SafeSetParam("ViewMatrix", view)
+      fx.SafeSetParam("ProjectionMatrix", camera.Projection)
+      fx.SafeSetParam("InverseViewMatrix", Matrix.Invert(view))
+
+      fx.SafeSetParam(
+        "InverseProjectionMatrix",
+        Matrix.Invert(camera.Projection)
+      )
+
+      fx.SafeSetParam("ViewProjectionMatrix", view * camera.Projection)
+      fx.SafeSetParam("LightIndexBufferWidth", float32 tileTex.Width)
+      fx.SafeSetParam("LightIndexBufferHeight", float32 tileTex.Height)
+
+      match cfg.Shadows, shadowAtlas with
+      | ValueSome sCfg, ValueSome atl ->
+        fx.SafeSetParam("ShadowAtlas", atl :> Texture)
+
+        fx.SafeSetParam(
+          "ShadowAtlasSize",
+          Vector2(float32 atl.Width, float32 atl.Height)
+        )
+
+        fx.SafeSetParam("ShadowBias", (sCfg.ShadowBias: float32))
+        let pc = Math.Min(bufs.IndicesPoint.Length, pCount)
+        let dc = Math.Min(bufs.IndicesDirectional.Length, dCount)
+
+        for i = 0 to pc - 1 do
+          bufs.PointShadowIndices.[i] <- float32 bufs.IndicesPoint.[i]
+
+        for i = 0 to dc - 1 do
+          bufs.DirShadowIndices.[i] <- float32 bufs.IndicesDirectional.[i]
+
+        fx.SafeSetParam("PointLightShadowIndices", bufs.PointShadowIndices)
+        fx.SafeSetParam("DirectionalLightShadowIndices", bufs.DirShadowIndices)
+      | _ -> ()
 
 
 /// <summary>Standard 2D Renderer using <see cref="T:Microsoft.Xna.Framework.Graphics.SpriteBatch"/>.</summary>
@@ -906,6 +1240,7 @@ type Batch2DRenderer<'Model>
 
       // 1. Initial collection pass (Phase 3) - Collect all lights/occluders for global shadows
       let mutable capturedCamera: Camera voption = ValueNone
+
       for i = 0 to buffer.Count - 1 do
         let struct (_, cmd) = buffer.Item i
 
@@ -913,7 +1248,8 @@ type Batch2DRenderer<'Model>
         | AddPointLight l -> pointLights.Add l
         | AddDirectionalLight l -> directionalLights.Add l
         | AddOccluder o -> occluders.Add o
-        | SetCamera c when capturedCamera.IsNone -> capturedCamera <- ValueSome c
+        | SetCamera c when capturedCamera.IsNone ->
+          capturedCamera <- ValueSome c
         | _ -> ()
 
       let hasPostProcess = config.PostProcess.IsSome
@@ -929,188 +1265,34 @@ type Batch2DRenderer<'Model>
       let shadowPass() =
         if shadowsEnabled then
           let shadowCfg = config.Lighting.Value.Shadows.Value
-          let device = ctx.GraphicsDevice
 
-          match occluderBatch with
-          | None -> occluderBatch <- Some(OccluderBatch.create device)
-          | Some _ -> ()
+          if occluderBatch.IsNone then
+            occluderBatch <- Some(OccluderBatch.create ctx.GraphicsDevice)
 
-          shadowCasters.Clear()
-
-          for i = 0 to pointLights.Count - 1 do
-            let l = pointLights.[i]
-
-            if l.Shadow.IsSome then
-              let distSq = Vector2.DistanceSquared(l.Position, Vector2.Zero)
-              let priority = l.Intensity / (max 1.0f distSq)
-              shadowCasters.Add({ Type = Lighting2DInternal.Point; Index = i; Priority = priority })
-
-          for i = 0 to directionalLights.Count - 1 do
-            let l = directionalLights.[i]
-
-            if l.Shadow.IsSome then
-              let priority = l.Intensity
-              shadowCasters.Add({ Type = Lighting2DInternal.Directional; Index = i; Priority = priority })
-
-          // Sort by priority descending without allocations
-          shadowCasters.Sort(Comparison(fun (a: Lighting2DInternal.ShadowCasterEntry) b -> b.Priority.CompareTo(a.Priority)))
-          let casterCount = Math.Min(shadowCasters.Count, shadowCfg.MaxShadowLights)
-
-          if shadowIndicesPoint.Length < pointLights.Count then
-            shadowIndicesPoint <-
-              Array.create
-                (max (shadowIndicesPoint.Length * 2) pointLights.Count)
-                -1
-          else
-            for i = 0 to shadowIndicesPoint.Length - 1 do
-              shadowIndicesPoint.[i] <- -1
-
-          if shadowIndicesDirectional.Length < directionalLights.Count then
-            shadowIndicesDirectional <-
-              Array.create
-                (max
-                  (shadowIndicesDirectional.Length * 2)
-                  directionalLights.Count)
-                -1
-          else
-            for i = 0 to shadowIndicesDirectional.Length - 1 do
-              shadowIndicesDirectional.[i] <- -1
-
-          let mutable shadowRow = 0
-
-          // Initialize shadow origins buffer
+          ensureCapacity pointLights.Count &shadowIndicesPoint
+          ensureCapacity directionalLights.Count &shadowIndicesDirectional
           ensureCapacity directionalLights.Count &dirShadowOrigins
 
-          // Calculate shadow origin based on camera center
-          let shadowOrigin = 
-            match capturedCamera with
-            | ValueSome cam -> 
-                let invView = Matrix.Invert(cam.View)
-                let viewport = ctx.GraphicsDevice.Viewport
-                // Center of the viewport in world space
-                let centerWorld = Vector3.Transform(Vector3(float32 viewport.Width * 0.5f, float32 viewport.Height * 0.5f, 0f), invView)
-                // Snap to integer to prevent shimmering
-                let snappedX = floor(centerWorld.X)
-                let snappedY = floor(centerWorld.Y)
-                Vector2(float32 snappedX, float32 snappedY)
-            | ValueNone -> Vector2.Zero
+          let bufs: Lighting2DInternal.ShadowBuffers = {
+            IndicesPoint = shadowIndicesPoint
+            IndicesDirectional = shadowIndicesDirectional
+            OriginsDirectional = dirShadowOrigins
+            Casters = shadowCasters
+          }
 
-          for i = 0 to casterCount - 1 do
-            let entry = shadowCasters.[i]
-            let lightIdx = entry.Index
-            match entry.Type with
-            | Lighting2DInternal.Point ->
-              if lightIdx < shadowIndicesPoint.Length then
-                shadowIndicesPoint.[lightIdx] <- shadowRow
-            | Lighting2DInternal.Directional ->
-              if lightIdx < shadowIndicesDirectional.Length then
-                shadowIndicesDirectional.[lightIdx] <- shadowRow
-                // Store origin for this light
-                dirShadowOrigins.[lightIdx] <- shadowOrigin
-
-            shadowRow <- shadowRow + 1
-
-          let atlasWidth = shadowCfg.Resolution
-          let atlasHeight = shadowCfg.MaxShadowLights
-
-          match shadowAtlas with
-          | ValueSome rt when rt.Width = atlasWidth && rt.Height = atlasHeight ->
-            ()
-          | ValueSome rt ->
-            rt.Dispose()
-
-            shadowAtlas <-
-              ValueSome(
-                rtPool.Value.Acquire {
-                  Width = atlasWidth
-                  Height = atlasHeight
-                  Format = SurfaceFormat.Single
-                  DepthFormat = DepthFormat.Depth24
-                }
-              )
-          | ValueNone ->
-            shadowAtlas <-
-              ValueSome(
-                rtPool.Value.Acquire {
-                  Width = atlasWidth
-                  Height = atlasHeight
-                  Format = SurfaceFormat.Single
-                  DepthFormat = DepthFormat.Depth24
-                }
-              )
-
-          let shadowRt = shadowAtlas.Value
-          let shadowShader = config.ShaderOverrides.[ShaderBase2D.ShadowCaster]
-
-          device.SetRenderTarget(shadowRt)
-          // Clear entire atlas once to White (1.0 = infinitely far)
-          device.Clear(Color.White)
-
-          device.DepthStencilState <- DepthStencilState.None
-          device.BlendState <- shadowMinBlend
-
-          let viewport = device.Viewport
-
-          for i = 0 to casterCount - 1 do
-            let entry = shadowCasters.[i]
-            let lightIdx = entry.Index
-            let row =
-              match entry.Type with
-              | Lighting2DInternal.Point -> shadowIndicesPoint.[lightIdx]
-              | Lighting2DInternal.Directional -> shadowIndicesDirectional.[lightIdx]
-
-            if row >= 0 then
-              match entry.Type with
-              | Lighting2DInternal.Point ->
-                let pl = pointLights.[lightIdx]
-                // Each light gets its own 1px row
-                device.Viewport <- Viewport(0, row, atlasWidth, 1, 0f, 1f)
-
-                shadowShader.SafeSetParam("LightPosition", pl.Position)
-                shadowShader.SafeSetParam("LightRadius", pl.Radius)
-                shadowShader.SafeSetParam("AtlasWidth", float32 atlasWidth)
-                shadowShader.SafeSetParam("AtlasHeight", float32 atlasHeight)
-
-                shadowShader.CurrentTechnique.Passes.[0].Apply()
-
-                let batchState = occluderBatch.Value
-                OccluderBatch.begin' batchState
-
-                for j = 0 to occluders.Count - 1 do
-                  let o = occluders.[j]
-                  // Tessellate long occluders to handle polar distortion
-                  let segments = 8
-
-                  for s = 0 to segments - 1 do
-                    let t1 = float32 s / float32 segments
-                    let t2 = float32(s + 1) / float32 segments
-                    let p1 = Vector2.Lerp(o.P1, o.P2, t1)
-                    let p2 = Vector2.Lerp(o.P1, o.P2, t2)
-                    OccluderBatch.addLine p1 p2 o.Height batchState
-
-                OccluderBatch.end' batchState
-              | Lighting2DInternal.Directional ->
-                let dl = directionalLights.[lightIdx]
-                device.Viewport <- Viewport(0, row, atlasWidth, 1, 0f, 1f)
-
-                shadowShader.SafeSetParam("LightDirection", dl.Direction)
-                shadowShader.SafeSetParam("LightRadius", -1.0f)
-                shadowShader.SafeSetParam("AtlasWidth", float32 atlasWidth)
-                shadowShader.SafeSetParam("AtlasHeight", float32 atlasHeight)
-                shadowShader.SafeSetParam("ShadowOrigin", dirShadowOrigins.[lightIdx])
-
-                shadowShader.CurrentTechnique.Passes.[0].Apply()
-
-                let batchState = occluderBatch.Value
-                OccluderBatch.begin' batchState
-
-                for j = 0 to occluders.Count - 1 do
-                  OccluderBatch.addOccluder occluders.[j] batchState
-
-                OccluderBatch.end' batchState
-
-          device.Viewport <- viewport
-          device.SetRenderTarget null
+          Lighting2DInternal.Shadows.render
+            ctx.GraphicsDevice
+            shadowCfg
+            config.ShaderOverrides.[ShaderBase2D.ShadowCaster]
+            shadowMinBlend
+            rtPool.Value
+            occluderBatch.Value
+            capturedCamera
+            pointLights
+            directionalLights
+            occluders
+            bufs
+            &shadowAtlas
 
       shadowPass()
 
@@ -1174,183 +1356,62 @@ type Batch2DRenderer<'Model>
       // Helper to update lighting params on an effect (Phase 3.7)
       let updateLighting(fx: Effect, viewMatrix: Matrix) =
         if fx <> null then
-          config.Lighting
-          |> ValueOption.iter(fun lCfg ->
-            currentLightingState
-            |> ValueOption.iter(fun state ->
-              state.Ambient
-              |> ValueOption.iter(fun ambient ->
-                fx.SafeSetParam("AmbientColor", ambient.Color)))
+          match config.Lighting with
+          | ValueNone -> ()
+          | ValueSome lCfg ->
+            let tw =
+              (ctx.GraphicsDevice.Viewport.Width + lCfg.TileSize - 1)
+              / lCfg.TileSize
 
-            // Transform lights to screen space FOR THIS VIEW (Binning needs Screen Space)
-            let pCount = pointLights.Count
-            ensureCapacity pCount &screenSpaceLightsBuf
+            let th =
+              (ctx.GraphicsDevice.Viewport.Height + lCfg.TileSize - 1)
+              / lCfg.TileSize
 
-            for i = 0 to pCount - 1 do
-              let l = pointLights.[i]
-              let screenPos = Vector2.Transform(l.Position, activeViewMatrix)
-              screenSpaceLightsBuf.[i] <- { l with Position = screenPos }
-
-            let tw = (ctx.GraphicsDevice.Viewport.Width + lCfg.TileSize - 1) / lCfg.TileSize
-            let th = (ctx.GraphicsDevice.Viewport.Height + lCfg.TileSize - 1) / lCfg.TileSize
             ensureCapacity (tw * th) &tileCounts
             ensureCapacity (tw * th * lCfg.MaxLightsPerTile) &tileData
 
-            let bin =
-              Lighting2DInternal.binPointLights
-                ctx.GraphicsDevice
-                lCfg.TileSize
-                lCfg.MaxLightsPerTile
-                screenSpaceLightsBuf
-                pCount
-                tileData
-                tileCounts
+            ensureCapacity pointLights.Count &pointPositions
+            ensureCapacity pointLights.Count &pointColors
+            ensureCapacity pointLights.Count &pointRadii
+            ensureCapacity pointLights.Count &pointFalloffs
+            ensureCapacity directionalLights.Count &dirDirections
+            ensureCapacity directionalLights.Count &dirColors
+            ensureCapacity pointLights.Count &pointShadowIndicesBuf
+            ensureCapacity directionalLights.Count &dirShadowIndicesBuf
 
-            let pCounts = pCount
-            ensureCapacity pCounts &pointPositions
-            ensureCapacity pCounts &pointColors
-            ensureCapacity pCounts &pointRadii
-            ensureCapacity pCounts &pointFalloffs
+            let bufs: Lighting2DInternal.LightingBuffers = {
+              PointPositions = pointPositions
+              PointColors = pointColors
+              PointRadii = pointRadii
+              PointFalloffs = pointFalloffs
+              PointShadowIndices = pointShadowIndicesBuf
+              DirDirections = dirDirections
+              DirColors = dirColors
+              DirShadowIndices = dirShadowIndicesBuf
+              OriginsDirectional = dirShadowOrigins
+              ScreenSpaceLights = screenSpaceLightsBuf
+              IndicesPoint = shadowIndicesPoint
+              IndicesDirectional = shadowIndicesDirectional
+              TileCounts = tileCounts
+              TileData = tileData
+              TileDataBuffer = lightTileDataBuffer
+            }
 
-            for i = 0 to pCounts - 1 do
-              // Use ORIGINAL World Space lights for the shader
-              let l = pointLights.[i]
-              pointPositions.[i] <- l.Position
-              pointColors.[i] <- l.Color.ToVector4() * l.Intensity
-              pointRadii.[i] <- l.Radius
-              pointFalloffs.[i] <- l.Falloff
-
-            fx.SafeSetParam("PointLightPositions", pointPositions)
-            fx.SafeSetParam("PointLightColors", pointColors)
-            fx.SafeSetParam("PointLightRadii", pointRadii)
-            fx.SafeSetParam("PointLightFalloffs", pointFalloffs)
-            fx.SafeSetParam("PointLightCount", pCounts)
-
-            // Directional lights (no position/radius, just direction)
-            let dirCounts = directionalLights.Count
-            fx.SafeSetParam("DirectionalLightCount", dirCounts)
-
-            if dirCounts > 0 then
-              ensureCapacity dirCounts &dirDirections
-              ensureCapacity dirCounts &dirColors
-
-              for i = 0 to dirCounts - 1 do
-                let l = directionalLights.[i]
-
-                // Keep directional lights in world space
-                dirDirections.[i] <-
-                  if l.Direction.LengthSquared() > 0.0001f then
-                    Vector2.Normalize(l.Direction)
-                  else
-                    l.Direction
-
-                dirColors.[i] <- l.Color.ToVector4() * l.Intensity
-
-              fx.SafeSetParam("DirectionalLightDirections", dirDirections)
-              fx.SafeSetParam("DirectionalLightColors", dirColors)
-              fx.SafeSetParam("DirectionalLightShadowOrigins", dirShadowOrigins)
-
-            // Handle tiered tile data texture
-            let requiredBufferSize = tw * th * lCfg.MaxLightsPerTile
-
-            if
-              isNull lightTileDataTex
-              || lightTileDataTex.Width <> requiredBufferSize
-            then
-              if not(isNull lightTileDataTex) then
-                lightTileDataTex.Dispose()
-
-              lightTileDataTex <-
-                new Texture2D(
-                  ctx.GraphicsDevice,
-                  requiredBufferSize,
-                  1,
-                  false,
-                  SurfaceFormat.Single
-                )
-
-              lightTileDataBuffer <- Array.zeroCreate requiredBufferSize
-
-            // Zero-allocation copy
-            for j = 0 to requiredBufferSize - 1 do
-              lightTileDataBuffer.[j] <- float32 tileData.[j]
-
-            lightTileDataTex.SetData(lightTileDataBuffer)
-
-            fx.SafeSetParam("LightIndexBuffer", lightTileDataTex :> Texture)
-            fx.SafeSetParam("TileSize", float32 lCfg.TileSize)
-            fx.SafeSetParam("TilesX", float32 bin.TilesX)
-            fx.SafeSetParam("MaxLightsPerTile", lCfg.MaxLightsPerTile)
-
-            // Viewport dimensions (for screen-space calculations)
-            let vpW = float32 ctx.GraphicsDevice.Viewport.Width
-            let vpH = float32 ctx.GraphicsDevice.Viewport.Height
-            let viewportSize = Vector2(vpW, vpH)
-
-            fx.SafeSetParam("ViewportSize", viewportSize)
-            fx.SafeSetParam("ViewportSizeInv", Vector2(1.0f / vpW, 1.0f / vpH))
-
-            // Camera matrices - shader authors choose coordinate space
-            fx.SafeSetParam("ViewMatrix", viewMatrix)
-            fx.SafeSetParam("ProjectionMatrix", currentCamera.Projection)
-            fx.SafeSetParam("InverseViewMatrix", Matrix.Invert(viewMatrix))
-
-            fx.SafeSetParam(
-              "InverseProjectionMatrix",
-              Matrix.Invert(currentCamera.Projection)
-            )
-
-            fx.SafeSetParam(
-              "ViewProjectionMatrix",
-              viewMatrix * currentCamera.Projection
-            )
-
-            fx.SafeSetParam(
-              "LightIndexBufferWidth",
-              float32 lightTileDataTex.Width
-            )
-
-            fx.SafeSetParam(
-              "LightIndexBufferHeight",
-              float32 lightTileDataTex.Height
-            )
-
-
-            lCfg.Shadows
-            |> ValueOption.iter(fun shadowCfg ->
+            Lighting2DInternal.Pipeline.apply
+              ctx.GraphicsDevice
+              tw
+              th
+              lCfg
+              currentLightingState.Value
+              pointLights
+              directionalLights
+              viewMatrix
+              currentCamera
+              fx
+              bufs
+              &lightTileDataTex
+              &lightTileDataBuffer
               shadowAtlas
-              |> ValueOption.iter(fun atlas ->
-                fx.SafeSetParam("ShadowAtlas", atlas :> Texture)
-
-                fx.SafeSetParam(
-                  "ShadowAtlasSize",
-                  Vector2(float32 atlas.Width, float32 atlas.Height)
-                )
-
-                fx.SafeSetParam("ShadowBias", shadowCfg.ShadowBias)
-
-                // Map to float32 for shader array passing without per-frame allocation
-                let pIndicesCount = shadowIndicesPoint.Length
-                let dIndicesCount = shadowIndicesDirectional.Length
-                ensureCapacity pIndicesCount &pointShadowIndicesBuf
-                ensureCapacity dIndicesCount &dirShadowIndicesBuf
-
-                for i = 0 to pIndicesCount - 1 do
-                  pointShadowIndicesBuf.[i] <- float32 shadowIndicesPoint.[i]
-
-                for i = 0 to dIndicesCount - 1 do
-                  dirShadowIndicesBuf.[i] <-
-                    float32 shadowIndicesDirectional.[i]
-
-                fx.SafeSetParam(
-                  "PointLightShadowIndices",
-                  pointShadowIndicesBuf
-                )
-
-                fx.SafeSetParam(
-                  "DirectionalLightShadowIndices",
-                  dirShadowIndicesBuf
-                ))))
 
 
 
@@ -1708,7 +1769,14 @@ type Batch2DRenderer<'Model>
 
           for pIdx = 0 to pCmd.Count - 1 do
             let p = pCmd.Particles.[pIdx]
-            BillboardBatch.draw2D p.Position p.Size p.Rotation p.Color p.Uv batch
+
+            BillboardBatch.draw2D
+              p.Position
+              p.Size
+              p.Rotation
+              p.Color
+              p.Uv
+              batch
 
           BillboardBatch.end' pCmd.Effect batch
 
@@ -1799,7 +1867,14 @@ type Batch2DRenderer<'Model>
           primitiveEffect.Projection <- currentCamera.Projection
 
           LineBatch.begin' batch
-          LineBatch.addCircle2D cCmd.Center cCmd.Radius cCmd.Segments cCmd.CircleColor batch
+
+          LineBatch.addCircle2D
+            cCmd.Center
+            cCmd.Radius
+            cCmd.Segments
+            cCmd.CircleColor
+            batch
+
           LineBatch.end' primitiveEffect batch
 
           beginBatch()
@@ -2466,7 +2541,11 @@ module DSL =
         lighting: LightingState2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, SetLighting lighting)
+      this.Add(
+        ValueOption.defaultValue 0<RenderLayer> layer,
+        SetLighting lighting
+      )
+
       this
 
     [<Extension>]
@@ -2476,7 +2555,11 @@ module DSL =
         ambient: AmbientLight2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddLighting ambient)
+      this.Add(
+        ValueOption.defaultValue 0<RenderLayer> layer,
+        AddLighting ambient
+      )
+
       this
 
     [<Extension>]
@@ -2486,7 +2569,11 @@ module DSL =
         light: PointLight2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddPointLight light)
+      this.Add(
+        ValueOption.defaultValue 0<RenderLayer> layer,
+        AddPointLight light
+      )
+
       this
 
     [<Extension>]
@@ -2496,7 +2583,11 @@ module DSL =
         light: DirectionalLight2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddDirectionalLight light)
+      this.Add(
+        ValueOption.defaultValue 0<RenderLayer> layer,
+        AddDirectionalLight light
+      )
+
       this
 
     [<Extension>]
@@ -2506,7 +2597,11 @@ module DSL =
         occluder: Occluder2D,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      this.Add(ValueOption.defaultValue 0<RenderLayer> layer, AddOccluder occluder)
+      this.Add(
+        ValueOption.defaultValue 0<RenderLayer> layer,
+        AddOccluder occluder
+      )
+
       this
 
     [<Extension>]
@@ -2519,8 +2614,22 @@ module DSL =
         count: int,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
-      this.Add(l, DrawParticles { Particles = particles; Count = count; Texture = texture; Effect = effect; ParticlesLayer = l })
+      let l =
+        match layer with
+        | ValueSome l -> l
+        | ValueNone -> 0<RenderLayer>
+
+      this.Add(
+        l,
+        DrawParticles {
+          Particles = particles
+          Count = count
+          Texture = texture
+          Effect = effect
+          ParticlesLayer = l
+        }
+      )
+
       this
 
     [<Extension>]
@@ -2532,8 +2641,21 @@ module DSL =
         color: Color,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
-      this.Add(l, DrawLine2D { P1 = p1; P2 = p2; LineColor = color; LineLayer = l })
+      let l =
+        match layer with
+        | ValueSome l -> l
+        | ValueNone -> 0<RenderLayer>
+
+      this.Add(
+        l,
+        DrawLine2D {
+          P1 = p1
+          P2 = p2
+          LineColor = color
+          LineLayer = l
+        }
+      )
+
       this
 
     [<Extension>]
@@ -2544,8 +2666,20 @@ module DSL =
         color: Color,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
-      this.Add(l, DrawRect2D { Rect = rect; RectColor = color; RectLayer = l })
+      let l =
+        match layer with
+        | ValueSome l -> l
+        | ValueNone -> 0<RenderLayer>
+
+      this.Add(
+        l,
+        DrawRect2D {
+          Rect = rect
+          RectColor = color
+          RectLayer = l
+        }
+      )
+
       this
 
     [<Extension>]
@@ -2558,9 +2692,24 @@ module DSL =
         [<Struct>] ?segments: int,
         [<Struct>] ?layer: int<RenderLayer>
       ) =
-      let l = match layer with ValueSome l -> l | ValueNone -> 0<RenderLayer>
+      let l =
+        match layer with
+        | ValueSome l -> l
+        | ValueNone -> 0<RenderLayer>
+
       let s = ValueOption.defaultValue 16 segments
-      this.Add(l, DrawCircle2D { Center = center; Radius = radius; Segments = s; CircleColor = color; CircleLayer = l })
+
+      this.Add(
+        l,
+        DrawCircle2D {
+          Center = center
+          Radius = radius
+          Segments = s
+          CircleColor = color
+          CircleLayer = l
+        }
+      )
+
       this
 
     [<Extension>]
@@ -2601,7 +2750,13 @@ module DSL =
     let inline occluder o (buffer: RenderBuffer<RenderCmd2D>) =
       buffer.Occluder(o)
 
-    let inline particles texture effect particlesArr count (buffer: RenderBuffer<RenderCmd2D>) =
+    let inline particles
+      texture
+      effect
+      particlesArr
+      count
+      (buffer: RenderBuffer<RenderCmd2D>)
+      =
       buffer.Particles(texture, effect, particlesArr, count)
 
     let inline line p1 p2 color (buffer: RenderBuffer<RenderCmd2D>) =
