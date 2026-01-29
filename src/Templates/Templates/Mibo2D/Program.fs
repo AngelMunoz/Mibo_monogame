@@ -136,7 +136,7 @@ let main _ =
   let program =
     Program.mkProgram init update
     |> Program.withAssets
-    |> Program.withRenderer(Batch2DRenderer.create view)
+    |> Program.withRenderer(fun g -> Batch2DRenderer.create g view)
     |> Program.withInput
     |> Program.withSubscription(fun ctx _ ->
       InputMapper.subscribeStatic inputMap InputChanged ctx)

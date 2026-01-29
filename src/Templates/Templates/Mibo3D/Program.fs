@@ -161,8 +161,8 @@ let main _ =
     Program.mkProgram init update
     |> Program.withAssets
     |> Program.withRenderer(fun game ->
-      let pipeline = RenderPipeline.create PipelineConfig.defaults game
-      PipelineRenderer.create game view pipeline)
+      RenderPipeline.create PipelineConfig.defaults game
+      |> PipelineRenderer.create game view)
     |> Program.withInput
     |> Program.withSubscription(fun ctx _ ->
       InputMapper.subscribeStatic inputMap InputChanged ctx)
@@ -174,6 +174,6 @@ let main _ =
       graphics.PreferredBackBufferWidth <- 800
       graphics.PreferredBackBufferHeight <- 600)
 
-  use game = new ElmishGame<Model, Msg>(program)
+  use game = new ElmishGame<_, _>(program)
   game.Run()
   0
