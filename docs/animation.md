@@ -113,6 +113,28 @@ let sheet = SpriteSheet.static' texture (Rectangle(0, 0, 32, 32))
 let sprite = AnimatedSprite.create sheet "default"
 ```
 
+### Animation Index Queries
+
+For zero-allocation animation switching, resolve names to indices once:
+
+```fsharp
+// At load time - resolve once
+let walkIdx = 
+  match SpriteSheet.tryGetAnimationIndex "walk" sheet with
+  | ValueSome idx -> idx
+  | ValueNone -> 0
+
+// Later - zero-allocation switch
+let sprite = oldSprite |> AnimatedSprite.playByIndex walkIdx
+```
+
+List all available animations:
+
+```fsharp
+let names = SpriteSheet.animationNames sheet |> Seq.toList
+// ["idle"; "walk"; "attack"]
+```
+
 ## AnimatedSprite API
 
 ### Creation and Animation Control
@@ -121,8 +143,20 @@ let sprite = AnimatedSprite.create sheet "default"
 // Create from sheet with named animation
 let sprite = AnimatedSprite.create sheet "idle"
 
+// Create with initial visual properties
+let colored = AnimatedSprite.createWith sheet "idle" Color.Red 1.5f
+
 // Switch to a different animation (resets to frame 0)
 let walkingSprite = sprite |> AnimatedSprite.play "walk"
+
+// Play only if not already playing (avoids resetting frame)
+let sprite = sprite |> AnimatedSprite.playIfNot "walk"
+
+// Force restart from frame 0
+let sprite = sprite |> AnimatedSprite.restart
+
+// Check if specific animation is currently playing
+let isWalking = sprite |> AnimatedSprite.isPlaying "walk"
 
 // Hot-path alternative: resolve name to index once, use index thereafter
 let walkIndex = sheet.AnimationIndices["walk"]
@@ -302,4 +336,8 @@ let loadHero (ctx: GameContext) =
     SpriteSheet.fromFrames tex (Vector2(32.f, 32.f)) frames
 ```
 
-See also: [Rendering 2D](rendering2d.html), [Assets](assets.html)
+## See Also
+
+- [Rendering 2D](rendering2d.html) - Drawing animated sprites
+- [Assets](assets.html) - Loading textures
+- [System](system.html) - Animation system integration

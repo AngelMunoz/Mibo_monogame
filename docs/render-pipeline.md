@@ -232,6 +232,46 @@ draw {
 
 The alpha threshold is configurable per material and defaults to 0.5f.
 
+#### Material API Reference
+
+Build materials programmatically:
+
+```fsharp
+// Start from presets
+let mat = Material.defaultOpaque  // Shadows on, opaque
+let mat = Material.unlit          // No lighting
+let mat = Material.transparent    // Alpha blending enabled
+
+// Chain modifications
+let gold =
+  Material.defaultOpaque
+  |> Material.withAlbedo Color.Gold
+  |> Material.withMetallic 1.0f
+  |> Material.withRoughness 0.2f
+  |> Material.withEmissive Color.Orange 0.5f
+
+let textured =
+  Material.defaultOpaque
+  |> Material.withAlbedoMap myTexture
+  |> Material.withNormalMap normalMap
+  |> Material.withMetallicRoughnessMap mraMap
+  |> Material.withFlags (MaterialFlags.CastsShadow ||| MaterialFlags.DoubleSided)
+```
+
+| Function | Description |
+|----------|-------------|
+| `Material.defaultOpaque` | Casts/receives shadows, opaque |
+| `Material.unlit` | Fullbright, no shadow interaction |
+| `Material.transparent` | Alpha blended, receives shadows |
+| `Material.withAlbedo color` | Base color tint |
+| `Material.withAlbedoMap texture` | Diffuse texture |
+| `Material.withNormalMap texture` | Tangent-space normals |
+| `Material.withMetallicRoughnessMap texture` | MRA packed texture |
+| `Material.withMetallic value` | 0.0 (dielectric) to 1.0 (metal) |
+| `Material.withRoughness value` | 0.0 (smooth) to 1.0 (rough) |
+| `Material.withEmissive color intensity` | Glow color and brightness |
+| `Material.withFlags flags` | Render behavior flags |
+
 ### Level 4: Scene Organization
 
 As your scene grows, the fluent DSL organizes frame rendering cleanly.
@@ -247,23 +287,172 @@ buffer
 ```
 
 ### Level 5: Lighting
-// ... (rest of the file follows same pattern)
-// ... (omitting middle)
 
-### Level 5: Lighting
+Lighting in Mibo uses a texture-based data approach for efficient multi-light scenes.
 
-To light your scene, you construct a `LightingState` and pass it to the renderer. Lights work independently of shadows.
-// ... (omitting middle)
+#### Basic Lighting Setup
+
+```fsharp
+// Create lights
+let sun =
+    Light.directional (Vector3(1.0f, -1.0f, 1.0f)) (Color.White) 1.0f
+    |> Light.withShadows ShadowQuality.High
+
+let torch =
+    Light.point (Vector3(5.0f, 2.0f, 5.0f)) (Color.Orange) 10.0f 5.0f
+
+// Build lighting state
+let lighting =
+    LightingState.create()
+    |> LightingState.withAmbient (Color(0.1f, 0.1f, 0.2f)) 0.3f
+    |> LightingState.withLight sun
+    |> LightingState.withLight torch
+
+// Apply in view
+buffer
+    .Camera(camera)
+    .Lighting(lighting)
+    .Clear(Color.Black)
+    .Draw(scene)
+    .Submit()
+```
+
+#### Light Types
+
+| Function | Type | Use Case |
+|----------|------|----------|
+| `Light.directional dir color intensity` | Sun/moon | Scene-wide lighting |
+| `Light.point pos color intensity range` | Lamp, torch | Local area lighting |
+| `Light.spot pos dir color intensity range inner outer` | Flashlight | Cone-shaped lighting |
+
+#### Light Configuration
+
+```fsharp
+// Enable shadows (requires pipeline shadow config)
+let shadowCaster =
+    myLight |> Light.withShadows ShadowQuality.High
+
+// Soft shadows (PCF sampling)
+let softLight =
+    myLight |> Light.withSoftShadows 1.0f  // Penumbra size
+```
 
 ### Level 6: Shadows
 
-Shadows require three things to work together: lights configured with shadow settings, materials that cast shadows, and the pipeline configured to render shadows.
-// ... (omitting middle)
+Shadows require three components working together:
+
+1. **Pipeline configuration** - Enable shadow atlas
+2. **Light configuration** - Mark lights as shadow casters
+3. **Material flags** - Objects must opt-in to cast/receive
+
+#### Pipeline Setup
+
+```fsharp
+Program.withPipeline (
+    PipelineConfig.defaults
+    |> PipelineConfig.withShadows (
+        ShadowConfig.defaults
+        |> ShadowConfig.withResolution 2048
+        |> ShadowConfig.withAtlasTiles 8  // 8x8 = 64 slots
+    )
+)
+```
+
+#### Marking Objects
+
+```fsharp
+// This object casts and receives shadows
+draw {
+    mesh playerMesh
+    withFlags (MaterialFlags.CastsShadow ||| MaterialFlags.ReceivesShadow)
+}
+
+// This object only receives (good for large static ground)
+draw {
+    mesh groundMesh
+    withFlags MaterialFlags.ReceivesShadow
+}
+```
+
+#### Shadow Atlas Capacity
+
+Plan your atlas usage carefully:
+
+| Light Type | Slots Used |
+|------------|------------|
+| Directional | 3-4 (cascades) |
+| Spot | 1 |
+| Point | 6 (cube unrolled) |
 
 ### Level 7: Custom Effects & Escape Hatches
 
-Sometimes PBR isn't what you need. You might want a custom Toon shader, a special VFX shader, or debug lines.
-// ... (omitting middle)
+When PBR isn't what you need, use custom effects or escape hatches.
+
+#### Custom Shaders
+
+Provide your own effects for special rendering:
+
+```fsharp
+// Load your custom effect
+let toonEffect = Assets.effect "Effects/Toon" ctx
+
+// Use in draw builder
+draw {
+    mesh character
+    withEffect toonEffect  // Overrides default PBR
+}
+```
+
+**Required shader parameters:**
+- `World`, `View`, `Projection` matrices
+- `AlbedoColor`, `AlbedoMap` for base texture
+- See "Shader Contract" section for complete API
+
+#### Unlit Rendering
+
+For UI, skyboxes, or emissive objects:
+
+```fsharp
+draw {
+    mesh skybox
+    withFlags MaterialFlags.Unlit
+    withAlbedo skyboxTexture
+}
+```
+
+#### Effect Override
+
+Complete control over effect setup:
+
+```fsharp
+let customSetup (effect: Effect) (ctx: EffectContext) =
+    effect.Parameters["World"].SetValue(ctx.World)
+    effect.Parameters["View"].SetValue(ctx.View)
+    effect.Parameters["Projection"].SetValue(ctx.Projection)
+    // Custom parameters
+    effect.Parameters["MyCustomData"].SetValue(Vector4(1.0f, 0.0f, 0.0f, 1.0f))
+    effect.CurrentTechnique.Passes[0].Apply()
+
+draw {
+    mesh specialObject
+    withEffectOverride myEffect customSetup
+}
+```
+
+#### Immediate Mode (DrawCustom)
+
+For debug rendering or procedural geometry:
+
+```fsharp
+buffer.DrawCustom(fun device camera lighting ->
+    // Direct GraphicsDevice access
+    device.DrawPrimitives(
+        PrimitiveType.LineList,
+        0,  // start vertex
+        12  // primitive count
+    )
+)
+```
 
 ### Level 8: Advanced Customization
 

@@ -179,3 +179,9 @@ let update msg model =
 ```
 
 If you would rather keep service references out of your model, you can also stash the mapper in a `ref` during `init` and read it from `update` via closure state.
+
+## See Also
+
+- [Subscriptions](subscriptions.html) - Continuous input handling
+- [System](system.html) - Input system integration
+- [Scaling](scaling.html) - Input handling patterns

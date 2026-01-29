@@ -288,7 +288,122 @@ let update msg model =
         let cleanup = Cmd.ofMsg (RemoveEntity id)
         // Ensure spawn happens cleanly next frame
         let spawnLoot = Cmd.ofMsg (SpawnLoot id) |> Cmd.deferNextFrame
-        model, Cmd.batch [ cleanup; spawnLoot ]
+         model, Cmd.batch [ cleanup; spawnLoot ]
+```
+
+## Level 6 — Avoiding GC on model updates
+
+**Best for:** Games with large state that update every frame (RTS, simulation games) where you want to minimize GC pauses.
+
+**Goal:** Eliminate allocations during the hot update loop.
+
+**The Problem:** In the Elmish runtime, every update does `state <- newState`. For large models, this means allocating a new record every frame—pressure that eventually triggers GC:
+
+```fsharp
+// This allocates every frame for large models
+let update msg model =
+    match msg with
+    | Tick dt ->
+        // { model with ... } creates a new record allocation
+        { model with Position = model.Position + model.Velocity * dt }, Cmd.none
+```
+
+**Solution 1: Structs (small models)**
+
+For small models (< 64 bytes), make your model a struct. No heap allocation, just stack copying:
+
+```fsharp
+[<Struct>]
+type Model = {
+    Position: Vector2
+    Velocity: Vector2
+    Health: int
+}
+
+// This copies on stack—zero GC pressure
+let update msg model =
+    match msg with
+    | Tick dt ->
+        { model with Position = model.Position + model.Velocity * dt }, Cmd.none
+```
+
+**Trade-off:** Large structs copy a lot of data each update. Not ideal for 500+ field models.
+
+**Solution 2: Reference types with manual field updates**
+
+For large models, use a class with mutable fields. Update in-place instead of creating new instances:
+
+```fsharp
+type GameModel(childInit) =
+    // Mutable fields—update in place
+    member val Player: Player.Model = childInit with get, set
+    member val Enemies: Enemy.Model[] = Array.empty with get, set
+    member val Score: int = 0 with get, set
+    member val Time: float32 = 0.0f with get, set
+
+let update msg (model: GameModel) =
+    match msg with
+    | Tick dt ->
+        // Update fields in place—no allocation
+        model.Time <- model.Time + dt
+        model.Player <- Player.update dt model.Player
+        
+        // Update array elements in place
+        for i = 0 to model.Enemies.Length - 1 do
+            model.Enemies[i] <- Enemy.update dt model.Enemies[i]
+        
+        // Return same instance
+        struct(model, Cmd.none)
+    
+    | ChildMsg childMsg ->
+        // Nested update with Cmd.map
+        let newChild, childCmd = Child.update childMsg model.ChildModel
+        model.ChildModel <- newChild
+        struct(model, Cmd.map ChildMsg childCmd)
+```
+
+**Hybrid approach:** Mix immutable structs for small data with mutable collections:
+
+```fsharp
+[<Struct>]  // Small, copy-friendly
+type Transform = {
+    Position: Vector2
+    Rotation: float32
+}
+
+type Entity() =
+    member val Transform: Transform = Unchecked.defaultof<_> with get, set
+    member val Health: int = 100 with get, set
+
+type GameModel() =
+    // Mutable array—entities updated in place
+    member val Entities: Entity[] = Array.zeroCreate 1000 with get, set
+    
+    // Small struct—copied cheaply
+    member val Camera: CameraState = CameraState.defaultValue with get, set
+```
+
+**Trade-offs:**
+
+| Approach | Best For | Pros | Cons |
+|----------|----------|------|------|
+| Immutable records | Most games | Pure, testable, time-travel debugging | Allocates every update |
+| Structs | Small models (< 64B) | Zero allocation | Copies data each update |
+| Reference types + mutation | Large models | Zero allocation, minimal copying | Loses time-travel, harder to test |
+
+**When to use this:**
+- You've profiled and GC is causing hitches
+- Your model is large (100+ entities, complex nested state)
+- You're at Level 3-5 already and need more performance
+
+**Debugging tip:** If you switch to mutable reference types, you lose Elmish's time-travel debugging. Keep a `snapshot()` function to convert to immutable for debugging:
+
+```fsharp
+member model.Snapshot() = {
+    Player = model.Player
+    Enemies = model.Enemies |> Array.copy
+    Score = model.Score
+}
 ```
 
 ## Choosing the right rung
@@ -298,7 +413,7 @@ You can ship a lot of games at Level 2–3.
 - **Card/turn-based:** Level 0–1
 - **Platformer/shooter:** Level 1–2
 - **ARPG:** Level 3 (+ maybe Level 4)
-- **RTS:** Level 3–4 (+ Level 5 if you want strict boundaries)
+- **RTS:** Level 3–4 (+ Level 5 if you want strict boundaries, + Level 6 if GC is causing hitches)
 
 Pick the simplest level that fits your game today, and add the next pieces only when you feel the need.
 
