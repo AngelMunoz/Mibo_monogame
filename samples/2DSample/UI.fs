@@ -78,3 +78,65 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
     }
   )
   |> ignore
+
+  // ─────────────────────────────────────────────────────────────
+  // Visual Layer Sorting Test
+  // ─────────────────────────────────────────────────────────────
+  // We explicitly submit these in REVERSE order of their desired depth.
+  // If sorting is working: Red (110) -> Green (111) -> Blue (112).
+  // Result: Blue Square is on top.
+  // If sorting is broken: Blue (Submitted 1st) -> Green -> Red (Submitted 3rd).
+  // Result: Red Square is on top.
+
+  let whiteTex = model.TerrainAssets.WhiteTexture
+  let testX = float32 viewport.Width - 100.0f
+  let testY = 50.0f
+  let size_ = 40.0f
+
+  // 1. Submit Blue (Layer 112 - Top) FIRST
+  buffer.Sprite(
+    sprite {
+      texture whiteTex
+      at (testX + 20.0f) (testY + 20.0f)
+      size size_ size_
+      color Color.Blue
+      layer 112<RenderLayer>
+    }
+  )
+  |> ignore
+
+  // 2. Submit Green (Layer 111 - Middle) SECOND
+  buffer.Sprite(
+    sprite {
+      texture whiteTex
+      at (testX + 10.0f) (testY + 10.0f)
+      size size_ size_
+      color Color.Green
+      layer 111<RenderLayer>
+    }
+  )
+  |> ignore
+
+  // 3. Submit Red (Layer 110 - Bottom) THIRD
+  buffer.Sprite(
+    sprite {
+      texture whiteTex
+      at testX testY
+      size size_ size_
+      color Color.Red
+      layer 110<RenderLayer>
+    }
+  )
+  |> ignore
+
+  // Label
+  buffer.Text(
+    text {
+      font uiFont
+      content "Layer Test (Blue on Top)"
+      at (testX - 60.0f) (testY + 70.0f)
+      color Color.White
+      layer 113<RenderLayer>
+    }
+  )
+  |> ignore

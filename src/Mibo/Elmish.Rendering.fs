@@ -46,6 +46,11 @@ type RenderBuffer<'Key, 'Cmd when 'Key: comparison>
   let mutable count = 0
   let keyComparer = defaultArg keyComparer Comparer<'Key>.Default
 
+  let sortComparer =
+    { new IComparer<struct ('Key * 'Cmd)> with
+        member _.Compare(struct (k1, _), struct (k2, _)) =
+          keyComparer.Compare(k1, k2) }
+
   let ensureCapacity(needed: int) =
     if count + needed > items.Length then
       let newSize = max (items.Length * 2) (count + needed)
@@ -65,8 +70,7 @@ type RenderBuffer<'Key, 'Cmd when 'Key: comparison>
 
   /// Sorts the buffer by key. Call this before iterating if order matters.
   member _.Sort() =
-    // Sort only the used portion via Span
-    items |> Array.take count |> Array.sortInPlaceBy(fun struct (k, _) -> k)
+    System.Array.Sort(items, 0, count, sortComparer)
 
   /// The number of commands currently in the buffer.
   member _.Count = count

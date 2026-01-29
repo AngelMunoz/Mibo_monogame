@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Rendering: Corrected `RenderBuffer.Sort` logic to use in-place array sorting. Previously, it sorted a temporary copy, causing `RenderLayer` depth keys to be ignored during draw call submission.
+
 ## [1.5.0] - 2026-01-25
 
 ### Added
