@@ -6,13 +6,7 @@ index: 21
 
 # Assets (loading + caching)
 
-Mibo exposes a per-game asset service (`IAssets`) that wraps MonoGame’s `ContentManager` plus a simple cache.
-
-What it provides:
-
-- **no module-level global caches** (safe with multiple game instances/tests)
-- **fast repeated loads** (`Texture`, `Model`, `Effect`, etc are cached)
-- **custom assets** (shaders, JSON config, decoded content)
+Mibo provides a simple, functional API for loading and caching game assets through the `Mibo.Elmish.Assets` module. It wraps MonoGame's `ContentManager` with automatic caching so you never load the same texture twice.
 
 ## Enabling the service
 
@@ -23,55 +17,106 @@ Program.mkProgram init update
 |> Program.withAssets
 ```
 
-Then use the helpers from `Mibo.Elmish.Assets` anywhere you have a `GameContext`:
+## Loading Standard Assets
+
+Once enabled, use these functions anywhere you have a `GameContext`:
 
 ```fsharp
 let init (ctx: GameContext): struct(Model * Cmd<Msg>) =
+  // Load and cache content pipeline assets
   let player = Assets.texture "sprites/player" ctx
   let font = Assets.font "fonts/ui" ctx
+  let bgm = Assets.sound "audio/background" ctx
+  let enemyModel = Assets.model "models/enemy" ctx
   let shader = Assets.effect "Effects/Grid" ctx
-  { PlayerTex = player; Font = font; Shader = shader }, Cmd.none
+  
+  { PlayerTex = player
+    Font = font
+    Bgm = bgm
+    Enemy = enemyModel
+    Shader = shader }, Cmd.none
 ```
 
-## Custom assets (GPU-backed or not)
+All these functions cache results automatically:
 
-You can cache custom values (GPU-backed or not):
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `Assets.texture path ctx` | `Texture2D` | 2D image asset |
+| `Assets.font path ctx` | `SpriteFont` | Bitmap font |
+| `Assets.sound path ctx` | `SoundEffect` | Audio effect |
+| `Assets.model path ctx` | `Model` | 3D model |
+| `Assets.effect path ctx` | `Effect` | Shader/effect |
+
+## Custom Assets
+
+For assets not loaded through the content pipeline, use `getOrCreate`:
 
 ```fsharp
+// Create a custom shader once, reuse forever
 let outlineFx =
   Assets.getOrCreate "OutlineEffect" (fun gd -> new Effect(gd, bytecode)) ctx
+
+// Create a render target
+let rt =
+  Assets.getOrCreate "MainRenderTarget" 
+    (fun gd -> new RenderTarget2D(gd, 1920, 1080)) ctx
 ```
 
-## JSON helpers
+**Why `getOrCreate`?** It's idempotent - safe to call multiple times, creates only once.
+
+For assets that might not exist yet, use `get`:
+
+```fsharp
+match Assets.get<MyConfig> "config" ctx with
+| ValueSome cfg -> cfg
+| ValueNone -> loadDefaultConfig()
+```
+
+To force creation (overwriting any existing), use `create`:
+
+```fsharp
+// This replaces any existing "playerData" entry
+Assets.create "playerData" (fun _ -> loadPlayerFromDisk()) ctx
+```
+
+## Loading Non-Pipeline Files
+
+### JSON with JDeck
 
 Mibo includes JSON helpers via [JDeck](https://github.com/AngelMunoz/JDeck):
 
-- `Assets.fromJson path decoder`
-- `Assets.fromJsonCache path decoder ctx`
+```fsharp
+// One-off load (no caching)
+let config = Assets.fromJson "config.json" myDecoder
 
-These read JSON files from disk and optionally cache them for the game lifetime.
+// Cached for game lifetime
+let data = Assets.fromJsonCache "data/levels.json" levelDecoder ctx
+```
 
-If you’re writing your own decoders, see the JDeck docs:
+For writing decoders, see the JDeck docs:
 
 - Source: https://github.com/AngelMunoz/JDeck
 - Guide: https://angelmunoz.github.io/JDeck/
 
-## Building your own “store” on top of `IAssets`
+### Custom File Loaders
 
-`IAssets` is a convenient place to centralize _loading + reuse_.
-
-For game-specific data sets (skills, items, quests, dialogue, etc), it can be useful to wrap `IAssets` in a specialized store that:
-
-- owns decoding/validation
-- chooses a backend (JSON, SQLite, embedded resources, network)
-- can decide whether to cache (and how)
-
-### Example: `SkillStore` (JSON)
+Load any file type with custom logic:
 
 ```fsharp
-open Mibo.Elmish
-open JDeck
+// One-off load
+let raw = Assets.fromCustom "data/save.dat" File.ReadAllBytes ctx
 
+// Cached
+let parsed = 
+  Assets.fromCustomCache "data/items.csv" 
+    (fun path -> parseCsvFile path) ctx
+```
+
+## Building Data Stores
+
+For game-specific datasets (skills, items, quests), wrap asset loading in a typed store:
+
+```fsharp
 type SkillId = SkillId of string
 
 type Skill = {
@@ -80,74 +125,87 @@ type Skill = {
   CooldownSeconds: float32
 }
 
-module SkillDecoders =
-  let skillDecoder : JDeck.Decoder<Skill> =
-    fun json -> JDeck.decode {
-      let! id = json |> Required.Property.get("id", Required.string)
-      let! name = json |> Required.Property.get("name", Required.string)
-      let! cd = json |> Required.Property.get("cooldownSeconds", Required.float32)
-      return {
-        Id = SkillId id
-        Name = name
-        CooldownSeconds = cd
-      }
-    }
-
-type SkillStore(assets: IAssets) =
-  /// Load a skill list (no caching). Useful if you want to manage lifetime yourself.
-  member _.LoadAll(path: string) : Skill list =
-    Assets.fromJson path (Required.list SkillDecoders.skillDecoder)
-
-  /// Load and cache (game-lifetime). Useful for static data.
-  member _.LoadAllCached(path: string, ctx: GameContext) : Skill list =
-    Assets.fromJsonCache path (Required.list SkillDecoders.skillDecoder) ctx
-
-  /// A typed cache for an indexed view.
-  member _.IndexByIdCached(path: string, ctx: GameContext) : Map<SkillId, Skill> =
-    Assets.getOrCreate ("SkillStore/IndexById/" + path)
-      (fun _gd ->
-        let skills = Assets.fromJson path (Required.list SkillDecoders.skillDecoder)
+module SkillStore =
+  let loadAll (path: string) : Skill list =
+    // No caching - manage lifetime yourself
+    Assets.fromJson path SkillDecoders.list
+  
+  let loadAllCached (path: string) (ctx: GameContext) : Skill list =
+    // Cached for game lifetime
+    Assets.fromJsonCache path SkillDecoders.list ctx
+  
+  let indexById (path: string) (ctx: GameContext) : Map<SkillId, Skill> =
+    // Custom cached transformation
+    Assets.getOrCreate ("skills/index/" + path)
+      (fun _ ->
+        let skills = Assets.fromJson path SkillDecoders.list
         skills |> List.map (fun s -> s.Id, s) |> Map.ofList)
       ctx
 ```
 
-You can create the store from context:
+Usage:
 
 ```fsharp
-let store = SkillStore(Assets.getService ctx)
-let skillsById = store.IndexByIdCached("Content/skills.json", ctx)
+let skillsById = SkillStore.indexById "Content/skills.json" ctx
 ```
 
-### Example: `SkillStore` (SQLite)
+## Cache Behavior
 
-If your source of truth is a database, the same idea applies: the store is where you choose I/O strategy and caching.
+**Automatic caching applies to:**
+- All standard assets (texture, font, sound, model, effect)
+- Anything loaded via `getOrCreate` or `*Cache` variants
+
+**Manual lifetime management:**
+- Use `Assets.fromJson` or `Assets.fromCustom` for one-off loads
+- Build your own store with LRU/eviction if memory is a concern
+
+**Clearing caches:**
 
 ```fsharp
-type SkillStoreDb(conn: System.Data.IDbConnection) =
-  member _.GetById(id: SkillId) : Skill option =
-    // query, map rows -> Skill
-    None
+// Get the underlying service (advanced)
+let service = Assets.getService ctx
+
+// Clear all custom caches (standard assets remain)
+service.Clear()
+
+// Dispose custom assets and clear everything
+service.Dispose()
 ```
 
-In this case you typically keep caching _inside the store_ (LRU, size cap, explicit invalidation) instead of using `IAssets` as a forever-cache.
+## Advanced: Direct IAssets Access
 
-## Cache growth and lifetime
+For advanced scenarios, access the underlying `IAssets` service:
 
-The built-in `IAssets` caches are designed for **game-lifetime reuse**:
+```fsharp
+// Safe retrieval
+match Assets.tryGetService ctx with
+| ValueSome svc -> // use service
+| ValueNone -> // service not registered
 
-- the cache grows as you load more keys
-- there is no built-in eviction policy
+// Throws if not registered
+let svc = Assets.getService ctx
+```
 
-If memory usage is a concern, prefer one of these patterns:
+`IAssets` provides the same operations if you need to pass it around as a value:
 
-1. Use non-cached loads (`Assets.fromJson`) and manage lifetime in your own store.
-2. Build a store with an explicit cap/eviction strategy (LRU) and keep only hot entries.
-3. Structure data so it loads in “chunks” (per level/biome), and keep chunk lifetime separate from the global `IAssets` cache.
+```fsharp
+let loadStuff (assets: IAssets) =
+  let tex = assets.Texture "sprite"
+  let fx = assets.GetOrCreate "fx" (fun gd -> ...)
+  ...
+```
 
-## Lifetime and disposal
+**Prefer the `Assets.*` functions** - they're more ergonomic and require less plumbing.
 
-- Content pipeline assets (`ContentManager.Load`) are managed by MonoGame.
-- “Custom” assets you store via `Create/GetOrCreate` are kept in a dictionary.
-- `IAssets.Dispose()` will dispose any cached values that implement `IDisposable`.
+## Performance Notes
 
-If you store GPU resources (Effects, RenderTargets, etc) in the cache, prefer `GetOrCreate` so they’re created once per game.
+- First load reads from disk; subsequent loads return cached reference
+- No built-in eviction - caches grow with unique keys loaded
+- GPU resources (textures, effects, render targets) are created once via `getOrCreate`
+- `Dispose()` on the service cleans up custom assets implementing `IDisposable`
+
+For large games, consider:
+
+1. Chunked loading (per level/biome) with separate cache scopes
+2. Custom stores with LRU eviction for dynamic content
+3. Non-cached loads for one-time data

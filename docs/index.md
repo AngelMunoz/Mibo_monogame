@@ -80,6 +80,7 @@ Run one of the samples, then copy its program setup (composition root) into your
   - [Elmish (MVU) runtime](elmish.html)
   - [Programs & composition](program.html)
   - [System pipeline (phases + snapshot)](system.html)
+  - [Service composition](services.html)
   - [Scaling Mibo (Simple → Complex)](scaling.html)
   - [F# For Perf](performance.html)
 
@@ -87,7 +88,7 @@ Run one of the samples, then copy its program setup (composition root) into your
 
   - [Rendering overview + custom renderers](rendering.html)
   - [Rendering 2D](rendering2d.html)
-  - [Rendering 3D](rendering3d.html)
+  - [Render pipeline (3D)](render-pipeline.html)
   - [Camera](camera.html)
   - [Culling](culling.html)
 
@@ -96,3 +97,5 @@ Run one of the samples, then copy its program setup (composition root) into your
   - [Input (raw + mapped)](input.html)
   - [Assets (loading + caching)](assets.html)
   - [Animation (2D sprites)](animation.html)
+  - [Commands (async + effects)](commands.html)
+  - [Subscriptions (events)](subscriptions.html)
