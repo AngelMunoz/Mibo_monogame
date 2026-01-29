@@ -22,7 +22,7 @@ let update msg model =
   match msg with
   | SaveGame ->
     // Return unchanged model + command to save
-    model, Cmd.ofAsync saveToDisk model SaveGameComplete SaveFailed
+    model, Cmd.ofAsync (saveToDisk model) SaveGameComplete SaveFailed
 
   | SaveComplete ->
     printfn "Game saved!"
