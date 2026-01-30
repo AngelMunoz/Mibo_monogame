@@ -144,6 +144,117 @@ let update msg model =
         { model with Position = newPos }, Cmd.none
 ```
 
+## Level 2.5 — Performance optimization
+
+**Best for:** Games with frequent message dispatch or large Models where measurable GC pressure appears.
+
+**Goal:** Reduce GC allocations while keeping the Elmish architecture.
+
+### Struct messages
+
+Messages are dispatched frequently throughout your game. Each message allocation adds pressure to the GC. For small messages, marking them as `[<Struct>]` eliminates heap allocation entirely.
+
+**Simple guideline:**
+
+- **Small messages** (1-2 simple fields like `int`, `float32`, `Vector2`): Use `[<Struct>]`
+- **Large messages** (arrays, large structs, many fields): Keep as reference types
+
+**Profile-driven:** Use a profiler to identify what's "small" vs "large" in your context. What works for one game may differ for another.
+
+```fsharp
+[<Struct>]
+type Message =
+    | Tick of GameTime              // Small - struct candidate
+    | Damage of int                  // Small - struct candidate
+    | ChildMsg of Child.Msg          // Works fine with struct
+```
+
+Struct messages work seamlessly with `Cmd.map` and `Sub.map`—they just wrap the dispatch function with the mapping function.
+
+### Mutable Model for large state
+
+When your Model grows large (10+ properties or contains substantial nested state), immutable updates allocate new objects each update cycle. While you might be tempted to make the Model a struct to avoid GC, this doesn't help: the runtime passes the Model by value (see `Elmish.Runtime.fs:218`), so a large struct would be copied every update.
+
+Instead, use a reference type (class) with mutable members. This pattern avoids GC pressure while maintaining the Elmish contract—you still return `Model * Cmd<'Msg>` from your update function. The runtime simply re-assigns the state variable.
+
+```fsharp
+type Model() =
+    // Top-level state fields (10+ properties in production games)
+    member val Time = Time.Zero with get, set
+    member val PlayerId = 0 with get, set
+    member val PlayerPosition = Vector2.Zero with get, set
+    member val PlayerVelocity = Vector2.Zero with get, set
+    member val Actions = ActionState.empty with get, set
+    // ... more large fields
+
+    // Child subsystem state (initialized in init)
+    member val ChildState = Unchecked.defaultof<_> with get, set
+
+[<Struct>]
+type Message =
+    | Tick of GameTime
+    | ChildMsg of Child.Msg
+
+let update msg model =
+    match msg with
+    | Tick gt ->
+        model.Time <- Time.ofGameTime gt
+        model, Cmd.none
+    | ChildMsg msg ->
+        let childState, childCmd = Child.update msg model.ChildState
+        model.ChildState <- childState
+        model, Cmd.map ChildMsg childCmd
+```
+
+**Tradeoffs:**
+
+- Pros: Zero GC pressure from Model updates
+- Cons: Less pure than immutable records, more potential for bugs if you mutate unexpectedly
+
+### Hybrid approach: gradual mutability
+
+You don't need to go all-in on mutability. Many games work well with a hybrid approach:
+
+- **Small models** (child subsystems, simple components): Keep as immutable structs
+- **Large models** (root state, complex subsystems): Use mutable reference types
+
+This lets you apply the right tool at the right level. A `Player` component with 3-4 fields works great as an immutable struct, while the root `Model` with 10+ fields benefits from mutability.
+
+The key is that mutability stays **encapsulated** and **predictable**:
+
+```fsharp
+// Small, immutable child model (struct)
+[<Struct>]
+type Player = {
+    Position: Vector2
+    Velocity: Vector2
+    Health: int
+}
+
+// Large, mutable parent model (class)
+type GameModel() =
+    member val Time = Time.Zero with get, set
+    member val Player: Player = { Position = Vector2.Zero; Velocity = Vector2.Zero; Health = 100 } with get, set
+    // ... 10+ more large fields
+
+// Update still returns the same Model instance
+let update msg model =
+    match msg with
+    | Tick gt ->
+        model.Time <- Time.ofGameTime gt
+        // Player can be updated immutably when needed
+        model.Player <- { model.Player with Position = model.Player.Position + Vector2(1f, 0f) }
+        model, Cmd.none
+```
+
+The Elmish contract is preserved: your `update` function still returns `Model * Cmd<'Msg>`. The mutability is an internal implementation detail that doesn't leak into your architecture. You get zero GC pressure where it matters most, without sacrificing the benefits of the functional model elsewhere.
+
+### When to apply these patterns
+
+Profile first, optimize second. Start with idiomatic code and apply these patterns only when measurements show a need. Struct messages and mutable Models complement each other—both reduce allocation but at different points in the update cycle.
+
+> **Performance Implementation:** For more on struct patterns, see [F# For Perf: Level 1 (Structs for Small Data)](performance.html#level-1--structs-for-small-data).
+
 ## Level 3 — Phase pipelines + snapshot barriers
 
 **Best for:** Complex simulations (ARPG, RTS) where update order matters. E.g., Physics must run before Collision, which must run before AI.
@@ -291,129 +402,14 @@ let update msg model =
          model, Cmd.batch [ cleanup; spawnLoot ]
 ```
 
-## Level 6 — Avoiding GC on model updates
-
-**Best for:** Games with large state that update every frame (RTS, simulation games) where you want to minimize GC pauses.
-
-**Goal:** Eliminate allocations during the hot update loop.
-
-**The Problem:** In the Elmish runtime, every update does `state <- newState`. For large models, this means allocating a new record every frame—pressure that eventually triggers GC:
-
-```fsharp
-// This allocates every frame for large models
-let update msg model =
-    match msg with
-    | Tick dt ->
-        // { model with ... } creates a new record allocation
-        { model with Position = model.Position + model.Velocity * dt }, Cmd.none
-```
-
-**Solution 1: Structs (small models)**
-
-For small models (< 64 bytes), make your model a struct. No heap allocation, just stack copying:
-
-```fsharp
-[<Struct>]
-type Model = {
-    Position: Vector2
-    Velocity: Vector2
-    Health: int
-}
-
-// This copies on stack—zero GC pressure
-let update msg model =
-    match msg with
-    | Tick dt ->
-        { model with Position = model.Position + model.Velocity * dt }, Cmd.none
-```
-
-**Trade-off:** Large structs copy a lot of data each update. Not ideal for 500+ field models.
-
-**Solution 2: Reference types with manual field updates**
-
-For large models, use a class with mutable fields. Update in-place instead of creating new instances:
-
-```fsharp
-type GameModel(childInit) =
-    // Mutable fields—update in place
-    member val Player: Player.Model = childInit with get, set
-    member val Enemies: Enemy.Model[] = Array.empty with get, set
-    member val Score: int = 0 with get, set
-    member val Time: float32 = 0.0f with get, set
-
-let update msg (model: GameModel) =
-    match msg with
-    | Tick dt ->
-        // Update fields in place—no allocation
-        model.Time <- model.Time + dt
-        model.Player <- Player.update dt model.Player
-        
-        // Update array elements in place
-        for i = 0 to model.Enemies.Length - 1 do
-            model.Enemies[i] <- Enemy.update dt model.Enemies[i]
-        
-        // Return same instance
-        struct(model, Cmd.none)
-    
-    | ChildMsg childMsg ->
-        // Nested update with Cmd.map
-        let newChild, childCmd = Child.update childMsg model.ChildModel
-        model.ChildModel <- newChild
-        struct(model, Cmd.map ChildMsg childCmd)
-```
-
-**Hybrid approach:** Mix immutable structs for small data with mutable collections:
-
-```fsharp
-[<Struct>]  // Small, copy-friendly
-type Transform = {
-    Position: Vector2
-    Rotation: float32
-}
-
-type Entity() =
-    member val Transform: Transform = Unchecked.defaultof<_> with get, set
-    member val Health: int = 100 with get, set
-
-type GameModel() =
-    // Mutable array—entities updated in place
-    member val Entities: Entity[] = Array.zeroCreate 1000 with get, set
-    
-    // Small struct—copied cheaply
-    member val Camera: CameraState = CameraState.defaultValue with get, set
-```
-
-**Trade-offs:**
-
-| Approach | Best For | Pros | Cons |
-|----------|----------|------|------|
-| Immutable records | Most games | Pure, testable, time-travel debugging | Allocates every update |
-| Structs | Small models (< 64B) | Zero allocation | Copies data each update |
-| Reference types + mutation | Large models | Zero allocation, minimal copying | Loses time-travel, harder to test |
-
-**When to use this:**
-- You've profiled and GC is causing hitches
-- Your model is large (100+ entities, complex nested state)
-- You're at Level 3-5 already and need more performance
-
-**Debugging tip:** If you switch to mutable reference types, you lose Elmish's time-travel debugging. Keep a `snapshot()` function to convert to immutable for debugging:
-
-```fsharp
-member model.Snapshot() = {
-    Player = model.Player
-    Enemies = model.Enemies |> Array.copy
-    Score = model.Score
-}
-```
-
 ## Choosing the right rung
 
 You can ship a lot of games at Level 2–3.
 
 - **Card/turn-based:** Level 0–1
-- **Platformer/shooter:** Level 1–2
-- **ARPG:** Level 3 (+ maybe Level 4)
-- **RTS:** Level 3–4 (+ Level 5 if you want strict boundaries, + Level 6 if GC is causing hitches)
+- **Platformer/shooter:** Level 1–2.5
+- **ARPG:** Level 2.5–3 (+ maybe Level 4)
+- **RTS:** Level 2.5–4 (+ Level 5 if you want strict boundaries)
 
 Pick the simplest level that fits your game today, and add the next pieces only when you feel the need.
 

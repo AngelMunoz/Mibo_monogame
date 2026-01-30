@@ -76,7 +76,6 @@ Run one of the samples, then copy its program setup (composition root) into your
 ## Documentation
 
 - Architecture
-
   - [Elmish (MVU) runtime](elmish.html)
   - [Programs & composition](program.html)
   - [System pipeline (phases + snapshot)](system.html)
@@ -85,15 +84,22 @@ Run one of the samples, then copy its program setup (composition root) into your
   - [F# For Perf](performance.html)
 
 - Rendering
-
   - [Rendering overview + custom renderers](rendering.html)
   - [Rendering 2D](rendering2d.html)
-  - [Render pipeline (3D)](render-pipeline.html)
+
+- 3D Rendering
+  - [Rendering3D Overview](3d-rendering/overview.html)
+  - [Rendering3D: Pipeline](3d-rendering/pipeline.html)
+  - [Rendering3D: Materials](3d-rendering/materials.html)
+  - [Rendering3D: Lighting](3d-rendering/lighting.html)
+  - [Rendering3D: Primitives](3d-rendering/primitives.html)
+  - [Rendering3D: Post-Processing](3d-rendering/postprocessing.html)
+  - [Rendering3D: Custom Shaders](3d-rendering/custom-shaders.html)
+
+- Rendering & Assets
   - [Camera](camera.html)
   - [Culling](culling.html)
-
-- Amenities
-
+  - [Shaders](shaders.html)
   - [Input (raw + mapped)](input.html)
   - [Assets (loading + caching)](assets.html)
   - [Animation (2D sprites)](animation.html)

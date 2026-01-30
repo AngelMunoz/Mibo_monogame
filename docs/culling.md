@@ -17,9 +17,21 @@ It operates on MonoGame primitives:
 
 ## 3D: frustum culling
 
+Culling works with any `BoundingFrustum` - from either camera:
+
+**Elmish Camera3D:**
 ```fsharp
 let frustum = Camera3D.boundingFrustum camera
+```
 
+**Rendering3D Camera:**
+```fsharp
+let frustum = Camera.boundingFrustum camera
+```
+
+Both return same `BoundingFrustum` type, so culling works the same:
+
+```fsharp
 if Culling.isVisible frustum entitySphere then
   // submit draw commands
   ()
@@ -34,7 +46,7 @@ if Culling.isGenericVisible frustum nodeBounds then
 
 ## 2D: rectangle overlap
 
-This is typically paired with `Camera2D.viewportBounds`:
+Uses `Camera2D.viewportBounds` with generic rectangle overlap test:
 
 ```fsharp
 let viewBounds = Camera2D.viewportBounds camera viewport
