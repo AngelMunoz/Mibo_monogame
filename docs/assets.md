@@ -52,6 +52,7 @@ All these functions cache results automatically:
 For assets not loaded through the content pipeline, use `getOrCreate`:
 
 ```fsharp
+<<<<<<< Updated upstream
 // Create a custom shader once, reuse forever
 let outlineFx =
   Assets.getOrCreate "OutlineEffect" (fun gd -> new Effect(gd, bytecode)) ctx
@@ -82,6 +83,25 @@ Assets.create "playerData" (fun _ -> loadPlayerFromDisk()) ctx
 ## Loading Non-Pipeline Files
 
 ### JSON with JDeck
+=======
+// Create once, cache forever - preferred approach
+let outlineFx =
+  Assets.getOrCreate "OutlineEffect" (fun gd -> new Effect(gd, bytecode)) ctx
+
+// Check if already cached without creating
+match Assets.get<Effect> "OutlineEffect" ctx with
+| ValueSome fx -> printfn "Already loaded"
+| ValueNone -> printfn "Not cached yet"
+
+// Force creation (overwrites existing - use with caution)
+let freshData =
+  Assets.create "tempData" (fun _ -> calculateExpensive()) ctx
+```
+
+**Note:** `Assets.get` only retrieves custom assets created via `create` or `getOrCreate`. Content pipeline assets (textures, models, etc.) are loaded through `Assets.texture`, `Assets.model`, etc.
+
+## JSON helpers
+>>>>>>> Stashed changes
 
 Mibo includes JSON helpers via [JDeck](https://github.com/AngelMunoz/JDeck):
 
