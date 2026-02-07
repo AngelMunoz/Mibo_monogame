@@ -78,14 +78,12 @@ module CellGrid2D =
   /// Skips ValueNone cells cheaply.
   /// </summary>
   let inline iter
-    (action: int -> int -> 'T -> unit)
+    ([<InlineIfLambda>] action: int -> int -> 'T -> unit)
     (grid: CellGrid2D<'T>)
     : unit =
     for x in 0 .. grid.Width - 1 do
       for y in 0 .. grid.Height - 1 do
-        match grid.Cells.[x, y] with
-        | ValueSome content -> action x y content
-        | ValueNone -> ()
+        grid |> get x y |> ValueOption.iter(action x y)
 
   /// <summary>
   /// Optimization for rendering: only iterates cells that intersect the given world-space bounds.
@@ -93,7 +91,7 @@ module CellGrid2D =
   /// </summary>
   let inline iterVisible
     (bounds: Rectangle)
-    (action: int -> int -> 'T -> unit)
+    ([<InlineIfLambda>] action: int -> int -> 'T -> unit)
     (grid: CellGrid2D<'T>)
     : unit =
     let startX = max 0 ((bounds.X - int grid.Origin.X) / int grid.CellSize.X)
@@ -111,6 +109,4 @@ module CellGrid2D =
 
     for x in startX..endX do
       for y in startY..endY do
-        match grid.Cells.[x, y] with
-        | ValueSome content -> action x y content
-        | ValueNone -> ()
+        grid |> get x y |> ValueOption.iter(action x y)
