@@ -3,6 +3,7 @@ module _3DSample.Physics
 open Microsoft.Xna.Framework
 open Mibo.Elmish
 open Mibo.Input
+open Mibo.Layout3D
 open _3DSample
 
 // ─────────────────────────────────────────────────────────────
@@ -24,21 +25,91 @@ let private applyJump(state: State) : Vector3 =
 let private getPlayerRadius(assets: GameAssets) : float32 =
   (assets.PlayerBounds.Max.Y - assets.PlayerBounds.Min.Y) / 2f
 
-/// Resolve collision with platforms
-let private resolveCollision
+/// Check if a cell exists at the given grid position
+let private hasCell (x: int) (y: int) (z: int) (grid: CellGrid3D<Cell>) : bool =
+  match CellGrid3D.get x y z grid with
+  | ValueSome _ -> true
+  | ValueNone -> false
+
+/// Convert world position to grid coordinates
+let private worldToGrid
+  (pos: Vector3)
+  (grid: CellGrid3D<Cell>)
+  : struct (int * int * int) =
+  let gx = int((pos.X - grid.Origin.X) / grid.CellSize.X)
+  let gy = int((pos.Y - grid.Origin.Y) / grid.CellSize.Y)
+  let gz = int((pos.Z - grid.Origin.Z) / grid.CellSize.Z)
+  struct (gx, gy, gz)
+
+/// Full 3D collision check - handles ground, ceiling, and walls
+let private checkGridCollision
   (playerRadius: float32)
   (prevPos: Vector3)
   (newPos: Vector3)
   (velocity: Vector3)
-  (platforms: PlatformData list)
+  (grid: CellGrid3D<Cell>)
   : struct (Vector3 * Vector3 * bool) =
-  match Platform.checkCollision playerRadius prevPos newPos platforms with
-  | Some top when velocity.Y <= 0f ->
-    // Land on platform: place ball on top, zero vertical velocity
-    Vector3(newPos.X, top + playerRadius, newPos.Z),
-    Vector3(velocity.X, 0f, velocity.Z),
-    true
-  | _ -> newPos, velocity, false
+
+  let mutable pos = newPos
+  let mutable vel = velocity
+  let mutable grounded = false
+
+  // Get grid cell the player's feet are in (player Y is center, subtract radius for feet)
+  let feetY = pos.Y - playerRadius
+  let struct (gx, _, gz) = worldToGrid pos grid
+  let feetGridY = int((feetY - grid.Origin.Y) / grid.CellSize.Y)
+
+  // Check ground collision (feet hitting top of cell below)
+  // Check multiple cells around player for better 1x1 block detection
+  for dx in -1 .. 1 do
+    for dz in -1 .. 1 do
+      let checkX = gx + dx
+      let checkZ = gz + dz
+
+      // Check if player XZ overlaps this cell
+      let cellMinX = grid.Origin.X + float32 checkX * grid.CellSize.X
+      let cellMaxX = cellMinX + grid.CellSize.X
+      let cellMinZ = grid.Origin.Z + float32 checkZ * grid.CellSize.Z
+      let cellMaxZ = cellMinZ + grid.CellSize.Z
+
+      let overlapX =
+        pos.X + playerRadius > cellMinX && pos.X - playerRadius < cellMaxX
+
+      let overlapZ =
+        pos.Z + playerRadius > cellMinZ && pos.Z - playerRadius < cellMaxZ
+
+      if overlapX && overlapZ then
+        // Check cells below for ground
+        for checkY in feetGridY .. -1 .. max 0 (feetGridY - 2) do
+          if hasCell checkX checkY checkZ grid && not grounded then
+            let cellTop = grid.Origin.Y + float32(checkY + 1) * grid.CellSize.Y
+            // Landing: moving down and feet crossing cell top
+            if
+              vel.Y <= 0f
+              && prevPos.Y - playerRadius >= cellTop - 0.1f
+              && feetY < cellTop
+            then
+              pos <- Vector3(pos.X, cellTop + playerRadius, pos.Z)
+              vel <- Vector3(vel.X, 0f, vel.Z)
+              grounded <- true
+
+        // Check ceiling collision (jumping up and hitting bottom of cell)
+        let headY = pos.Y + playerRadius
+        let headGridY = int((headY - grid.Origin.Y) / grid.CellSize.Y)
+
+        for checkY in headGridY .. headGridY + 1 do
+          if hasCell checkX checkY checkZ grid then
+            let cellBottom = grid.Origin.Y + float32 checkY * grid.CellSize.Y
+            // Hitting ceiling: moving up and head crossing cell bottom
+            if
+              vel.Y > 0f
+              && prevPos.Y + playerRadius <= cellBottom + 0.1f
+              && headY > cellBottom
+            then
+              pos <- Vector3(pos.X, cellBottom - playerRadius, pos.Z)
+              vel <- Vector3(vel.X, 0f, vel.Z)
+
+  struct (pos, vel, grounded)
 
 /// Physics system update: gravity, jump, position, collision
 let update<'Msg> (dt: float32) (state: State) : struct (State * Cmd<'Msg>) =
@@ -53,14 +124,14 @@ let update<'Msg> (dt: float32) (state: State) : struct (State * Cmd<'Msg>) =
   // Update position
   let newPos = state.PlayerPosition + velocity * dt
 
-  // Resolve platform collision
+  // Resolve grid-based collision
   let struct (finalPos, finalVel, grounded) =
-    resolveCollision
+    checkGridCollision
       playerRadius
       state.PlayerPosition
       newPos
       velocity
-      state.Platforms
+      state.LevelGrid
 
   {
     state with
