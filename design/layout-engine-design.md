@@ -1,4 +1,4 @@
-# Mibo Layout Engine - Minimalist Design
+# Mibo Layout Engine - Minimalist 2D Design
 
 ## Design Goals
 
@@ -34,31 +34,6 @@ module CellGrid2D =
   val iterVisible: bounds:Rectangle -> (int -> int -> 'T -> unit) -> grid:CellGrid2D<'T> -> unit
 ```
 
-### CellGrid3D<'T>
-
-```fsharp
-[<Struct>]
-type LayoutPlane = XY | XZ | YZ
-
-[<Struct>]
-type CellGrid3D<'T> = {
-  Origin: Vector3
-  CellSize: Vector2
-  Plane: LayoutPlane
-  Width: int
-  Height: int
-  Cells: Array2D<'T voption>
-}
-
-module CellGrid3D =
-  val create: width:int -> height:int -> cellSize:Vector2 -> plane:LayoutPlane -> origin:Vector3 -> CellGrid3D<'T>
-  val set: x:int -> y:int -> content:'T -> grid:CellGrid3D<'T> -> unit
-  val get: x:int -> y:int -> grid:CellGrid3D<'T> -> 'T voption
-  val getWorldPos: x:int -> y:int -> grid:CellGrid3D<'T> -> Vector3
-  val iter: (int -> int -> 'T -> unit) -> grid:CellGrid3D<'T> -> unit
-  val iterVisible: frustum:BoundingFrustum -> (int -> int -> 'T -> unit) -> grid:CellGrid3D<'T> -> unit
-```
-
 ## Composition Layer (The View)
 
 To support relative positioning, nesting, and reusable layout components without data copying, we introduce a lightweight "view" abstraction.
@@ -71,19 +46,6 @@ A cursor-like view into a backing grid that handles coordinate translation and b
 [<Struct>]
 type GridSection2D<'T> = {
   BackingGrid: CellGrid2D<'T>
-  OffsetX: int
-  OffsetY: int
-  Width: int
-  Height: int
-}
-```
-
-### GridSection3D<'T>
-
-```fsharp
-[<Struct>]
-type GridSection3D<'T> = {
-  BackingGrid: CellGrid3D<'T>
   OffsetX: int
   OffsetY: int
   Width: int
@@ -199,9 +161,6 @@ type Level<'T> = {
 ```fsharp
 module CellGridRenderer2D =
   val render: CellGrid2D<'T> -> renderCell:(Vector2 -> 'T -> unit) -> unit
-
-module CellGridRenderer3D =
-  val render: CellGrid3D<'T> -> renderCell:(Vector3 -> 'T -> unit) -> unit
 ```
 
 ### Raw Access (For Custom Renderers)
@@ -261,32 +220,6 @@ let view (ctx: GameContext) (grid: CellGrid2D<TileData>) (buffer: RenderBuffer<R
   )
 ```
 
-### 3D Level
-
-```fsharp
-type BuildingData = {
-  Model: Model
-  Transform: Matrix
-}
-
-let town =
-  CellGrid3D.create 10 10 (Vector2(100f, 100f)) XZ (Vector3.Zero)
-  |> Layout.run (
-       Layout.set 2 2 { Model = tavernModel; Transform = Matrix.Identity }
-       >> Layout.set 5 2 { Model = shopModel; Transform = Matrix.Identity }
-     )
-
-// Rendering
-let render (grid: CellGrid3D<BuildingData>) (buffer: RenderBuffer<RenderCmd3D>) =
-  let cameraFrustum = getCameraFrustum()
-  grid
-  |> CellGrid3D.iterVisible cameraFrustum (fun x y building ->
-    let pos = CellGrid3D.getWorldPos x y grid
-    let matrix = building.Transform * Matrix.CreateTranslation(pos)
-    Draw3D.mesh building.Model matrix buffer
-  )
-```
-
 ## Performance Characteristics
 
 ### Memory
@@ -306,9 +239,7 @@ let render (grid: CellGrid3D<BuildingData>) (buffer: RenderBuffer<RenderCmd3D>) 
 ```
 src/Mibo/Layout/
 ├── Grid2D.fs       // CellGrid2D and CellGrid2D module
-├── Grid3D.fs       // CellGrid3D and CellGrid3D module
 ├── Renderer2D.fs   // Optional built-in 2D renderer
-├── Renderer3D.fs   // Optional built-in 3D renderer
 └── Layout.fs       // Composition Types and DSL (Layout module)
 ```
 
@@ -319,11 +250,10 @@ This minimalist design provides:
 ✅ **Generic cell grids** - User defines content type
 ✅ **Low-level storage primitives** - Efficient data structure for level/map data
 ✅ **Raw access** - Direct cell iteration for custom renderers
-✅ **Built-in renderers** - Convenience helpers for 2D and 3D
+✅ **Built-in renderers** - Convenience helpers for 2D
 ✅ **Built-in iteration** - `iterVisible` with culling support
 ✅ **Zero-copy operations** - In-place mutations for optimal performance
 ✅ **Composable DSL** - Relative positioning and reuse via `GridSection`
-✅ **2D and 3D** - Same pattern, different coordinate mapping
 
 What is **NOT** included (Phase 1):
 
