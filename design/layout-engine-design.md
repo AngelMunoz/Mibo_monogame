@@ -79,7 +79,7 @@ module Layout =
   // Geometry (Rasterized)
   val line: x1:int -> y1:int -> x2:int -> y2:int -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
   val circle: cx:int -> cy:int -> radius:int -> filled:bool -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
-  val polygon: points:(int * int) list -> filled:bool -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
+  val polygon: points:struct (int * int)[] -> filled:bool -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
 
   // Patterns
   val checker: odd:'T -> even:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
@@ -89,6 +89,72 @@ module Layout =
   val clear: x:int -> y:int -> width:int -> height:int -> section:GridSection2D<'T> -> GridSection2D<'T>
   val replace: oldContent:'T -> newContent:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
   val setIfEmpty: x:int -> y:int -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
+```
+
+## Phase 1.5: Layered Composition
+
+To support overlapping content (e.g., decorations behind physical objects), we introduce a layered container.
+
+### LayeredGrid2D<'T>
+
+```fsharp
+type LayeredGrid2D<'T> = {
+    Width: int
+    Height: int
+    CellSize: Vector2
+    Origin: Vector2
+    // Map from RenderLayer index to Grid
+    Layers: Map<int, CellGrid2D<'T>>
+}
+```
+
+### LayeredLayout DSL
+
+Helper functions to select the active layer before applying standard Layout primitives.
+
+```fsharp
+module LayeredLayout =
+    // Selects a layer and runs a standard Layout function on it.
+    // Creates the layer if it doesn't exist.
+    val layer: index:int -> f:(GridSection2D<'T> -> GridSection2D<'T>) -> grid:LayeredGrid2D<'T> -> LayeredGrid2D<'T>
+```
+
+## Phase 1.5: Domain Modules
+
+Domain modules are standard libraries of **Layout Stamps**. They provide high-level geometry generators that return `LayoutOp` (GridSection2D -> GridSection2D). They do **not** depend on physics or game logic.
+
+### Platformer Module
+
+```fsharp
+module Platformer =
+    // Generates a rectangular room with walls
+    val room: width:int -> height:int -> wall:'T -> floor:'T -> (GridSection2D<'T> -> GridSection2D<'T>)
+
+    // Generates a platform (guaranteed 1-tile high)
+    val platform: width:int -> tile:'T -> (GridSection2D<'T> -> GridSection2D<'T>)
+
+    // Generates stairs
+    val stairs: width:int -> height:int -> tile:'T -> direction:Direction -> (GridSection2D<'T> -> GridSection2D<'T>)
+```
+
+## Usage Examples
+
+### Layered Composition (Bush behind Box)
+
+```fsharp
+// 1. Create a layered container
+let level = LayeredGrid2D.create 100 100 (Vector2(32f, 32f)) Vector2.Zero
+
+// 2. Compose content across layers
+let result =
+    level
+    |> LayeredLayout.layer 0 ( // Physical Layer
+         Platformer.room 10 10 Wall Floor
+         >> Layout.set 5 5 Box
+    )
+    |> LayeredLayout.layer -1 ( // Background Layer
+         Layout.set 5 5 Bush
+    )
 ```
 
 ## Design Decisions
@@ -125,35 +191,6 @@ let triggers = CellGrid2D<TriggerData>.create 100 50 size origin
 - For runtime immutability, users can copy explicitly: `{ grid with Cells = Array2D.copy grid.Cells }`
 - This aligns with Mibo's philosophy: performance first, provide primitives, let users compose
 
-## Multi-Grid Composition
-
-For complex levels with multiple cell types, users compose grids:
-
-```fsharp
-[<Struct>]
-type Level = {
-  Terrain: CellGrid2D<TileData>
-  Decorations: CellGrid2D<Decoration>
-  Triggers: CellGrid2D<Trigger>
-}
-```
-
-Or use zoned composition:
-
-```fsharp
-[<Struct>]
-type Zone<'T> = {
-  Name: string
-  Offset: Vector2
-  Grid: CellGrid2D<'T>
-}
-
-[<Struct>]
-type Level<'T> = {
-  Zones: Zone<'T> list
-}
-```
-
 ## Rendering Integration
 
 ### Built-in Renderers (Optional)
@@ -176,50 +213,6 @@ for x in 0 .. grid.Width - 1 do
     | ValueNone -> ()
 ```
 
-## Usage Examples
-
-### 2D Platformer Level
-
-```fsharp
-// User-defined content type
-type TileType = Ground | Wall | Platform
-
-type TileData = {
-  Texture: Texture2D
-  SourceRect: Rectangle
-  Type: TileType
-  Collision: bool
-}
-
-// Reusable stamps
-module Platformer =
-  let island width height =
-    Layout.fill 0 1 width (height - 1) Ground // Body
-    >> Layout.repeatX 0 0 width Platform      // Top Layer
-
-// Declarative level construction
-let level =
-  CellGrid2D.create 20 15 (Vector2(32f, 32f)) Vector2.Zero
-  |> Layout.run (
-       Layout.fill 0 14 20 1 Ground
-       >> Layout.section 10 5 (Platformer.island 6 3)
-     )
-
-// Rendering
-let view (ctx: GameContext) (grid: CellGrid2D<TileData>) (buffer: RenderBuffer<RenderCmd2D>) =
-  let cameraBounds = Camera.getWorldBounds ctx
-  grid
-  |> CellGrid2D.iterVisible cameraBounds (fun x y tile ->
-    let pos = CellGrid2D.getWorldPos x y grid
-    buffer.Sprite(sprite {
-      texture tile.Texture
-      sourceRect tile.SourceRect
-      at pos.X pos.Y
-      size grid.CellSize.X grid.CellSize.Y
-    })
-  )
-```
-
 ## Performance Characteristics
 
 ### Memory
@@ -239,6 +232,8 @@ let view (ctx: GameContext) (grid: CellGrid2D<TileData>) (buffer: RenderBuffer<R
 ```
 src/Mibo/Layout/
 ├── Grid2D.fs       // CellGrid2D and CellGrid2D module
+├── Layered.fs      // LayeredGrid2D and LayeredLayout module
+├── Platformer.fs   // Platformer domain stamps
 ├── Renderer2D.fs   // Optional built-in 2D renderer
 └── Layout.fs       // Composition Types and DSL (Layout module)
 ```
@@ -254,6 +249,8 @@ This minimalist design provides:
 ✅ **Built-in iteration** - `iterVisible` with culling support
 ✅ **Zero-copy operations** - In-place mutations for optimal performance
 ✅ **Composable DSL** - Relative positioning and reuse via `GridSection`
+✅ **Layered Composition** - Support for overlapping content via `LayeredGrid2D`
+✅ **Domain Primitives** - Reusable geometry stamps via `Platformer` module
 
 What is **NOT** included (Phase 1):
 
