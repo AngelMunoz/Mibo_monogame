@@ -75,18 +75,18 @@ type TerrainPattern =
 /// Get terrain pattern for a chunk based on noise
 let getChunkPattern(chunkX: int, seed: int) : TerrainPattern =
   if chunkX = 0 then
-      FlatGround // Force safe spawn area
+    FlatGround // Force safe spawn area
   else
-      let patternNoise = SimpleNoise.noise2d(chunkX, 0, seed)
+    let patternNoise = SimpleNoise.noise2d(chunkX, 0, seed)
 
-      match patternNoise with
-      | n when n < 0.15f -> FlatGround
-      | n when n < 0.35f -> RollingHills
-      | n when n < 0.50f -> Mountains
-      | n when n < 0.65f -> FloatingPlatforms
-      | n when n < 0.80f -> Cavernous
-      | n when n < 0.90f -> StaircaseUp
-      | _ -> StaircaseDown
+    match patternNoise with
+    | n when n < 0.15f -> FlatGround
+    | n when n < 0.35f -> RollingHills
+    | n when n < 0.50f -> Mountains
+    | n when n < 0.65f -> FloatingPlatforms
+    | n when n < 0.80f -> Cavernous
+    | n when n < 0.90f -> StaircaseUp
+    | _ -> StaircaseDown
 
 // ─────────────────────────────────────────────────────────────
 // Terrain Generation Functions
@@ -218,6 +218,136 @@ let generateLight
   : PointLight2D option =
   None
 
+// ─────────────────────────────────────────────────────────────
+// Terrain Layout Stamps (composition over Layout DSL)
+// ─────────────────────────────────────────────────────────────
+
+/// Higher-level, pattern-specific stamps used by the sample.
+/// Key point: each function returns a *stamp* (a section transformer) so you can
+/// pipeline and compose them without manually threading `section`.
+///
+/// Most stamps are designed to run inside a per-column sub-section created with
+/// `Layout.section x 0 (...)`, so they use local X=0.
+module Terrain =
+
+  /// A stamp is just a section transformer.
+  type Stamp = GridSection2D<GridTile> -> GridSection2D<GridTile>
+
+  let none: Stamp = id
+
+  let inline when' (cond: bool) ([<InlineIfLambda>] stamp: Stamp) : Stamp =
+    if cond then stamp else none
+
+  let inline private placeTile (lx: int) (ly: int) (tile: GridTile) : Stamp =
+    fun section -> Layout.fill lx ly 1 1 tile section
+
+  let inline private placePlatform (ly: int) (variant: int) : Stamp =
+    placeTile 0 ly {
+      TileType = TileType.Platform
+      Variant = variant
+    }
+
+  let inline private placeHazard(ly: int) : Stamp =
+    placeTile 0 ly {
+      TileType = TileType.Hazard
+      Variant = 0
+    }
+
+  /// Fill ground from the computed groundHeight down to the bottom of the chunk.
+  let groundColumn
+    (globalX: int)
+    (groundHeight: int)
+    (theme: int)
+    (seed: int)
+    : Stamp =
+    fun section ->
+      let h = Constants.worldHeight - groundHeight
+
+      if h > 0 then
+        Layout.generate
+          0
+          groundHeight
+          1
+          h
+          (fun _ fy ->
+            let shape = getTileShape(globalX, fy, seed)
+            let variant = theme * 10 + shape
+
+            {
+              TileType = TileType.Ground
+              Variant = variant
+            })
+          section
+      else
+        section
+
+  /// FlatGround: optional floating platform.
+  let flatGround (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    when'
+      (SimpleNoise.chance(0.3f, globalX, groundHeight - 3, seed))
+      (placePlatform (groundHeight - 3) 0)
+
+  /// RollingHills: climb-assist platform when needed, otherwise occasional floating platform.
+  let rollingHills (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let hL = getGlobalGroundHeight(globalX - 1, seed)
+      let hR = getGlobalGroundHeight(globalX + 1, seed)
+      let isClimbAssist = (hL < groundHeight - 2 || hR < groundHeight - 2)
+
+      (if isClimbAssist then
+         placePlatform (groundHeight - 2) 0
+       elif SimpleNoise.chance(0.2f, globalX, groundHeight - 3, seed) then
+         placePlatform (groundHeight - 3) 0
+       else
+         none)
+        section
+
+  /// Mountains: climb-assist platform when needed, otherwise occasional higher platform.
+  let mountains (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let hL = getGlobalGroundHeight(globalX - 1, seed)
+      let hR = getGlobalGroundHeight(globalX + 1, seed)
+      let isClimbAssist = (hL < groundHeight - 2 || hR < groundHeight - 2)
+
+      (if isClimbAssist then
+         placePlatform (groundHeight - 2) 0
+       elif SimpleNoise.chance(0.3f, globalX + 50, groundHeight - 4, seed) then
+         placePlatform (groundHeight - 4) 0
+       else
+         none)
+        section
+
+  /// FloatingPlatforms: just platforms, no ground fill.
+  let floatingPlatforms (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let section =
+        if SimpleNoise.chance(0.4f, globalX, groundHeight, seed) then
+          let variant = SimpleNoise.rangeInt(0, 1, globalX, groundHeight, seed)
+          section |> placePlatform groundHeight variant
+        else
+          section
+
+      if SimpleNoise.chance(0.3f, globalX + 100, groundHeight + 3, seed) then
+        section |> placePlatform (groundHeight + 3) 0
+      else
+        section
+
+  /// Cavernous: gaps vs solid ground, with an occasional hazard on gap edges.
+  let cavernous
+    (globalX: int)
+    (groundHeight: int)
+    (gapProbability: float32)
+    (theme: int)
+    (seed: int)
+    : Stamp =
+    fun section ->
+      if gapProbability >= 0.2f then
+        section |> groundColumn globalX groundHeight theme seed
+      elif SimpleNoise.chance(0.15f, globalX + 200, groundHeight - 1, seed) then
+        section |> placeHazard(groundHeight - 1)
+      else
+        section
+
 /// Generate a chunk of tiles using Layout DSL
 let generateChunk(chunkX: int, seed: int) : LayeredGrid2D<GridTile> =
   let pattern = getChunkPattern(chunkX, seed)
@@ -229,7 +359,7 @@ let generateChunk(chunkX: int, seed: int) : LayeredGrid2D<GridTile> =
     LayeredGrid2D.create
       Constants.chunkWidth
       Constants.worldHeight
-      (Vector2(Constants.tileSize))
+      (Vector2 Constants.tileSize)
       origin
 
   chunk
@@ -249,143 +379,30 @@ let generateChunk(chunkX: int, seed: int) : LayeredGrid2D<GridTile> =
 
       let gapProbability = SimpleNoise.noise2d(globalX, chunkX + 100, seed)
 
-      let fillGround() =
-        // Fill from groundHeight to Bottom
-        let h = Constants.worldHeight - groundHeight
+      // This is the "composition showcase":
+      // - we create a sub-section for the current column
+      // - we build a stamp (section transformer) by composing smaller stamps
+      // - we apply it to the column section
+      section
+      |> Layout.section x 0 (fun columnSection ->
+        let ground = Terrain.groundColumn globalX groundHeight theme seed
 
-        if h > 0 then
-          // We need to set individual tiles to handle variants (auto-tiling logic simulation)
-          for y = groundHeight to Constants.worldHeight - 1 do
-            let shape = getTileShape(globalX, y, seed)
-            let variant = theme * 10 + shape
+        let stamp: Terrain.Stamp =
+          match pattern with
+          | FlatGround ->
+            Terrain.flatGround globalX groundHeight seed >> ground
+          | RollingHills ->
+            Terrain.rollingHills globalX groundHeight seed >> ground
+          | Mountains -> Terrain.mountains globalX groundHeight seed >> ground
+          | StaircaseUp
+          | StaircaseDown -> ground
+          | FloatingPlatforms ->
+            Terrain.floatingPlatforms globalX groundHeight seed
+          | Cavernous ->
+            Terrain.cavernous globalX groundHeight gapProbability theme seed
 
-            Layout.set
-              x
-              y
-              {
-                TileType = TileType.Ground
-                Variant = variant
-              }
-              section
-            |> ignore
-
-      match pattern with
-      | FlatGround ->
-        // Optional floating platform
-        if SimpleNoise.chance(0.3f, globalX, groundHeight - 3, seed) then
-          Layout.set
-            x
-            (groundHeight - 3)
-            {
-              TileType = TileType.Platform
-              Variant = 0
-            }
-            section
-          |> ignore
-
-        fillGround()
-
-      | RollingHills ->
-        // Climb Assist
-        let hL = getGlobalGroundHeight(globalX - 1, seed)
-        let hR = getGlobalGroundHeight(globalX + 1, seed)
-        let isClimbAssist = (hL < groundHeight - 2 || hR < groundHeight - 2)
-
-        if isClimbAssist then
-          Layout.set
-            x
-            (groundHeight - 2)
-            {
-              TileType = TileType.Platform
-              Variant = 0
-            }
-            section
-          |> ignore
-        elif SimpleNoise.chance(0.2f, globalX, groundHeight - 3, seed) then
-          Layout.set
-            x
-            (groundHeight - 3)
-            {
-              TileType = TileType.Platform
-              Variant = 0
-            }
-            section
-          |> ignore
-
-        fillGround()
-
-      | Mountains ->
-        let hL = getGlobalGroundHeight(globalX - 1, seed)
-        let hR = getGlobalGroundHeight(globalX + 1, seed)
-        let isClimbAssist = (hL < groundHeight - 2 || hR < groundHeight - 2)
-
-        if isClimbAssist then
-          Layout.set
-            x
-            (groundHeight - 2)
-            {
-              TileType = TileType.Platform
-              Variant = 0
-            }
-            section
-          |> ignore
-        elif
-          SimpleNoise.chance(0.3f, globalX + 50, groundHeight - 4, seed)
-        then
-          Layout.set
-            x
-            (groundHeight - 4)
-            {
-              TileType = TileType.Platform
-              Variant = 0
-            }
-            section
-          |> ignore
-
-        fillGround()
-
-      | StaircaseUp
-      | StaircaseDown -> fillGround()
-
-      | FloatingPlatforms ->
-        // Only 1 block thick
-        if SimpleNoise.chance(0.4f, globalX, groundHeight, seed) then
-          Layout.set
-            x
-            groundHeight
-            {
-              TileType = TileType.Platform
-              Variant = SimpleNoise.rangeInt(0, 1, globalX, groundHeight, seed)
-            }
-            section
-          |> ignore
-
-        if SimpleNoise.chance(0.3f, globalX + 100, groundHeight + 3, seed) then
-          Layout.set
-            x
-            (groundHeight + 3)
-            {
-              TileType = TileType.Platform
-              Variant = 0
-            }
-            section
-          |> ignore
-
-      | Cavernous ->
-        if gapProbability >= 0.2f then
-          fillGround()
-        elif
-          SimpleNoise.chance(0.15f, globalX + 200, groundHeight - 1, seed)
-        then
-          Layout.set
-            x
-            (groundHeight - 1)
-            {
-              TileType = TileType.Hazard
-              Variant = 0
-            }
-            section
-          |> ignore
+        stamp columnSection)
+      |> ignore
 
     section)
 
@@ -486,19 +503,17 @@ let createPlatformsFromChunks
         if tile.TileType <> TileType.Empty then
           let pos = CellGrid2D.getWorldPos x y grid
 
-          platforms.Add(
-            {
-              Bounds =
-                Rectangle(
-                  int pos.X,
-                  int pos.Y,
-                  int Constants.tileSize,
-                  int Constants.tileSize
-                )
-              Type = tile.TileType
-              Variant = tile.Variant
-            }
-          ))
+          platforms.Add {
+            Bounds =
+              Rectangle(
+                int pos.X,
+                int pos.Y,
+                int Constants.tileSize,
+                int Constants.tileSize
+              )
+            Type = tile.TileType
+            Variant = tile.Variant
+          })
       grid
 
   platforms.ToArray()
