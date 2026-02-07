@@ -21,6 +21,7 @@
     <Compile Include="Layout/Layout.fs" />
     <Compile Include="Layout/Layered.fs" />
     <Compile Include="Layout/Platformer.fs" />
+    <Compile Include="Layout/TopDown.fs" />
     <Compile Include="InputMapper.fs" />
     <Compile Include="Culling.fs" />
     <Compile Include="Assets.fs" />
