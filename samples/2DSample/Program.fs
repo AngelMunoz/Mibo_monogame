@@ -54,9 +54,9 @@ let init(ctx: GameContext) : struct (Model * Cmd<Msg>) =
   let seed = System.Random.Shared.Next()
 
   // Generate initial terrain
-  let initialTiles = Terrain.generateInitialTerrain seed
-  let map = Terrain.createMapFromTiles initialTiles seed
-  let platforms = Terrain.createPlatformsFromTiles initialTiles
+  let chunks = Terrain.generateInitialTerrain seed
+  let map = Terrain.createMapFromChunks chunks seed
+  let platforms = Terrain.createPlatformsFromChunks chunks
 
   // Create player
   let playerId = Helpers.newEntityId()
@@ -122,7 +122,7 @@ let private updateSystems dt model =
       let model = Physics.respawnPlayer model
       let model = Terrain.reset model
       // Rebuild platforms from the new map tiles
-      let platforms = Terrain.createPlatformsFromTiles model.Map.Tiles
+      let platforms = Terrain.createPlatformsFromChunks model.Map.Chunks
       { model with Platforms = platforms }, Cmd.none
     else
       model, Cmd.none)

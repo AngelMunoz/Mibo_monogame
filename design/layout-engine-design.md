@@ -73,6 +73,15 @@ module Layout =
   val set: x:int -> y:int -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
   val fill: x:int -> y:int -> width:int -> height:int -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
   val border: x:int -> y:int -> width:int -> height:int -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
+  
+  // Functional / Procedural
+  // Fills a region by calling a generator function for each cell.
+  val generate: x:int -> y:int -> width:int -> height:int -> generator:(int -> int -> 'T) -> section:GridSection2D<'T> -> GridSection2D<'T>
+  // Iterates over a region (read-only).
+  val iter: x:int -> y:int -> width:int -> height:int -> action:(int -> int -> 'T voption -> unit) -> section:GridSection2D<'T> -> GridSection2D<'T>
+  // Transforms existing content in a region.
+  val map: x:int -> y:int -> width:int -> height:int -> mapping:('T -> 'T) -> section:GridSection2D<'T> -> GridSection2D<'T>
+
   val repeatX: x:int -> y:int -> count:int -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
   val repeatY: x:int -> y:int -> count:int -> content:'T -> section:GridSection2D<'T> -> GridSection2D<'T>
 
