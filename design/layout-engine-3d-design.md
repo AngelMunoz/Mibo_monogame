@@ -67,6 +67,19 @@ type GridSection3D<'T> = {
 }
 ```
 
+## Helpers Module
+
+```fsharp
+[<AutoOpen>]
+module Layout3DHelpers =
+  /// Wraps a raw grid in a root-level section.
+  val createSection: grid:CellGrid3D<'T> -> GridSection3D<'T>
+  /// Internal helper to set a cell using section-relative coordinates.
+  val inline setLocal: x:int -> y:int -> z:int -> content:'T -> section:GridSection3D<'T> -> unit
+  /// Internal helper to clear a cell using section-relative coordinates.
+  val inline clearLocal: x:int -> y:int -> z:int -> section:GridSection3D<'T> -> unit
+```
+
 ## Layout3D DSL
 
 All operations follow the 2D pattern: `section -> section` for pipeline composition.
@@ -79,6 +92,8 @@ module Layout3D =
   // Scoping (creates sub-section, runs f, returns parent)
   val section: x:int -> y:int -> z:int -> f:(GridSection3D<'T> -> GridSection3D<'T>) -> parent:GridSection3D<'T> -> GridSection3D<'T>
   val padding: n:int -> f:(GridSection3D<'T> -> GridSection3D<'T>) -> parent:GridSection3D<'T> -> GridSection3D<'T>
+  val paddingEx: left:int -> bottom:int -> back:int -> right:int -> top:int -> front:int
+              -> f:(GridSection3D<'T> -> GridSection3D<'T>) -> parent:GridSection3D<'T> -> GridSection3D<'T>
   val center: w:int -> h:int -> d:int -> f:(GridSection3D<'T> -> GridSection3D<'T>) -> parent:GridSection3D<'T> -> GridSection3D<'T>
 
   // Primitives
@@ -94,6 +109,9 @@ module Layout3D =
   // Shell (hollow box - 6 faces)
   val shell: x:int -> y:int -> z:int -> w:int -> h:int -> d:int -> content:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
 
+  // Edges (12 edges of a box, no faces)
+  val edges: x:int -> y:int -> z:int -> w:int -> h:int -> d:int -> content:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
+
   // Repetition
   val repeatX: x:int -> y:int -> z:int -> count:int -> content:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
   val repeatY: x:int -> y:int -> z:int -> count:int -> content:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
@@ -108,6 +126,15 @@ module Layout3D =
   // Procedural
   val generate: x:int -> y:int -> z:int -> w:int -> h:int -> d:int -> generator:(int -> int -> int -> 'T) -> section:GridSection3D<'T> -> GridSection3D<'T>
   val scatter3D: count:int -> seed:int -> content:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
+  val checker3D: odd:'T -> even:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
+
+  // Iteration / Transformation
+  val iter: x:int -> y:int -> z:int -> w:int -> h:int -> d:int
+         -> action:(int -> int -> int -> 'T voption -> unit) -> section:GridSection3D<'T> -> GridSection3D<'T>
+  val map: x:int -> y:int -> z:int -> w:int -> h:int -> d:int -> mapping:('T -> 'T)
+        -> section:GridSection3D<'T> -> GridSection3D<'T>
+  val replace: oldContent:'T -> newContent:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
+  val setIfEmpty: x:int -> y:int -> z:int -> content:'T -> section:GridSection3D<'T> -> GridSection3D<'T>
 
   // Flow (arrange stamps along axis)
   val flowX: step:int -> stamps:seq<GridSection3D<'T> -> GridSection3D<'T>> -> parent:GridSection3D<'T> -> GridSection3D<'T>
@@ -223,14 +250,39 @@ Models larger than one cell are a **user concern**:
 
 Unlike 2D where layers are useful for depth-sorting, 3D naturally has Y as height. If users need conceptual "layers" (e.g., separate grids for collision vs. decoration), they can use multiple `CellGrid3D` instances.
 
+## Rendering Integration
+
+### Built-in Renderers (Optional)
+
+```fsharp
+module CellGridRenderer3D =
+  /// Iterates over populated cells and invokes renderCell with world position.
+  val render: CellGrid3D<'T> -> renderCell:(Vector3 -> 'T -> unit) -> unit
+```
+
+### Raw Access (For Custom Renderers)
+
+```fsharp
+// Access cells directly for custom rendering
+for x in 0 .. grid.Width - 1 do
+  for y in 0 .. grid.Height - 1 do
+    for z in 0 .. grid.Depth - 1 do
+      match CellGrid3D.get x y z grid with
+      | ValueSome content ->
+        let pos = CellGrid3D.getWorldPos x y z grid
+        // Custom render logic (spawn model, draw instanced mesh, etc.)
+      | ValueNone -> ()
+```
+
 ## File Structure
 
 ```
 src/Mibo/Layout3D/
 ├── Grid3D.fs        # CellGrid3D type and core functions
-├── Layout3D.fs      # GridSection3D and Layout3D DSL
-├── Interior.fs      # Interior domain module
-└── Terrain.fs       # Terrain domain module
+├── Layout3D.fs      # GridSection3D, Layout3DHelpers, and Layout3D DSL
+├── Interior.fs      # Interior domain module (rooms, corridors, etc.)
+├── Terrain.fs       # Terrain domain module (ground, plateaus, etc.)
+└── Renderer3D.fs    # Optional built-in 3D renderer helper
 ```
 
 ## Usage Example
@@ -271,3 +323,18 @@ dungeonSection
 - **In-place mutation** - All operations mutate the backing array directly
 
 For very large worlds, consider chunking strategies (user-implemented).
+
+## Summary
+
+This 3D design provides:
+
+✅ **Generic cell grids** - User defines content type
+✅ **Low-level storage primitives** - Efficient flat array for 3D spatial data
+✅ **Raw access** - Direct cell iteration for custom renderers
+✅ **Built-in renderers** - Convenience helpers via `CellGridRenderer3D`
+✅ **Built-in iteration** - `iterVolume` with bounding box culling
+✅ **Zero-copy operations** - In-place mutations for optimal performance
+✅ **Composable DSL** - Relative positioning and reuse via `GridSection3D`
+✅ **Helpers module** - `setLocal`, `clearLocal`, `createSection`
+✅ **Content transformation** - `map`, `replace`, `setIfEmpty`
+✅ **Domain Primitives** - Reusable geometry stamps via `Interior` and `Terrain` modules
