@@ -32,14 +32,12 @@ type TileType =
   | Empty
   | Ground
   | Platform
+  | Decoration
   | Hazard
 
 /// Lightweight tile data for storage in the Grid
 [<Struct>]
-type GridTile = {
-  TileType: TileType
-  Variant: int
-}
+type GridTile = { TileType: TileType; Variant: int }
 
 /// Structured map definition containing chunked grid data
 type GameMap = {
@@ -95,7 +93,9 @@ module Constants =
   let tileSize = 64.0f
   let chunkWidth = 20 // Tiles per chunk
   let worldHeight = 12 // Total tiles high (12 * 64 = 768 pixels)
-  let chunkSize = Vector2(float32 chunkWidth * tileSize, float32 worldHeight * tileSize)
+
+  let chunkSize =
+    Vector2(float32 chunkWidth * tileSize, float32 worldHeight * tileSize)
 
 // ─────────────────────────────────────────────────────────────
 // Sprite Assets
@@ -175,16 +175,16 @@ module Helpers =
 
   /// Get the chunk X coordinate from a world X position
   let worldXToChunkX(worldX: float32) : int =
-      // Use floor to correctly handle negative coordinates
-      int(floor(worldX / Constants.chunkSize.X))
+    // Use floor to correctly handle negative coordinates
+    int(floor(worldX / Constants.chunkSize.X))
 
   /// Convert world position to a Chunk Index and Local Tile Index
-  let worldToChunkAndTile (position: Vector2) : int * Point =
-      let chunkX = worldXToChunkX position.X
-      let chunkOriginX = float32 chunkX * Constants.chunkSize.X
-      let localX = int((position.X - chunkOriginX) / Constants.tileSize)
-      let localY = int(position.Y / Constants.tileSize)
-      chunkX, Point(localX, localY)
+  let worldToChunkAndTile(position: Vector2) : int * Point =
+    let chunkX = worldXToChunkX position.X
+    let chunkOriginX = float32 chunkX * Constants.chunkSize.X
+    let localX = int((position.X - chunkOriginX) / Constants.tileSize)
+    let localY = int(position.Y / Constants.tileSize)
+    chunkX, Point(localX, localY)
 
   /// Check if a point is within screen bounds (for culling)
   let isVisible

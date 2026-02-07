@@ -348,12 +348,154 @@ module Terrain =
       else
         section
 
+// ─────────────────────────────────────────────────────────────
+// Decoration Layout Stamps (separate layer)
+// ─────────────────────────────────────────────────────────────
+
+module Decorations =
+
+  type Stamp = GridSection2D<GridTile> -> GridSection2D<GridTile>
+
+  let none: Stamp = id
+
+  let inline when' (cond: bool) ([<InlineIfLambda>] stamp: Stamp) : Stamp =
+    if cond then stamp else none
+
+  let inline private place (lx: int) (ly: int) (variant: int) : Stamp =
+    fun section ->
+      Layout.fill lx ly 1 1 {
+        TileType = TileType.Decoration
+        Variant = variant
+      } section
+
+  let inline private placeAtSurface (surfaceY: int) (variant: int) : Stamp =
+    place 0 surfaceY variant
+
+  let inline private pickFrom (variants: int[]) (x: int) (y: int) (seed: int) : int =
+    let i = SimpleNoise.rangeInt(0, variants.Length - 1, x, y, seed)
+    variants.[i]
+
+  /// Light surface dressing: grass tufts, rocks, mushrooms, bushes...
+  let surfaceScatter (globalX: int) (groundHeight: int) (theme: int) (seed: int) : Stamp =
+    fun section ->
+      let surfaceY = groundHeight - 1
+
+      // Keep within chunk bounds.
+      if surfaceY < 0 || surfaceY >= Constants.worldHeight then
+        section
+      else
+        // Theme influences which clutter is more likely.
+        // (e.g., sand theme favors cactus a bit more)
+        let sandLike = (theme = 2)
+        let baseChance = if sandLike then 0.35f else 0.45f
+
+        let clutterVariant =
+          if sandLike && SimpleNoise.chance(0.25f, globalX + 11, surfaceY, seed) then
+            SpriteLoader.TileRegions.DecorationVariants.Cactus
+          else
+            pickFrom SpriteLoader.TileRegions.DecorationVariants.surfaceClutter globalX surfaceY seed
+
+        section
+        |> (when'
+              (SimpleNoise.chance(baseChance, globalX, surfaceY, seed))
+              (placeAtSurface surfaceY clutterVariant))
+
+  /// Occasional props on the surface (fences/signs) to make the world feel inhabited.
+  let surfaceProps (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let surfaceY = groundHeight - 1
+
+      if surfaceY < 0 || surfaceY >= Constants.worldHeight then
+        section
+      else
+        let variant =
+          pickFrom SpriteLoader.TileRegions.DecorationVariants.surfaceProps (globalX + 31) surfaceY seed
+
+        section
+        |> (when'
+              (SimpleNoise.chance(0.08f, globalX + 31, surfaceY, seed))
+              (placeAtSurface surfaceY variant))
+
+  /// Simple vertical accent: ladders (3-tile column) on flatter stretches.
+  let ladders (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let surfaceY = groundHeight - 1
+      let topY = surfaceY - 2
+
+      if topY < 0 || surfaceY >= Constants.worldHeight then
+        section
+      else
+        // Rare, but visually distinctive.
+        if SimpleNoise.chance(0.03f, globalX + 99, surfaceY, seed) then
+          section
+          |> place 0 topY SpriteLoader.TileRegions.DecorationVariants.LadderTop
+          |> place 0 (topY + 1) SpriteLoader.TileRegions.DecorationVariants.LadderMiddle
+          |> place 0 (topY + 2) SpriteLoader.TileRegions.DecorationVariants.LadderBottom
+        else
+          section
+
+  /// Hanging accents for airier chunks: ropes/chains above the surface.
+  let hangingAccents (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let y = groundHeight - 4
+
+      if y < 0 || y >= Constants.worldHeight then
+        section
+      else
+        let variant =
+          pickFrom SpriteLoader.TileRegions.DecorationVariants.hanging (globalX + 7) y seed
+
+        section
+        |> (when'
+              (SimpleNoise.chance(0.06f, globalX + 7, y, seed))
+              (place 0 y variant))
+
+  /// Cave-ish sparkles + occasional torch to show animated decoration rendering.
+  let caveAccents
+    (globalX: int)
+    (groundHeight: int)
+    (gapProbability: float32)
+    (seed: int)
+    : Stamp =
+    fun section ->
+      let y = groundHeight - 3
+
+      if y < 0 || y >= Constants.worldHeight then
+        section
+      else
+        let sparkle =
+          pickFrom SpriteLoader.TileRegions.DecorationVariants.sparkles (globalX + 123) y seed
+
+        section
+        |> (when'
+              (gapProbability < 0.25f && SimpleNoise.chance(0.12f, globalX + 123, y, seed))
+              (place 0 y sparkle))
+        |> (when'
+              (gapProbability < 0.25f && SimpleNoise.chance(0.06f, globalX + 321, y + 1, seed))
+              (place 0 (y + 1) SpriteLoader.TileRegions.DecorationVariants.Torch))
+
 /// Generate a chunk of tiles using Layout DSL
 let generateChunk(chunkX: int, seed: int) : LayeredGrid2D<GridTile> =
   let pattern = getChunkPattern(chunkX, seed)
   let startX = chunkX * Constants.chunkWidth
   let theme = SimpleNoise.rangeInt(0, 5, chunkX, 0, seed)
   let origin = Vector2(float32 chunkX * Constants.chunkSize.X, 0f)
+
+  // Precompute per-column terrain parameters once so both layers can use them.
+  let groundHeights: int[] = Array.zeroCreate Constants.chunkWidth
+  let gapProbabilities: float32[] = Array.zeroCreate Constants.chunkWidth
+
+  for x = 0 to Constants.chunkWidth - 1 do
+    let globalX = startX + x
+
+    let prevHeight =
+      if globalX = 0 then
+        None
+      else
+        Some(getGlobalGroundHeight(globalX - 1, seed))
+
+    groundHeights.[x] <- generateGroundHeight(globalX, chunkX, pattern, seed, prevHeight)
+    gapProbabilities.[x] <- SimpleNoise.noise2d(globalX, chunkX + 100, seed)
 
   let chunk =
     LayeredGrid2D.create
@@ -368,16 +510,8 @@ let generateChunk(chunkX: int, seed: int) : LayeredGrid2D<GridTile> =
     for x = 0 to Constants.chunkWidth - 1 do
       let globalX = startX + x
 
-      let prevHeight =
-        if globalX = 0 then
-          None
-        else
-          Some(getGlobalGroundHeight(globalX - 1, seed))
-
-      let groundHeight =
-        generateGroundHeight(globalX, chunkX, pattern, seed, prevHeight)
-
-      let gapProbability = SimpleNoise.noise2d(globalX, chunkX + 100, seed)
+      let groundHeight = groundHeights.[x]
+      let gapProbability = gapProbabilities.[x]
 
       // This is the "composition showcase":
       // - we create a sub-section for the current column
@@ -400,6 +534,42 @@ let generateChunk(chunkX: int, seed: int) : LayeredGrid2D<GridTile> =
             Terrain.floatingPlatforms globalX groundHeight seed
           | Cavernous ->
             Terrain.cavernous globalX groundHeight gapProbability theme seed
+
+        stamp columnSection)
+      |> ignore
+
+    section)
+  |> LayeredLayout.layer 1 (fun section ->
+    // Decoration layer: purely visual, varied, and driven by composable stamps.
+    for x = 0 to Constants.chunkWidth - 1 do
+      let globalX = startX + x
+      let groundHeight = groundHeights.[x]
+      let gapProbability = gapProbabilities.[x]
+
+      section
+      |> Layout.section x 0 (fun columnSection ->
+        // Compose small, name-driven placement behaviors.
+        let baseStamp =
+          Decorations.surfaceScatter globalX groundHeight theme seed
+          >> Decorations.surfaceProps globalX groundHeight seed
+
+        let stamp: Decorations.Stamp =
+          match pattern with
+          | FlatGround -> baseStamp
+          | RollingHills -> baseStamp >> Decorations.ladders globalX groundHeight seed
+          | Mountains ->
+            baseStamp
+            >> Decorations.hangingAccents globalX groundHeight seed
+            >> Decorations.caveAccents globalX groundHeight gapProbability seed
+          | FloatingPlatforms ->
+            // Airier: fewer surface props, more hanging accents.
+            Decorations.hangingAccents globalX groundHeight seed
+            >> Decorations.surfaceScatter globalX groundHeight theme seed
+          | Cavernous ->
+            Decorations.caveAccents globalX groundHeight gapProbability seed
+            >> Decorations.surfaceScatter globalX groundHeight theme seed
+          | StaircaseUp
+          | StaircaseDown -> baseStamp
 
         stamp columnSection)
       |> ignore
@@ -500,7 +670,10 @@ let createPlatformsFromChunks
 
     CellGrid2D.iter
       (fun x y tile ->
-        if tile.TileType <> TileType.Empty then
+        match tile.TileType with
+        | TileType.Ground
+        | TileType.Platform
+        | TileType.Hazard ->
           let pos = CellGrid2D.getWorldPos x y grid
 
           platforms.Add {
@@ -513,7 +686,9 @@ let createPlatformsFromChunks
               )
             Type = tile.TileType
             Variant = tile.Variant
-          })
+          }
+        | TileType.Empty
+        | TileType.Decoration -> ())
       grid
 
   platforms.ToArray()
@@ -573,7 +748,9 @@ let findGroundAt
       if result.IsNone then
         match CellGrid2D.get localX y grid with
         | ValueSome tile when
-          tile.TileType <> TileType.Empty && tile.TileType <> TileType.Hazard
+          tile.TileType <> TileType.Empty
+          && tile.TileType <> TileType.Hazard
+          && tile.TileType <> TileType.Decoration
           ->
           let pos = CellGrid2D.getWorldPos localX y grid
           result <- Some pos.Y
@@ -604,6 +781,7 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
     match model.Map.Chunks.TryFind cx with
     | Some chunk ->
       let (grid, _) = LayeredGrid2D.getOrAddLayer 0 chunk
+      let (decorations, _) = LayeredGrid2D.getOrAddLayer 1 chunk
 
       grid
       |> CellGrid2D.iterVisible viewBounds (fun x y tile ->
@@ -616,6 +794,7 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
           | TileType.Platform ->
             SpriteLoader.TileRegions.getPlatformVariant tile.Variant
           | TileType.Hazard -> SpriteLoader.TileRegions.getHazardTile()
+          | TileType.Decoration -> Rectangle.Empty
           | TileType.Empty -> Rectangle.Empty
 
         if rect <> Rectangle.Empty then
@@ -629,6 +808,27 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
             }
           )
           |> ignore)
+
+      // Draw decorations after the ground but below the player.
+      decorations
+      |> CellGrid2D.iterVisible viewBounds (fun x y tile ->
+        if tile.TileType = TileType.Decoration then
+          let pos = CellGrid2D.getWorldPos x y decorations
+
+          let rect =
+            SpriteLoader.TileRegions.getDecorationVariant(tile.Variant, model.TotalTime)
+
+          if rect <> Rectangle.Empty then
+            buffer.Sprite(
+              sprite {
+                texture model.TerrainAssets.GroundTile
+                sourceRect rect
+                at pos.X pos.Y
+                size Constants.tileSize Constants.tileSize
+                layer 1<RenderLayer>
+              }
+            )
+            |> ignore)
     | None -> ()
 
   for occluder in model.Map.Occluders do
