@@ -489,12 +489,17 @@ module internal Lighting2DInternalLogic =
 
   let calculateProjectionParams (camera: Camera) (viewport: Viewport) =
     let inv = Matrix.Invert(camera.View)
+
     let cw =
       Vector3.Transform(
-        Vector3(float32 viewport.Width * 0.5f, float32 viewport.Height * 0.5f, 0f),
+        Vector3(
+          float32 viewport.Width * 0.5f,
+          float32 viewport.Height * 0.5f,
+          0f
+        ),
         inv
       )
-    
+
     let corner = Vector3.Transform(Vector3.Zero, inv)
     let dist = Vector3.Distance(cw, corner)
 
@@ -575,7 +580,8 @@ module internal Lighting2DInternalLogic =
       Array.Fill(bufs.IndicesPoint, -1)
       Array.Fill(bufs.IndicesDirectional, -1)
 
-      let origin, projectionSize = calculateProjectionParams env.Camera env.Device.Viewport
+      let origin, projectionSize =
+        calculateProjectionParams env.Camera env.Device.Viewport
 
       for i = 0 to count - 1 do
         let entry = bufs.Casters.[i]
@@ -788,7 +794,9 @@ module internal Lighting2DInternalLogic =
 
         fx.SafeSetParam("ShadowBias", (sCfg.ShadowBias: float32))
 
-        let _, projectionSize = calculateProjectionParams env.Camera env.Device.Viewport
+        let _, projectionSize =
+          calculateProjectionParams env.Camera env.Device.Viewport
+
         fx.SafeSetParam("ProjectionSize", projectionSize)
 
         let pc, dc =
@@ -1245,11 +1253,17 @@ module internal LightingProcessor =
           &b.DirShadowIndices
 
         RendererBuffers.ensureCapacity b.PointLights.Count &b.ScreenSpaceLights
-        
+
         // Ensure shadow mapping arrays can hold an entry for every light
         RendererBuffers.ensureCapacity b.PointLights.Count &b.ShadowIndicesPoint
-        RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.ShadowIndicesDirectional
-        RendererBuffers.ensureCapacity b.DirectionalLights.Count &b.DirShadowOrigins
+
+        RendererBuffers.ensureCapacity
+          b.DirectionalLights.Count
+          &b.ShadowIndicesDirectional
+
+        RendererBuffers.ensureCapacity
+          b.DirectionalLights.Count
+          &b.DirShadowOrigins
 
         let lBufsUpdated: LightingBuffers = {
           PointPositions = b.PointPositions

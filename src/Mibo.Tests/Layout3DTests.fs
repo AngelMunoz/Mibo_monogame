@@ -10,12 +10,17 @@ let tests =
     testList "CellGrid3D" [
       testCase "create initializes with ValueNone cells"
       <| fun _ ->
-        let grid = CellGrid3D.create 10 5 8 (Vector3(32f, 32f, 32f)) Vector3.Zero
+        let grid =
+          CellGrid3D.create 10 5 8 (Vector3(32f, 32f, 32f)) Vector3.Zero
 
         Expect.equal grid.Width 10 "Width should be 10"
         Expect.equal grid.Height 5 "Height should be 5"
         Expect.equal grid.Depth 8 "Depth should be 8"
-        Expect.equal grid.CellSize (Vector3(32f, 32f, 32f)) "CellSize should match"
+
+        Expect.equal
+          grid.CellSize
+          (Vector3(32f, 32f, 32f))
+          "CellSize should match"
 
         // All cells should be empty
         for x in 0..9 do
@@ -28,7 +33,8 @@ let tests =
 
       testCase "set and get roundtrip"
       <| fun _ ->
-        let grid = CellGrid3D.create 10 10 10 (Vector3(32f, 32f, 32f)) Vector3.Zero
+        let grid =
+          CellGrid3D.create 10 10 10 (Vector3(32f, 32f, 32f)) Vector3.Zero
 
         CellGrid3D.set 5 3 7 42 grid
 
@@ -78,7 +84,12 @@ let tests =
       testCase "getWorldPos calculates correct position"
       <| fun _ ->
         let grid =
-          CellGrid3D.create 10 10 10 (Vector3(32f, 16f, 8f)) (Vector3(100f, 50f, 25f))
+          CellGrid3D.create
+            10
+            10
+            10
+            (Vector3(32f, 16f, 8f))
+            (Vector3(100f, 50f, 25f))
 
         let pos = CellGrid3D.getWorldPos 3 2 4 grid
 
@@ -96,12 +107,21 @@ let tests =
         grid |> CellGrid3D.iter(fun x y z v -> visited.Add(struct (x, y, z, v)))
 
         Expect.equal visited.Count 2 "Should visit 2 cells"
-        Expect.contains visited (struct (1, 1, 1, 10)) "Should contain first cell"
-        Expect.contains visited (struct (3, 2, 4, 20)) "Should contain second cell"
+
+        Expect.contains
+          visited
+          (struct (1, 1, 1, 10))
+          "Should contain first cell"
+
+        Expect.contains
+          visited
+          (struct (3, 2, 4, 20))
+          "Should contain second cell"
 
       testCase "iterVolume visits only cells in bounds"
       <| fun _ ->
-        let grid = CellGrid3D.create 10 10 10 (Vector3(32f, 32f, 32f)) Vector3.Zero
+        let grid =
+          CellGrid3D.create 10 10 10 (Vector3(32f, 32f, 32f)) Vector3.Zero
         // Set cells throughout the grid
         for x in 0..9 do
           for y in 0..9 do
@@ -113,7 +133,10 @@ let tests =
         // This corresponds to grid cells X=[2, 3], Y=[1, 2], Z=[0, 1]
         let bounds = BoundingBox(Vector3(64f, 32f, 0f), Vector3(96f, 64f, 32f))
         let visited = ResizeArray<struct (int * int * int * int)>()
-        grid |> CellGrid3D.iterVolume bounds (fun x y z v -> visited.Add(struct (x, y, z, v)))
+
+        grid
+        |> CellGrid3D.iterVolume bounds (fun x y z v ->
+          visited.Add(struct (x, y, z, v)))
 
         Expect.equal visited.Count 8 "Should visit 2*2*2 = 8 cells"
         Expect.contains visited (struct (2, 1, 0, 210)) "Should contain (2,1,0)"
@@ -127,7 +150,10 @@ let tests =
           CellGrid3D.create 5 5 5 (Vector3(32f, 32f, 32f)) Vector3.Zero
           |> Layout3D.run(fun section -> section |> Layout3D.set 2 2 2 42)
 
-        Expect.equal (CellGrid3D.get 2 2 2 grid) (ValueSome 42) "Should set cell"
+        Expect.equal
+          (CellGrid3D.get 2 2 2 grid)
+          (ValueSome 42)
+          "Should set cell"
 
       testCase "fill creates cuboid volume"
       <| fun _ ->
@@ -156,8 +182,7 @@ let tests =
             section
             |> Layout3D.section 3 4 5 (fun inner ->
               inner |> Layout3D.set 0 0 0 42 // Should map to (3, 4, 5)
-            )
-          )
+            ))
 
         Expect.equal
           (CellGrid3D.get 3 4 5 grid)
@@ -175,10 +200,8 @@ let tests =
           CellGrid3D.create 10 10 10 (Vector3(32f, 32f, 32f)) Vector3.Zero
           |> Layout3D.run(fun section ->
             section
-            |> Layout3D.padding 2 (fun inner ->
-              inner |> Layout3D.set 0 0 0 42 // Should map to (2, 2, 2)
-            )
-          )
+            |> Layout3D.padding 2 (fun inner -> inner |> Layout3D.set 0 0 0 42 // Should map to (2, 2, 2)
+            ))
 
         Expect.equal
           (CellGrid3D.get 2 2 2 grid)
@@ -193,8 +216,7 @@ let tests =
             section
             |> Layout3D.paddingEx 1 2 3 4 5 6 (fun inner ->
               inner |> Layout3D.set 0 0 0 42 // Should map to (1, 2, 3)
-            )
-          )
+            ))
 
         Expect.equal
           (CellGrid3D.get 1 2 3 grid)
@@ -209,8 +231,7 @@ let tests =
             section
             |> Layout3D.center 4 4 4 (fun inner ->
               inner |> Layout3D.set 0 0 0 42 // Should map to (3, 3, 3)
-            )
-          )
+            ))
 
         // Center of 10x10x10 with 4x4x4 block = offset (3,3,3)
         Expect.equal
@@ -342,7 +363,10 @@ let tests =
           |> Layout3D.run(Layout3D.repeatX 2 1 3 5 7)
 
         for x in 2..6 do
-          Expect.equal (CellGrid3D.get x 1 3 grid) (ValueSome 7) $"Cell ({x},1,3)"
+          Expect.equal
+            (CellGrid3D.get x 1 3 grid)
+            (ValueSome 7)
+            $"Cell ({x},1,3)"
 
         Expect.equal (CellGrid3D.get 1 1 3 grid) ValueNone "Before start"
         Expect.equal (CellGrid3D.get 7 1 3 grid) ValueNone "After end"
@@ -354,7 +378,10 @@ let tests =
           |> Layout3D.run(Layout3D.repeatY 1 2 3 4 8)
 
         for y in 2..5 do
-          Expect.equal (CellGrid3D.get 1 y 3 grid) (ValueSome 8) $"Cell (1,{y},3)"
+          Expect.equal
+            (CellGrid3D.get 1 y 3 grid)
+            (ValueSome 8)
+            $"Cell (1,{y},3)"
 
       testCase "repeatZ creates line along Z"
       <| fun _ ->
@@ -363,7 +390,10 @@ let tests =
           |> Layout3D.run(Layout3D.repeatZ 1 2 3 4 9)
 
         for z in 3..6 do
-          Expect.equal (CellGrid3D.get 1 2 z grid) (ValueSome 9) $"Cell (1,2,{z})"
+          Expect.equal
+            (CellGrid3D.get 1 2 z grid)
+            (ValueSome 9)
+            $"Cell (1,2,{z})"
 
       testCase "column creates vertical column"
       <| fun _ ->
@@ -372,7 +402,10 @@ let tests =
           |> Layout3D.run(Layout3D.column 2 1 3 4 5)
 
         for y in 1..4 do
-          Expect.equal (CellGrid3D.get 2 y 3 grid) (ValueSome 5) $"Column at (2,{y},3)"
+          Expect.equal
+            (CellGrid3D.get 2 y 3 grid)
+            (ValueSome 5)
+            $"Column at (2,{y},3)"
     ]
 
     testList "Layout3D Geometry" [
@@ -384,7 +417,10 @@ let tests =
 
         // Horizontal line along X
         for x in 1..5 do
-          Expect.equal (CellGrid3D.get x 2 3 grid) (ValueSome 1) $"Line at ({x},2,3)"
+          Expect.equal
+            (CellGrid3D.get x 2 3 grid)
+            (ValueSome 1)
+            $"Line at ({x},2,3)"
 
       testCase "line draws diagonal 3D line"
       <| fun _ ->
@@ -406,7 +442,10 @@ let tests =
           |> Layout3D.run(Layout3D.sphere 10 10 10 3 true 1)
 
         // Center should be filled
-        Expect.equal (CellGrid3D.get 10 10 10 grid) (ValueSome 1) "Center filled"
+        Expect.equal
+          (CellGrid3D.get 10 10 10 grid)
+          (ValueSome 1)
+          "Center filled"
         // Near center should be filled
         Expect.equal (CellGrid3D.get 9 10 10 grid) (ValueSome 1) "Near center"
         Expect.equal (CellGrid3D.get 10 9 10 grid) (ValueSome 1) "Near center"
@@ -424,7 +463,10 @@ let tests =
         // Center should be empty for outline
         Expect.equal (CellGrid3D.get 10 10 10 grid) ValueNone "Center empty"
         // Surface should have content
-        Expect.equal (CellGrid3D.get 13 10 10 grid) (ValueSome 1) "Surface point"
+        Expect.equal
+          (CellGrid3D.get 13 10 10 grid)
+          (ValueSome 1)
+          "Surface point"
 
       testCase "cylinder creates vertical cylinder"
       <| fun _ ->
@@ -452,9 +494,20 @@ let tests =
           )
 
         // Check values within the generated volume
-        Expect.equal (CellGrid3D.get 1 1 1 grid) (ValueSome 111) "Generated value at (1,1,1)"
-        Expect.equal (CellGrid3D.get 2 2 2 grid) (ValueSome 222) "Generated value at (2,2,2)"
-        Expect.equal (CellGrid3D.get 3 3 3 grid) (ValueSome 333) "Generated value at (3,3,3)"
+        Expect.equal
+          (CellGrid3D.get 1 1 1 grid)
+          (ValueSome 111)
+          "Generated value at (1,1,1)"
+
+        Expect.equal
+          (CellGrid3D.get 2 2 2 grid)
+          (ValueSome 222)
+          "Generated value at (2,2,2)"
+
+        Expect.equal
+          (CellGrid3D.get 3 3 3 grid)
+          (ValueSome 333)
+          "Generated value at (3,3,3)"
         // Outside generation should be empty
         Expect.equal (CellGrid3D.get 0 0 0 grid) ValueNone "Outside generation"
 
@@ -495,13 +548,19 @@ let tests =
             |> Layout3D.set 2 2 2 20
             |> Layout3D.iter 0 0 0 3 3 3 (fun x y z v ->
               match v with
-              | ValueSome value -> CellGrid3D.set x y z (value * 2) section.BackingGrid
-              | ValueNone -> ()
-            )
-          )
+              | ValueSome value ->
+                CellGrid3D.set x y z (value * 2) section.BackingGrid
+              | ValueNone -> ()))
 
-        Expect.equal (CellGrid3D.get 1 1 1 grid) (ValueSome 20) "Iterated and doubled"
-        Expect.equal (CellGrid3D.get 2 2 2 grid) (ValueSome 40) "Iterated and doubled"
+        Expect.equal
+          (CellGrid3D.get 1 1 1 grid)
+          (ValueSome 20)
+          "Iterated and doubled"
+
+        Expect.equal
+          (CellGrid3D.get 2 2 2 grid)
+          (ValueSome 40)
+          "Iterated and doubled"
 
       testCase "map transforms existing content"
       <| fun _ ->
@@ -511,8 +570,7 @@ let tests =
             section
             |> Layout3D.set 1 1 1 10
             |> Layout3D.set 2 2 2 20
-            |> Layout3D.map 0 0 0 3 3 3 ((*) 2)
-          )
+            |> Layout3D.map 0 0 0 3 3 3 ((*) 2))
 
         Expect.equal (CellGrid3D.get 1 1 1 grid) (ValueSome 20) "Mapped value"
         Expect.equal (CellGrid3D.get 2 2 2 grid) (ValueSome 40) "Mapped value"
@@ -526,8 +584,7 @@ let tests =
             |> Layout3D.set 1 1 1 1
             |> Layout3D.set 2 2 2 1
             |> Layout3D.set 3 3 3 2
-            |> Layout3D.replace 1 99
-          )
+            |> Layout3D.replace 1 99)
 
         Expect.equal (CellGrid3D.get 1 1 1 grid) (ValueSome 99) "Replaced"
         Expect.equal (CellGrid3D.get 2 2 2 grid) (ValueSome 99) "Replaced"
@@ -659,17 +716,38 @@ let tests =
             // Room with height 6 to ensure doorway fits within walls (Y=0..5)
             |> Interior.room 5 6 5 1 2 3
             // Doorway with width=2, height=3 clears Y=1,2,3 at centered X position
-            |> Layout3D.section 0 0 0 (Interior.doorway Interior.DoorSide.South 2 3)
-          )
+            |> Layout3D.section
+              0
+              0
+              0
+              (Interior.doorway Interior.DoorSide.South 2 3))
 
         // Doorway on South wall (Z=0) should be cleared at Y=1,2,3
         // startX = (5-2)/2 = 1, so doorway clears X=1,2 at Y=1,2,3
-        Expect.equal (CellGrid3D.get 1 1 0 grid) ValueNone "Doorway cleared at (1,1,0)"
-        Expect.equal (CellGrid3D.get 2 1 0 grid) ValueNone "Doorway cleared at (2,1,0)"
-        Expect.equal (CellGrid3D.get 1 2 0 grid) ValueNone "Doorway cleared at (1,2,0)"
-        Expect.equal (CellGrid3D.get 2 3 0 grid) ValueNone "Doorway cleared at (2,3,0)"
+        Expect.equal
+          (CellGrid3D.get 1 1 0 grid)
+          ValueNone
+          "Doorway cleared at (1,1,0)"
+
+        Expect.equal
+          (CellGrid3D.get 2 1 0 grid)
+          ValueNone
+          "Doorway cleared at (2,1,0)"
+
+        Expect.equal
+          (CellGrid3D.get 1 2 0 grid)
+          ValueNone
+          "Doorway cleared at (1,2,0)"
+
+        Expect.equal
+          (CellGrid3D.get 2 3 0 grid)
+          ValueNone
+          "Doorway cleared at (2,3,0)"
         // Wall beside doorway should remain
-        Expect.equal (CellGrid3D.get 0 2 0 grid) (ValueSome 2) "Wall beside door"
+        Expect.equal
+          (CellGrid3D.get 0 2 0 grid)
+          (ValueSome 2)
+          "Wall beside door"
 
       testCase "stairs creates staircase"
       <| fun _ ->
@@ -717,14 +795,32 @@ let tests =
             |> Interior.room 5 6 5 1 2 3
             // Window on East wall at X=4: sillHeight=2, windowWidth=2, windowHeight=2
             // startZ = (5-2)/2 = 1, so clears Z=1,2 at Y=2,3
-            |> Layout3D.section 0 0 0 (Interior.window Interior.DoorSide.East 2 2 2)
-          )
+            |> Layout3D.section
+              0
+              0
+              0
+              (Interior.window Interior.DoorSide.East 2 2 2))
 
         // Window clears Y=2 and Y=3 at Z=1 and Z=2
-        Expect.equal (CellGrid3D.get 4 2 1 grid) ValueNone "Window cleared at (4,2,1)"
-        Expect.equal (CellGrid3D.get 4 2 2 grid) ValueNone "Window cleared at (4,2,2)"
-        Expect.equal (CellGrid3D.get 4 3 1 grid) ValueNone "Window cleared at (4,3,1)"
-        Expect.equal (CellGrid3D.get 4 3 2 grid) ValueNone "Window cleared at (4,3,2)"
+        Expect.equal
+          (CellGrid3D.get 4 2 1 grid)
+          ValueNone
+          "Window cleared at (4,2,1)"
+
+        Expect.equal
+          (CellGrid3D.get 4 2 2 grid)
+          ValueNone
+          "Window cleared at (4,2,2)"
+
+        Expect.equal
+          (CellGrid3D.get 4 3 1 grid)
+          ValueNone
+          "Window cleared at (4,3,1)"
+
+        Expect.equal
+          (CellGrid3D.get 4 3 2 grid)
+          ValueNone
+          "Window cleared at (4,3,2)"
         // Wall below and above window should remain
         Expect.equal (CellGrid3D.get 4 1 1 grid) (ValueSome 2) "Wall below"
         Expect.equal (CellGrid3D.get 4 4 1 grid) (ValueSome 2) "Wall above"
@@ -764,15 +860,16 @@ let tests =
         let grid =
           CellGrid3D.create 10 10 10 (Vector3(32f, 32f, 32f)) Vector3.Zero
           |> Layout3D.run(fun section ->
-            section
-            |> Layout3D.fill 0 0 0 5 5 5 1
-            |> Terrain.pit 3 3 2)
+            section |> Layout3D.fill 0 0 0 5 5 5 1 |> Terrain.pit 3 3 2)
 
         // Pit area cleared
         for x in 0..2 do
           for z in 0..2 do
             for y in 0..1 do
-              Expect.equal (CellGrid3D.get x y z grid) ValueNone $"Pit at ({x},{y},{z})"
+              Expect.equal
+                (CellGrid3D.get x y z grid)
+                ValueNone
+                $"Pit at ({x},{y},{z})"
 
         Expect.equal (CellGrid3D.get 3 0 0 grid) (ValueSome 1) "Outside pit"
 
@@ -800,14 +897,18 @@ let tests =
 
       testCase "path creates path between waypoints"
       <| fun _ ->
-        let points = [(0, 0, 0); (3, 0, 0)]
+        let points = [ (0, 0, 0); (3, 0, 0) ]
+
         let grid =
           CellGrid3D.create 10 5 10 (Vector3(32f, 32f, 32f)) Vector3.Zero
           |> Layout3D.run(Terrain.path points 1 1)
 
         // Line from (0,0,0) to (3,0,0)
         for x in 0..3 do
-          Expect.equal (CellGrid3D.get x 0 0 grid) (ValueSome 1) $"Path at ({x},0,0)"
+          Expect.equal
+            (CellGrid3D.get x 0 0 grid)
+            (ValueSome 1)
+            $"Path at ({x},0,0)"
 
       testCase "scatter places items randomly on ground"
       <| fun _ ->
@@ -824,7 +925,8 @@ let tests =
         Expect.isTrue (count <= 15) "Should not exceed requested count"
 
         // All should be at Y=0
-        grid |> CellGrid3D.iter(fun x y z _ ->
+        grid
+        |> CellGrid3D.iter(fun x y z _ ->
           Expect.equal y 0 $"Item at ({x},{y},{z}) should be at ground level")
 
       testCase "heightmap generates terrain from height function"
@@ -834,10 +936,25 @@ let tests =
           |> Layout3D.run(Terrain.heightmap (fun x z -> x + z) 1)
 
         // Height increases with x+z
-        Expect.equal (CellGrid3D.get 0 0 0 grid) (ValueSome 1) "Height 0 at (0,0)"
-        Expect.equal (CellGrid3D.get 1 1 0 grid) (ValueSome 1) "Height 1 at (1,0)"
-        Expect.equal (CellGrid3D.get 2 2 0 grid) (ValueSome 1) "Height 2 at (2,0)"
-        Expect.equal (CellGrid3D.get 1 0 1 grid) (ValueSome 1) "Height 1+1=2 at (1,1)"
+        Expect.equal
+          (CellGrid3D.get 0 0 0 grid)
+          (ValueSome 1)
+          "Height 0 at (0,0)"
+
+        Expect.equal
+          (CellGrid3D.get 1 1 0 grid)
+          (ValueSome 1)
+          "Height 1 at (1,0)"
+
+        Expect.equal
+          (CellGrid3D.get 2 2 0 grid)
+          (ValueSome 1)
+          "Height 2 at (2,0)"
+
+        Expect.equal
+          (CellGrid3D.get 1 0 1 grid)
+          (ValueSome 1)
+          "Height 1+1=2 at (1,1)"
         // Above height should be empty
         Expect.equal (CellGrid3D.get 0 1 0 grid) ValueNone "Above terrain empty"
 
@@ -852,14 +969,30 @@ let tests =
           |> Layout3D.run(Terrain.layeredHeightmap (fun x z -> 4) 1 2 2 3)
 
         // Top layer at height 4
-        Expect.equal (CellGrid3D.get 2 4 2 grid) (ValueSome 1) "Top layer at Y=4"
+        Expect.equal
+          (CellGrid3D.get 2 4 2 grid)
+          (ValueSome 1)
+          "Top layer at Y=4"
         // Middle layer: Y=3 and Y=2 (since y > h-midDepth means y > 2)
-        Expect.equal (CellGrid3D.get 2 3 2 grid) (ValueSome 2) "Middle layer at Y=3"
+        Expect.equal
+          (CellGrid3D.get 2 3 2 grid)
+          (ValueSome 2)
+          "Middle layer at Y=3"
         // Y=2: y > 2 is false, so it should be bottom layer (y=2 is NOT > 2)
-        Expect.equal (CellGrid3D.get 2 2 2 grid) (ValueSome 3) "Bottom layer at Y=2"
+        Expect.equal
+          (CellGrid3D.get 2 2 2 grid)
+          (ValueSome 3)
+          "Bottom layer at Y=2"
         // Bottom layer: Y=1 and Y=0
-        Expect.equal (CellGrid3D.get 2 1 2 grid) (ValueSome 3) "Bottom layer at Y=1"
-        Expect.equal (CellGrid3D.get 2 0 2 grid) (ValueSome 3) "Bottom layer at Y=0"
+        Expect.equal
+          (CellGrid3D.get 2 1 2 grid)
+          (ValueSome 3)
+          "Bottom layer at Y=1"
+
+        Expect.equal
+          (CellGrid3D.get 2 0 2 grid)
+          (ValueSome 3)
+          "Bottom layer at Y=0"
     ]
 
     testList "CellGridRenderer3D" [
@@ -868,12 +1001,10 @@ let tests =
         let grid =
           CellGrid3D.create 5 5 5 (Vector3(32f, 32f, 32f)) Vector3.Zero
           |> Layout3D.run(fun section ->
-            section
-            |> Layout3D.set 1 1 1 10
-            |> Layout3D.set 2 2 2 20
-          )
+            section |> Layout3D.set 1 1 1 10 |> Layout3D.set 2 2 2 20)
 
         let visited = ResizeArray<struct (Vector3 * int)>()
+
         CellGridRenderer3D.render grid (fun pos value ->
           visited.Add(struct (pos, value)))
 
@@ -902,6 +1033,7 @@ let tests =
         // Bounds: [64, 96] in each dimension = cells [2, 3] in each dimension = 2*2*2=8 cells
         let bounds = BoundingBox(Vector3(64f, 64f, 64f), Vector3(96f, 96f, 96f))
         let visited = ResizeArray<Vector3>()
+
         CellGridRenderer3D.renderVolume bounds grid (fun pos _ ->
           visited.Add(pos))
 
@@ -914,6 +1046,7 @@ let tests =
 
         let mutable capturedX, capturedY, capturedZ = 0, 0, 0
         let mutable capturedPos = Vector3.Zero
+
         CellGridRenderer3D.renderWithIndices grid (fun x y z pos _ ->
           capturedX <- x
           capturedY <- y

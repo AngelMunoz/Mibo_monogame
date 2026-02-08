@@ -49,7 +49,8 @@ type RenderBuffer<'Key, 'Cmd when 'Key: comparison>
   let sortComparer =
     { new IComparer<struct ('Key * 'Cmd)> with
         member _.Compare(struct (k1, _), struct (k2, _)) =
-          keyComparer.Compare(k1, k2) }
+          keyComparer.Compare(k1, k2)
+    }
 
   let ensureCapacity(needed: int) =
     if count + needed > items.Length then

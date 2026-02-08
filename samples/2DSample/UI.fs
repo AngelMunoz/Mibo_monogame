@@ -58,7 +58,10 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   buffer.Text(
     text {
       font uiFont
-      content $"Tiles: {TerrainStats.totalTiles model.Map.Chunks} | Platforms: {model.Platforms.Length}"
+
+      content
+        $"Tiles: {TerrainStats.totalTiles model.Map.Chunks} | Platforms: {model.Platforms.Length}"
+
       at 10.0f 70.0f
       color Color.White
       layer 100<RenderLayer>

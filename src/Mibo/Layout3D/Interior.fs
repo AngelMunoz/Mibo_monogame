@@ -299,7 +299,17 @@ module Interior =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    Layout3D.scatterEdges 0 0 0 section.Width section.Height section.Depth count seed content
+    Layout3D.scatterEdges
+      0
+      0
+      0
+      section.Width
+      section.Height
+      section.Depth
+      count
+      seed
+      content
+      section
 
   /// <summary>
   /// Non-destructively decorates existing surfaces by replacing a percentage of tiles.

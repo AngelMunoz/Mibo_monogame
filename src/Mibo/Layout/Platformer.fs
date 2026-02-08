@@ -172,7 +172,15 @@ module Platformer =
     content
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
-    Layout.scatterBorder 0 0 section.Width section.Height count seed content section
+    Layout.scatterBorder
+      0
+      0
+      section.Width
+      section.Height
+      count
+      seed
+      content
+      section
 
   /// <summary>
   /// Non-destructively decorates existing surfaces by replacing a percentage of tiles.

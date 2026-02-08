@@ -94,6 +94,7 @@ module Layout =
     : GridSection2D<'T> =
     let x = max 0 (min parent.Width x)
     let y = max 0 (min parent.Height y)
+
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + x
@@ -115,6 +116,7 @@ module Layout =
     (parent: GridSection2D<'T>)
     : GridSection2D<'T> =
     let n = max 0 n
+
     if n = 0 then
       f parent |> ignore
       parent
@@ -145,6 +147,7 @@ module Layout =
     let top = max 0 top
     let right = max 0 right
     let bottom = max 0 bottom
+
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + left
@@ -851,16 +854,16 @@ module Layout =
     count
     seed
     ([<InlineIfLambda>] stamp: GridSection2D<'T> -> GridSection2D<'T>)
-    (section: GridSection2D<'T>)
+    (section': GridSection2D<'T>)
     : GridSection2D<'T> =
     let rng = System.Random(seed)
 
     for _ in 1..count do
-      let x = rng.Next(0, section.Width)
-      let y = rng.Next(0, section.Height)
-      section |> Layout.section x y stamp |> ignore
+      let x = rng.Next(0, section'.Width)
+      let y = rng.Next(0, section'.Height)
+      section' |> section x y stamp |> ignore
 
-    section
+    section'
 
   /// <summary>
   /// Sets a cell only if it is currently empty (ValueNone).

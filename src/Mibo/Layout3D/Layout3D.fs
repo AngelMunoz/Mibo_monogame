@@ -131,6 +131,7 @@ module Layout3D =
     let x = max 0 (min parent.Width x)
     let y = max 0 (min parent.Height y)
     let z = max 0 (min parent.Depth z)
+
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + x
@@ -153,6 +154,7 @@ module Layout3D =
     (parent: GridSection3D<'T>)
     : GridSection3D<'T> =
     let n = max 0 n
+
     if n = 0 then
       f parent |> ignore
       parent
@@ -190,6 +192,7 @@ module Layout3D =
     let right = max 0 right
     let top = max 0 top
     let front = max 0 front
+
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + left
@@ -538,7 +541,8 @@ module Layout3D =
       | 4 -> setLocal x (y + rng.Next(0, h)) z content section
       | 5 -> setLocal (x + w - 1) (y + rng.Next(0, h)) z content section
       | 6 -> setLocal x (y + rng.Next(0, h)) (z + d - 1) content section
-      | 7 -> setLocal (x + w - 1) (y + rng.Next(0, h)) (z + d - 1) content section
+      | 7 ->
+        setLocal (x + w - 1) (y + rng.Next(0, h)) (z + d - 1) content section
       // 4 edges along Z axis
       | 8 -> setLocal x y (z + rng.Next(0, d)) content section
       | 9 -> setLocal (x + w - 1) y (z + rng.Next(0, d)) content section
@@ -955,7 +959,8 @@ module Layout3D =
       let face = rng.Next(0, 6)
 
       match face with
-      | 0 -> setLocal (x + rng.Next(0, w)) y (z + rng.Next(0, d)) content section // Bottom
+      | 0 ->
+        setLocal (x + rng.Next(0, w)) y (z + rng.Next(0, d)) content section // Bottom
       | 1 ->
         setLocal
           (x + rng.Next(0, w))
@@ -963,7 +968,8 @@ module Layout3D =
           (z + rng.Next(0, d))
           content
           section // Top
-      | 2 -> setLocal x (y + rng.Next(0, h)) (z + rng.Next(0, d)) content section // West
+      | 2 ->
+        setLocal x (y + rng.Next(0, h)) (z + rng.Next(0, d)) content section // West
       | 3 ->
         setLocal
           (x + w - 1)
@@ -971,7 +977,8 @@ module Layout3D =
           (z + rng.Next(0, d))
           content
           section // East
-      | 4 -> setLocal (x + rng.Next(0, w)) (y + rng.Next(0, h)) z content section // South
+      | 4 ->
+        setLocal (x + rng.Next(0, w)) (y + rng.Next(0, h)) z content section // South
       | 5 ->
         setLocal
           (x + rng.Next(0, w))
@@ -1075,16 +1082,26 @@ module Layout3D =
   /// <summary>
   /// Applies a checkerboard pattern to the 6 outer faces of a cuboid.
   /// </summary>
-  let checkerShell x y z w h d odd even (section: GridSection3D<'T>) : GridSection3D<'T> =
-    section
+  let checkerShell
+    x
+    y
+    z
+    w
+    h
+    d
+    odd
+    even
+    (section': GridSection3D<'T>)
+    : GridSection3D<'T> =
+    section'
     |> section x y z (fun s ->
-        s
-        |> checkerXZ 0 odd even
-        |> checkerXZ (h - 1) odd even
-        |> checkerXY 0 odd even
-        |> checkerXY (d - 1) odd even
-        |> checkerYZ 0 odd even
-        |> checkerYZ (w - 1) odd even)
+      s
+      |> checkerXZ 0 odd even
+      |> checkerXZ (h - 1) odd even
+      |> checkerXY 0 odd even
+      |> checkerXY (d - 1) odd even
+      |> checkerYZ 0 odd even
+      |> checkerYZ (w - 1) odd even)
 
   /// <summary>
   /// Generates content for an XZ plane using a generator function.
@@ -1155,7 +1172,8 @@ module Layout3D =
         let zOffset = (startZ + fz) * wh
 
         for fy in 0 .. section.Height - 1 do
-          grid.Cells.[zOffset + (startY + fy) * gw + gx] <- ValueSome(generator fy fz)
+          grid.Cells.[zOffset + (startY + fy) * gw + gx] <-
+            ValueSome(generator fy fz)
 
     section
 
@@ -1320,17 +1338,17 @@ module Layout3D =
     count
     seed
     ([<InlineIfLambda>] stamp: GridSection3D<'T> -> GridSection3D<'T>)
-    (section: GridSection3D<'T>)
+    (section': GridSection3D<'T>)
     : GridSection3D<'T> =
     let rng = System.Random(seed)
 
     for _ in 1..count do
-      let x = rng.Next(0, section.Width)
-      let y = rng.Next(0, section.Height)
-      let z = rng.Next(0, section.Depth)
-      section |> Layout3D.section x y z stamp |> ignore
+      let x = rng.Next(0, section'.Width)
+      let y = rng.Next(0, section'.Height)
+      let z = rng.Next(0, section'.Depth)
+      section' |> section x y z stamp |> ignore
 
-    section
+    section'
 
   /// <summary>
   /// Sets a cell only if it is currently empty (ValueNone).

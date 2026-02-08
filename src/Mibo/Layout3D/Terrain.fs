@@ -253,7 +253,10 @@ module Terrain =
         let (x2, y2, z2) = points.[i + 1]
         // Partition the count roughly between segments based on distance (or just distribute)
         let segCount = max 1 (count / (points.Length - 1))
-        section |> Layout3D.scatterLine x1 y1 z1 x2 y2 z2 segCount (rng.Next()) content |> ignore
+
+        section
+        |> Layout3D.scatterLine x1 y1 z1 x2 y2 z2 segCount (rng.Next()) content
+        |> ignore
 
       section
 
