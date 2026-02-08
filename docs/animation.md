@@ -1,6 +1,7 @@
 ---
 title: Animation
 category: Amenities
+categoryindex: 5
 index: 22
 ---
 

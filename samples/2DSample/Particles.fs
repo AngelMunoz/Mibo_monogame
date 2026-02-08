@@ -97,6 +97,6 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
       model.TerrainAssets.ParticleEffect,
       pStates,
       pStates.Length,
-      0<RenderLayer>
+      3<RenderLayer>
     )
     |> ignore

@@ -46,7 +46,7 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   buffer.Text(
     text {
       font uiFont
-      content $"Chunk: {Terrain.worldXToChunkX model.PlayerPosition.X}"
+      content $"Chunk: {Helpers.worldXToChunkX model.PlayerPosition.X}"
       at 10.0f 50.0f
       color Color.White
       layer 100<RenderLayer>
@@ -58,7 +58,7 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   buffer.Text(
     text {
       font uiFont
-      content $"Tiles: {model.Map.Tiles.Length}"
+      content $"Tiles: {TerrainStats.totalTiles model.Map.Chunks} | Platforms: {model.Platforms.Length}"
       at 10.0f 70.0f
       color Color.White
       layer 100<RenderLayer>

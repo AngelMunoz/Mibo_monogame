@@ -266,6 +266,181 @@ module TileRegions =
   let getHazardTile() : Rectangle = Rectangle(715, 0, 64, 64) // block_spikes
 
   // ─────────────────────────────────────────────────────────────
+  // Decorations (layered, non-collidable)
+  // Coordinates from spritesheet-tiles-default.xml
+  // ─────────────────────────────────────────────────────────────
+
+  module DecorationVariants =
+    // Natural / surface clutter
+    [<Literal>]
+    let Grass = 0
+
+    [<Literal>]
+    let GrassPurple = 1
+
+    [<Literal>]
+    let Bush = 2
+
+    [<Literal>]
+    let Cactus = 3
+
+    [<Literal>]
+    let MushroomBrown = 4
+
+    [<Literal>]
+    let MushroomRed = 5
+
+    [<Literal>]
+    let Rock = 6
+
+    // Small props
+    [<Literal>]
+    let Fence = 7
+
+    [<Literal>]
+    let FenceBroken = 8
+
+    [<Literal>]
+    let Sign = 9
+
+    [<Literal>]
+    let SignExit = 10
+
+    [<Literal>]
+    let SignLeft = 11
+
+    [<Literal>]
+    let SignRight = 12
+
+    // Background-y props
+    [<Literal>]
+    let Window = 13
+
+    [<Literal>]
+    let Hill = 14
+
+    [<Literal>]
+    let HillTop = 15
+
+    [<Literal>]
+    let HillTopSmile = 16
+
+    // Vertical / hanging
+    [<Literal>]
+    let LadderBottom = 17
+
+    [<Literal>]
+    let LadderMiddle = 18
+
+    [<Literal>]
+    let LadderTop = 19
+
+    [<Literal>]
+    let Rope = 20
+
+    [<Literal>]
+    let Chain = 21
+
+    // Sparkly accents
+    [<Literal>]
+    let GemBlue = 22
+
+    [<Literal>]
+    let GemGreen = 23
+
+    [<Literal>]
+    let GemRed = 24
+
+    [<Literal>]
+    let GemYellow = 25
+
+    // Animated (special-cased by renderer)
+    [<Literal>]
+    let Torch = -1
+
+    let surfaceClutter: int[] = [|
+      Grass
+      GrassPurple
+      Bush
+      Cactus
+      MushroomBrown
+      MushroomRed
+      Rock
+    |]
+
+    let surfaceProps: int[] = [|
+      Fence
+      FenceBroken
+      Sign
+      SignExit
+      SignLeft
+      SignRight
+    |]
+
+    let hanging: int[] = [| Rope; Chain |]
+
+    let sparkles: int[] = [| GemBlue; GemGreen; GemRed; GemYellow |]
+
+  let private decorationRects: Rectangle[] = [|
+    // 0..6: surface clutter
+    Rectangle(455, 195, 64, 64) // grass
+    Rectangle(520, 195, 64, 64) // grass_purple
+    Rectangle(845, 65, 64, 64) // bush
+    Rectangle(910, 65, 64, 64) // cactus
+    Rectangle(390, 390, 64, 64) // mushroom_brown
+    Rectangle(455, 390, 64, 64) // mushroom_red
+    Rectangle(585, 390, 64, 64) // rock
+
+    // 7..12: surface props
+    Rectangle(585, 130, 64, 64) // fence
+    Rectangle(650, 130, 64, 64) // fence_broken
+    Rectangle(845, 390, 64, 64) // sign
+    Rectangle(910, 390, 64, 64) // sign_exit
+    Rectangle(975, 390, 64, 64) // sign_left
+    Rectangle(1040, 390, 64, 64) // sign_right
+
+    // 13..16: background-y props
+    Rectangle(455, 1105, 64, 64) // window
+    Rectangle(650, 195, 64, 64) // hill
+    Rectangle(715, 195, 64, 64) // hill_top
+    Rectangle(780, 195, 64, 64) // hill_top_smile
+
+    // 17..21: vertical / hanging
+    Rectangle(715, 325, 64, 64) // ladder_bottom
+    Rectangle(780, 325, 64, 64) // ladder_middle
+    Rectangle(845, 325, 64, 64) // ladder_top
+    Rectangle(715, 390, 64, 64) // rope
+    Rectangle(975, 65, 64, 64) // chain
+
+    // 22..25: sparkles
+    Rectangle(195, 195, 64, 64) // gem_blue
+    Rectangle(260, 195, 64, 64) // gem_green
+    Rectangle(325, 195, 64, 64) // gem_red
+    Rectangle(390, 195, 64, 64) // gem_yellow
+  |]
+
+  let private torchOnA = Rectangle(65, 1105, 64, 64)
+  let private torchOnB = Rectangle(130, 1105, 64, 64)
+  let private torchOff = Rectangle(0, 1105, 64, 64)
+
+  /// Get the source rectangle for a decoration tile.
+  ///
+  /// Note: some variants are special-cased (e.g. animated torch).
+  let getDecorationVariant
+    (variant: int, totalTimeSeconds: float32)
+    : Rectangle =
+    if variant = DecorationVariants.Torch then
+      // Cheap "animation" without keeping per-tile state.
+      // 8 FPS flicker between A/B frames.
+      let frame = int(totalTimeSeconds * 8.0f) &&& 1
+      if frame = 0 then torchOnA else torchOnB
+    elif variant < 0 then
+      // Unknown negative variants: default to off.
+      torchOff
+    else
+      decorationRects.[variant % decorationRects.Length]
+
+  // ─────────────────────────────────────────────────────────────
   // Asset Loading Utilities
   // ─────────────────────────────────────────────────────────────
 

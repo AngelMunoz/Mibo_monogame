@@ -1,7 +1,8 @@
 ---
 title: Scaling Mibo
 category: Architecture
-index: 4
+categoryindex: 1
+index: 5
 ---
 
 # Scaling Mibo (Simple → Complex)

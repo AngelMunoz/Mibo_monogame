@@ -9,6 +9,7 @@ open Mibo.Animation
 open Mibo.Elmish
 open Mibo.Elmish.Graphics2D
 open Mibo.Elmish.Graphics2D.DSL
+open Mibo.Layout
 
 // ─────────────────────────────────────────────────────────────
 // Core Types
@@ -31,26 +32,24 @@ type TileType =
   | Empty
   | Ground
   | Platform
+  | Decoration
   | Hazard
 
-/// Individual terrain tile
+/// Lightweight tile data for storage in the Grid
 [<Struct>]
-type Tile = {
-  Position: Vector2
-  TileType: TileType
-  Variant: int // For sprite variation
-}
+type GridTile = { TileType: TileType; Variant: int }
 
-/// Structured map definition containing all static world data
+/// Structured map definition containing chunked grid data
 type GameMap = {
-  Tiles: Tile array
+  /// Active chunks keyed by Chunk X index
+  Chunks: Map<int, LayeredGrid2D<GridTile>>
   Occluders: Occluder2D array
   PointLights: PointLight2D array
 }
 
 module GameMap =
   let empty: GameMap = {
-    Tiles = [||]
+    Chunks = Map.empty
     Occluders = [||]
     PointLights = [||]
   }
@@ -94,6 +93,9 @@ module Constants =
   let tileSize = 64.0f
   let chunkWidth = 20 // Tiles per chunk
   let worldHeight = 12 // Total tiles high (12 * 64 = 768 pixels)
+
+  let chunkSize =
+    Vector2(float32 chunkWidth * tileSize, float32 worldHeight * tileSize)
 
 // ─────────────────────────────────────────────────────────────
 // Sprite Assets
@@ -171,13 +173,18 @@ module Helpers =
   /// Create a new entity ID
   let newEntityId() : Guid<EntityId> = Guid.NewGuid() |> UMX.tag<EntityId>
 
-  /// Convert world position to tile coordinates
-  let worldToTile(position: Vector2, tileSize: float32) : Point =
-    Point(int(position.X / tileSize), int(position.Y / tileSize))
+  /// Get the chunk X coordinate from a world X position
+  let worldXToChunkX(worldX: float32) : int =
+    // Use floor to correctly handle negative coordinates
+    int(floor(worldX / Constants.chunkSize.X))
 
-  /// Convert tile coordinates to world position (center of tile)
-  let tileToWorld(tile: Point, tileSize: float32) : Vector2 =
-    Vector2(float32 tile.X * tileSize, float32 tile.Y * tileSize)
+  /// Convert world position to a Chunk Index and Local Tile Index
+  let worldToChunkAndTile(position: Vector2) : int * Point =
+    let chunkX = worldXToChunkX position.X
+    let chunkOriginX = float32 chunkX * Constants.chunkSize.X
+    let localX = int((position.X - chunkOriginX) / Constants.tileSize)
+    let localY = int(position.Y / Constants.tileSize)
+    chunkX, Point(localX, localY)
 
   /// Check if a point is within screen bounds (for culling)
   let isVisible

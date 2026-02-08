@@ -116,7 +116,8 @@ let view
   // We want to align feet to Bottom-Center of collision box (Pos + (20, 54)).
   let drawPos = position + Vector2(20.0f, 54.0f)
 
-  AnimatedSprite.draw drawPos 0<RenderLayer> buffer sprite
+  // Keep the player above terrain/decorations.
+  AnimatedSprite.draw drawPos 2<RenderLayer> buffer sprite
 
 // ─────────────────────────────────────────────────────────────
 // Animation Utilities

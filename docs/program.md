@@ -1,6 +1,7 @@
 ---
 title: Programs & Composition
 category: Architecture
+categoryindex: 1
 index: 2
 ---
 

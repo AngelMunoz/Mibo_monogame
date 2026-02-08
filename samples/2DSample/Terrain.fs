@@ -2,6 +2,7 @@ module MiboSample.Terrain
 
 open System
 open Microsoft.Xna.Framework
+open Mibo.Layout
 open Mibo.Elmish
 open Mibo.Elmish.Graphics2D
 open Mibo.Elmish.Graphics2D.DSL
@@ -73,16 +74,19 @@ type TerrainPattern =
 
 /// Get terrain pattern for a chunk based on noise
 let getChunkPattern(chunkX: int, seed: int) : TerrainPattern =
-  let patternNoise = SimpleNoise.noise2d(chunkX, 0, seed)
+  if chunkX = 0 then
+    FlatGround // Force safe spawn area
+  else
+    let patternNoise = SimpleNoise.noise2d(chunkX, 0, seed)
 
-  match patternNoise with
-  | n when n < 0.15f -> FlatGround
-  | n when n < 0.35f -> RollingHills
-  | n when n < 0.50f -> Mountains
-  | n when n < 0.65f -> FloatingPlatforms
-  | n when n < 0.80f -> Cavernous
-  | n when n < 0.90f -> StaircaseUp
-  | _ -> StaircaseDown
+    match patternNoise with
+    | n when n < 0.15f -> FlatGround
+    | n when n < 0.35f -> RollingHills
+    | n when n < 0.50f -> Mountains
+    | n when n < 0.65f -> FloatingPlatforms
+    | n when n < 0.80f -> Cavernous
+    | n when n < 0.90f -> StaircaseUp
+    | _ -> StaircaseDown
 
 // ─────────────────────────────────────────────────────────────
 // Terrain Generation Functions
@@ -191,10 +195,10 @@ let getTileShape(x: int, y: int, seed: int) : int =
     1 // Center (Full fill)
 
 /// Generate occluders for a tile if it is solid
-let generateOccluders(tile: Tile) : Occluder2D array =
+let generateOccluders(tile: GridTile, pos: Vector2) : Occluder2D array =
   match tile.TileType with
-  | Platform ->
-    let x, y = tile.Position.X, tile.Position.Y
+  | TileType.Platform ->
+    let x, y = pos.X, pos.Y
     let size = Constants.tileSize
     // Only add occluder to the bottom part of the platform
     [|
@@ -207,342 +211,487 @@ let generateOccluders(tile: Tile) : Occluder2D array =
   | _ -> [||]
 
 /// Generate a light source for specific tile types
-let generateLight (tile: Tile) (seed: int) : PointLight2D option = None
+let generateLight
+  (tile: GridTile)
+  (pos: Vector2)
+  (seed: int)
+  : PointLight2D option =
+  None
 
-/// Generate a single tile at the given position
-let generateTile
-  (
-    x: int,
-    y: int,
-    chunkX: int,
-    pattern: TerrainPattern,
-    seed: int,
-    theme: int,
-    prevHeight: int option
-  ) : Tile option =
-  let groundHeight = generateGroundHeight(x, chunkX, pattern, seed, prevHeight)
-  let columnNoise = SimpleNoise.noise2d(x, y, seed)
-  let gapProbability = SimpleNoise.noise2d(x, chunkX + 100, seed)
+// ─────────────────────────────────────────────────────────────
+// Terrain Layout Stamps (composition over Layout DSL)
+// ─────────────────────────────────────────────────────────────
 
-  // Auto-tiling shape
-  let shape = getTileShape(x, y, seed)
-  let variant = theme * 10 + shape
+/// Higher-level, pattern-specific stamps used by the sample.
+/// Key point: each function returns a *stamp* (a section transformer) so you can
+/// pipeline and compose them without manually threading `section`.
+///
+/// Most stamps are designed to run inside a per-column sub-section created with
+/// `Layout.section x 0 (...)`, so they use local X=0.
+module Terrain =
 
-  // Climb Assist: Check if neighbors are significantly higher (smaller Y)
-  let hL = getGlobalGroundHeight(x - 1, seed)
-  let hR = getGlobalGroundHeight(x + 1, seed)
-  let needsStepL = hL < groundHeight - 2
-  let needsStepR = hR < groundHeight - 2
-  let isClimbAssist = (needsStepL || needsStepR) && y = groundHeight - 2
+  /// A stamp is just a section transformer.
+  type Stamp = GridSection2D<GridTile> -> GridSection2D<GridTile>
 
-  match pattern with
-  | FlatGround ->
-    if y = groundHeight - 3 && SimpleNoise.chance(0.3f, x, y, seed) then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = TileType.Platform
-        Variant = 0
-      }
-    elif y >= groundHeight && y < Constants.worldHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
+  let none: Stamp = id
+
+  let inline when' (cond: bool) ([<InlineIfLambda>] stamp: Stamp) : Stamp =
+    if cond then stamp else none
+
+  let inline private placeTile (lx: int) (ly: int) (tile: GridTile) : Stamp =
+    fun section -> Layout.fill lx ly 1 1 tile section
+
+  let inline private placePlatform (ly: int) (variant: int) : Stamp =
+    placeTile 0 ly {
+      TileType = TileType.Platform
+      Variant = variant
+    }
+
+  let inline private placeHazard(ly: int) : Stamp =
+    placeTile 0 ly {
+      TileType = TileType.Hazard
+      Variant = 0
+    }
+
+  /// Fill ground from the computed groundHeight down to the bottom of the chunk.
+  let groundColumn
+    (globalX: int)
+    (groundHeight: int)
+    (theme: int)
+    (seed: int)
+    : Stamp =
+    fun section ->
+      let h = Constants.worldHeight - groundHeight
+
+      if h > 0 then
+        Layout.generate
+          0
+          groundHeight
+          1
+          h
+          (fun _ fy ->
+            let shape = getTileShape(globalX, fy, seed)
+            let variant = theme * 10 + shape
+
+            {
+              TileType = TileType.Ground
+              Variant = variant
+            })
+          section
+      else
+        section
+
+  /// FlatGround: optional floating platform.
+  let flatGround (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    when'
+      (SimpleNoise.chance(0.3f, globalX, groundHeight - 3, seed))
+      (placePlatform (groundHeight - 3) 0)
+
+  /// RollingHills: climb-assist platform when needed, otherwise occasional floating platform.
+  let rollingHills (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let hL = getGlobalGroundHeight(globalX - 1, seed)
+      let hR = getGlobalGroundHeight(globalX + 1, seed)
+      let isClimbAssist = (hL < groundHeight - 2 || hR < groundHeight - 2)
+
+      (if isClimbAssist then
+         placePlatform (groundHeight - 2) 0
+       elif SimpleNoise.chance(0.2f, globalX, groundHeight - 3, seed) then
+         placePlatform (groundHeight - 3) 0
+       else
+         none)
+        section
+
+  /// Mountains: climb-assist platform when needed, otherwise occasional higher platform.
+  let mountains (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let hL = getGlobalGroundHeight(globalX - 1, seed)
+      let hR = getGlobalGroundHeight(globalX + 1, seed)
+      let isClimbAssist = (hL < groundHeight - 2 || hR < groundHeight - 2)
+
+      (if isClimbAssist then
+         placePlatform (groundHeight - 2) 0
+       elif SimpleNoise.chance(0.3f, globalX + 50, groundHeight - 4, seed) then
+         placePlatform (groundHeight - 4) 0
+       else
+         none)
+        section
+
+  /// FloatingPlatforms: just platforms, no ground fill.
+  let floatingPlatforms (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let section =
+        if SimpleNoise.chance(0.4f, globalX, groundHeight, seed) then
+          let variant = SimpleNoise.rangeInt(0, 1, globalX, groundHeight, seed)
+          section |> placePlatform groundHeight variant
+        else
+          section
+
+      if SimpleNoise.chance(0.3f, globalX + 100, groundHeight + 3, seed) then
+        section |> placePlatform (groundHeight + 3) 0
+      else
+        section
+
+  /// Cavernous: gaps vs solid ground, with an occasional hazard on gap edges.
+  let cavernous
+    (globalX: int)
+    (groundHeight: int)
+    (gapProbability: float32)
+    (theme: int)
+    (seed: int)
+    : Stamp =
+    fun section ->
+      if gapProbability >= 0.2f then
+        section |> groundColumn globalX groundHeight theme seed
+      elif SimpleNoise.chance(0.15f, globalX + 200, groundHeight - 1, seed) then
+        section |> placeHazard(groundHeight - 1)
+      else
+        section
+
+// ─────────────────────────────────────────────────────────────
+// Decoration Layout Stamps (separate layer)
+// ─────────────────────────────────────────────────────────────
+
+module Decorations =
+
+  type Stamp = GridSection2D<GridTile> -> GridSection2D<GridTile>
+
+  let none: Stamp = id
+
+  let inline when' (cond: bool) ([<InlineIfLambda>] stamp: Stamp) : Stamp =
+    if cond then stamp else none
+
+  let inline private place (lx: int) (ly: int) (variant: int) : Stamp =
+    fun section ->
+      Layout.fill lx ly 1 1 {
+        TileType = TileType.Decoration
         Variant = variant
-      }
-    else
-      None
+      } section
 
-  | RollingHills ->
-    if isClimbAssist then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = TileType.Platform
-        Variant = 0
-      }
-    elif y = groundHeight - 3 && SimpleNoise.chance(0.2f, x, y, seed) then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = TileType.Platform
-        Variant = 0
-      }
-    elif y >= groundHeight && y < Constants.worldHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    else
-      None
+  let inline private placeAtSurface (surfaceY: int) (variant: int) : Stamp =
+    place 0 surfaceY variant
 
-  | Mountains ->
-    if isClimbAssist then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = TileType.Platform
-        Variant = 0
-      }
-    elif y >= groundHeight && y < Constants.worldHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    elif y = groundHeight - 4 && SimpleNoise.chance(0.3f, x, y + 50, seed) then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = TileType.Platform
-        Variant = 0
-      }
-    else
-      None
+  let inline private pickFrom (variants: int[]) (x: int) (y: int) (seed: int) : int =
+    let i = SimpleNoise.rangeInt(0, variants.Length - 1, x, y, seed)
+    variants.[i]
 
-  | StaircaseUp
-  | StaircaseDown ->
-    if y >= groundHeight && y < Constants.worldHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    else
-      None
+  /// Light surface dressing: grass tufts, rocks, mushrooms, bushes...
+  let surfaceScatter (globalX: int) (groundHeight: int) (theme: int) (seed: int) : Stamp =
+    fun section ->
+      let surfaceY = groundHeight - 1
 
-  | FloatingPlatforms ->
-    // Only 1 block thick for floating platforms
-    if y = groundHeight && SimpleNoise.chance(0.4f, x, y, seed) then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = TileType.Platform
-        Variant = SimpleNoise.rangeInt(0, 1, x, y, seed)
-      }
-    // Add lower platforms
-    elif y = groundHeight + 3 && SimpleNoise.chance(0.3f, x, y + 100, seed) then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = TileType.Platform
-        Variant = 0
-      }
-    else
-      None
+      // Keep within chunk bounds.
+      if surfaceY < 0 || surfaceY >= Constants.worldHeight then
+        section
+      else
+        // Theme influences which clutter is more likely.
+        // (e.g., sand theme favors cactus a bit more)
+        let sandLike = (theme = 2)
+        let baseChance = if sandLike then 0.35f else 0.45f
 
-  | Cavernous ->
-    // Create gaps in ground (pits)
-    if gapProbability < 0.2f then
-      None // Full column gap
-    elif y >= groundHeight && y < Constants.worldHeight then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Ground
-        Variant = variant
-      }
-    // Add hazards
-    elif
-      y = groundHeight - 1 && SimpleNoise.chance(0.15f, x, y + 200, seed)
-    then
-      Some {
-        Position =
-          Vector2(
-            float32 x * Constants.tileSize,
-            float32 y * Constants.tileSize
-          )
-        TileType = Hazard
-        Variant = 0
-      }
-    else
-      None
+        let clutterVariant =
+          if sandLike && SimpleNoise.chance(0.25f, globalX + 11, surfaceY, seed) then
+            SpriteLoader.TileRegions.DecorationVariants.Cactus
+          else
+            pickFrom SpriteLoader.TileRegions.DecorationVariants.surfaceClutter globalX surfaceY seed
 
-/// Create a GameMap from a collection of tiles
-let createMapFromTiles (tiles: Tile array) (seed: int) : GameMap =
-  let occluders = tiles |> Array.collect generateOccluders
-  let lights = tiles |> Array.choose(fun t -> generateLight t seed)
+        section
+        |> (when'
+              (SimpleNoise.chance(baseChance, globalX, surfaceY, seed))
+              (placeAtSurface surfaceY clutterVariant))
 
-  {
-    Tiles = tiles
-    Occluders = occluders
-    PointLights = lights
-  }
+  /// Occasional props on the surface (fences/signs) to make the world feel inhabited.
+  let surfaceProps (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let surfaceY = groundHeight - 1
 
-/// Generate a chunk of tiles
-let generateChunk(chunkX: int, seed: int) : Tile array =
+      if surfaceY < 0 || surfaceY >= Constants.worldHeight then
+        section
+      else
+        let variant =
+          pickFrom SpriteLoader.TileRegions.DecorationVariants.surfaceProps (globalX + 31) surfaceY seed
+
+        section
+        |> (when'
+              (SimpleNoise.chance(0.08f, globalX + 31, surfaceY, seed))
+              (placeAtSurface surfaceY variant))
+
+  /// Simple vertical accent: ladders (3-tile column) on flatter stretches.
+  let ladders (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let surfaceY = groundHeight - 1
+      let topY = surfaceY - 2
+
+      if topY < 0 || surfaceY >= Constants.worldHeight then
+        section
+      else
+        // Rare, but visually distinctive.
+        if SimpleNoise.chance(0.03f, globalX + 99, surfaceY, seed) then
+          section
+          |> place 0 topY SpriteLoader.TileRegions.DecorationVariants.LadderTop
+          |> place 0 (topY + 1) SpriteLoader.TileRegions.DecorationVariants.LadderMiddle
+          |> place 0 (topY + 2) SpriteLoader.TileRegions.DecorationVariants.LadderBottom
+        else
+          section
+
+  /// Hanging accents for airier chunks: ropes/chains above the surface.
+  let hangingAccents (globalX: int) (groundHeight: int) (seed: int) : Stamp =
+    fun section ->
+      let y = groundHeight - 4
+
+      if y < 0 || y >= Constants.worldHeight then
+        section
+      else
+        let variant =
+          pickFrom SpriteLoader.TileRegions.DecorationVariants.hanging (globalX + 7) y seed
+
+        section
+        |> (when'
+              (SimpleNoise.chance(0.06f, globalX + 7, y, seed))
+              (place 0 y variant))
+
+  /// Cave-ish sparkles + occasional torch to show animated decoration rendering.
+  let caveAccents
+    (globalX: int)
+    (groundHeight: int)
+    (gapProbability: float32)
+    (seed: int)
+    : Stamp =
+    fun section ->
+      let y = groundHeight - 3
+
+      if y < 0 || y >= Constants.worldHeight then
+        section
+      else
+        let sparkle =
+          pickFrom SpriteLoader.TileRegions.DecorationVariants.sparkles (globalX + 123) y seed
+
+        section
+        |> (when'
+              (gapProbability < 0.25f && SimpleNoise.chance(0.12f, globalX + 123, y, seed))
+              (place 0 y sparkle))
+        |> (when'
+              (gapProbability < 0.25f && SimpleNoise.chance(0.06f, globalX + 321, y + 1, seed))
+              (place 0 (y + 1) SpriteLoader.TileRegions.DecorationVariants.Torch))
+
+/// Generate a chunk of tiles using Layout DSL
+let generateChunk(chunkX: int, seed: int) : LayeredGrid2D<GridTile> =
   let pattern = getChunkPattern(chunkX, seed)
   let startX = chunkX * Constants.chunkWidth
-  // Consistent theme for the entire chunk
   let theme = SimpleNoise.rangeInt(0, 5, chunkX, 0, seed)
+  let origin = Vector2(float32 chunkX * Constants.chunkSize.X, 0f)
 
-  let tiles = ResizeArray<Tile>()
+  // Precompute per-column terrain parameters once so both layers can use them.
+  let groundHeights: int[] = Array.zeroCreate Constants.chunkWidth
+  let gapProbabilities: float32[] = Array.zeroCreate Constants.chunkWidth
 
-  for x in 0 .. Constants.chunkWidth - 1 do
-    for y in 0 .. Constants.worldHeight - 1 do
+  for x = 0 to Constants.chunkWidth - 1 do
+    let globalX = startX + x
+
+    let prevHeight =
+      if globalX = 0 then
+        None
+      else
+        Some(getGlobalGroundHeight(globalX - 1, seed))
+
+    groundHeights.[x] <- generateGroundHeight(globalX, chunkX, pattern, seed, prevHeight)
+    gapProbabilities.[x] <- SimpleNoise.noise2d(globalX, chunkX + 100, seed)
+
+  let chunk =
+    LayeredGrid2D.create
+      Constants.chunkWidth
+      Constants.worldHeight
+      (Vector2 Constants.tileSize)
+      origin
+
+  chunk
+  |> LayeredLayout.layer 0 (fun section ->
+    // Generate Terrain Column by Column
+    for x = 0 to Constants.chunkWidth - 1 do
       let globalX = startX + x
 
-      let prevHeight =
-        if globalX = 0 then
-          None
-        else
-          Some(getGlobalGroundHeight(globalX - 1, seed))
+      let groundHeight = groundHeights.[x]
+      let gapProbability = gapProbabilities.[x]
 
-      match
-        generateTile(globalX, y, chunkX, pattern, seed, theme, prevHeight)
-      with
-      | Some tile -> tiles.Add(tile)
-      | None -> ()
+      // This is the "composition showcase":
+      // - we create a sub-section for the current column
+      // - we build a stamp (section transformer) by composing smaller stamps
+      // - we apply it to the column section
+      section
+      |> Layout.section x 0 (fun columnSection ->
+        let ground = Terrain.groundColumn globalX groundHeight theme seed
 
-  tiles.ToArray()
+        let stamp: Terrain.Stamp =
+          match pattern with
+          | FlatGround ->
+            Terrain.flatGround globalX groundHeight seed >> ground
+          | RollingHills ->
+            Terrain.rollingHills globalX groundHeight seed >> ground
+          | Mountains -> Terrain.mountains globalX groundHeight seed >> ground
+          | StaircaseUp
+          | StaircaseDown -> ground
+          | FloatingPlatforms ->
+            Terrain.floatingPlatforms globalX groundHeight seed
+          | Cavernous ->
+            Terrain.cavernous globalX groundHeight gapProbability theme seed
+
+        stamp columnSection)
+      |> ignore
+
+    section)
+  |> LayeredLayout.layer 1 (fun section ->
+    // Decoration layer: purely visual, varied, and driven by composable stamps.
+    for x = 0 to Constants.chunkWidth - 1 do
+      let globalX = startX + x
+      let groundHeight = groundHeights.[x]
+      let gapProbability = gapProbabilities.[x]
+
+      section
+      |> Layout.section x 0 (fun columnSection ->
+        // Compose small, name-driven placement behaviors.
+        let baseStamp =
+          Decorations.surfaceScatter globalX groundHeight theme seed
+          >> Decorations.surfaceProps globalX groundHeight seed
+
+        let stamp: Decorations.Stamp =
+          match pattern with
+          | FlatGround -> baseStamp
+          | RollingHills -> baseStamp >> Decorations.ladders globalX groundHeight seed
+          | Mountains ->
+            baseStamp
+            >> Decorations.hangingAccents globalX groundHeight seed
+            >> Decorations.caveAccents globalX groundHeight gapProbability seed
+          | FloatingPlatforms ->
+            // Airier: fewer surface props, more hanging accents.
+            Decorations.hangingAccents globalX groundHeight seed
+            >> Decorations.surfaceScatter globalX groundHeight theme seed
+          | Cavernous ->
+            Decorations.caveAccents globalX groundHeight gapProbability seed
+            >> Decorations.surfaceScatter globalX groundHeight theme seed
+          | StaircaseUp
+          | StaircaseDown -> baseStamp
+
+        stamp columnSection)
+      |> ignore
+
+    section)
+
+/// Create a GameMap from a collection of chunks
+let createMapFromChunks
+  (chunks: Map<int, LayeredGrid2D<GridTile>>)
+  (seed: int)
+  : GameMap =
+  // Gather all tiles to generate secondary data (lights/occluders)
+  // In a real optimized system, we would cache this per chunk instead of rebuilding globally
+  let occluders = ResizeArray<Occluder2D>()
+  let lights = ResizeArray<PointLight2D>()
+
+  for kvp in chunks do
+    let chunk = kvp.Value
+    // We assume layer 0 is the physical layer
+    let (grid, _) = LayeredGrid2D.getOrAddLayer 0 chunk
+
+    CellGrid2D.iter
+      (fun x y tile ->
+        let pos = CellGrid2D.getWorldPos x y grid
+        occluders.AddRange(generateOccluders(tile, pos))
+
+        match generateLight tile pos seed with
+        | Some l -> lights.Add(l)
+        | None -> ())
+      grid
+
+  {
+    Chunks = chunks
+    Occluders = occluders.ToArray()
+    PointLights = lights.ToArray()
+  }
 
 /// Generate initial terrain (few chunks around spawn)
-let generateInitialTerrain(seed: int) : Tile array =
+let generateInitialTerrain(seed: int) : Map<int, LayeredGrid2D<GridTile>> =
   // Generate 3 chunks: [-1, 0, 1]
-  let tiles = ResizeArray<Tile>()
+  let chunks =
+    [ -1; 0; 1 ]
+    |> List.map(fun cx -> cx, generateChunk(cx, seed))
+    |> Map.ofList
 
-  for chunkX in -1 .. 1 do
-    // Force FlatGround pattern for initial safe area
-    let chunkTiles =
-      // Manually generate chunk with FlatGround pattern
-      let pattern = FlatGround
-      let startX = chunkX * Constants.chunkWidth
-      // Use Grass theme (0) for spawn area
-      let theme = 0
-      let chunkTiles = ResizeArray<Tile>()
-
-      for x in 0 .. Constants.chunkWidth - 1 do
-        for y in 0 .. Constants.worldHeight - 1 do
-          let globalX = startX + x
-          let prevHeight = getGlobalGroundHeight(globalX - 1, seed)
-
-          match
-            generateTile(
-              globalX,
-              y,
-              chunkX,
-              pattern,
-              seed,
-              theme,
-              Some prevHeight
-            )
-          with
-          | Some tile -> chunkTiles.Add(tile)
-          | None -> ()
-
-      chunkTiles.ToArray()
-
-    tiles.AddRange(chunkTiles)
-
-  tiles.ToArray()
+  chunks
 
 // ─────────────────────────────────────────────────────────────
 // Terrain Management
 // ─────────────────────────────────────────────────────────────
 
-/// Get the chunk X coordinate from a world X position
-let worldXToChunkX(worldX: float32) : int =
-  int(worldX / (float32 Constants.chunkWidth * Constants.tileSize))
-
 /// Check if we need to generate new terrain
 let needsTerrainGeneration(model: Model) : bool =
-  let currentChunkX = worldXToChunkX model.PlayerPosition.X
+  let currentChunkX = Helpers.worldXToChunkX model.PlayerPosition.X
   // Generate 2 chunks ahead to prevent seeing the void
   currentChunkX + 2 > model.LastGeneratedChunk
 
 /// Generate next terrain chunk and update model
 let generateNextChunk(model: Model) : Model =
   let nextChunk = model.LastGeneratedChunk + 1
-  let newTiles = generateChunk(nextChunk, model.Seed)
+  let newChunk = generateChunk(nextChunk, model.Seed)
 
-  // Combine existing tiles with new chunk
-  let allTiles = Array.append model.Map.Tiles newTiles
+  // Add new chunk to map
+  let newChunks = model.Map.Chunks.Add(nextChunk, newChunk)
 
   {
     model with
-        Map = createMapFromTiles allTiles model.Seed
+        Map = createMapFromChunks newChunks model.Seed
         LastGeneratedChunk = nextChunk
   }
 
 /// Remove tiles that are too far behind the player (cleanup)
 let cleanupOldTiles(model: Model) : Model =
-  let currentChunkX = worldXToChunkX model.PlayerPosition.X
+  let currentChunkX = Helpers.worldXToChunkX model.PlayerPosition.X
   let cleanupThreshold = currentChunkX - 3 // Remove chunks 3 chunks behind
 
-  let filteredTiles =
-    model.Map.Tiles
-    |> Array.filter(fun tile ->
-      let tileChunkX =
-        int(
-          tile.Position.X / (float32 Constants.chunkWidth * Constants.tileSize)
-        )
+  // Filter keys < threshold
+  let filteredChunks =
+    model.Map.Chunks |> Map.filter(fun cx _ -> cx >= cleanupThreshold)
 
-      tileChunkX >= cleanupThreshold)
-
-  if filteredTiles.Length = model.Map.Tiles.Length then
+  if filteredChunks.Count = model.Map.Chunks.Count then
     model
   else
     {
       model with
-          Map = createMapFromTiles filteredTiles model.Seed
+          Map = createMapFromChunks filteredChunks model.Seed
     }
 
-/// Create platforms array from tiles array
-let createPlatformsFromTiles(tiles: Tile array) : Platform array =
-  tiles
-  |> Array.filter(fun t -> t.TileType <> TileType.Empty)
-  |> Array.map(fun tile -> {
-    Bounds =
-      Rectangle(
-        int tile.Position.X,
-        int tile.Position.Y,
-        int Constants.tileSize,
-        int Constants.tileSize
-      )
-    Type = tile.TileType
-    Variant = tile.Variant
-  })
+/// Create platforms array from chunks
+let createPlatformsFromChunks
+  (chunks: Map<int, LayeredGrid2D<GridTile>>)
+  : Platform array =
+  let platforms = ResizeArray<Platform>()
+
+  for kvp in chunks do
+    let chunk = kvp.Value
+    let (grid, _) = LayeredGrid2D.getOrAddLayer 0 chunk
+
+    CellGrid2D.iter
+      (fun x y tile ->
+        match tile.TileType with
+        | TileType.Ground
+        | TileType.Platform
+        | TileType.Hazard ->
+          let pos = CellGrid2D.getWorldPos x y grid
+
+          platforms.Add {
+            Bounds =
+              Rectangle(
+                int pos.X,
+                int pos.Y,
+                int Constants.tileSize,
+                int Constants.tileSize
+              )
+            Type = tile.TileType
+            Variant = tile.Variant
+          }
+        | TileType.Empty
+        | TileType.Decoration -> ())
+      grid
+
+  platforms.ToArray()
 
 /// Ensure terrain is generated as player moves
 let update(model: Model) : struct (Model * Cmd<'Msg>) =
@@ -556,18 +705,18 @@ let update(model: Model) : struct (Model * Cmd<'Msg>) =
   let model = cleanupOldTiles model
 
   // Update platforms when terrain changes
-  let platforms = createPlatformsFromTiles model.Map.Tiles
+  let platforms = createPlatformsFromChunks model.Map.Chunks
 
   { model with Platforms = platforms }, Cmd.none
 
 
 /// Reset terrain to initial state
 let reset(model: Model) : Model =
-  let tiles = generateInitialTerrain model.Seed
+  let chunks = generateInitialTerrain model.Seed
 
   {
     model with
-        Map = createMapFromTiles tiles model.Seed
+        Map = createMapFromChunks chunks model.Seed
         LastGeneratedChunk = 1
   }
 
@@ -578,53 +727,109 @@ let reset(model: Model) : Model =
 // ─────────────────────────────────────────────────────────────
 
 /// Find ground height at given world X position
-let findGroundAt(worldX: float32, tiles: Tile array) : float32 option =
-  let tileX = int(worldX / Constants.tileSize)
+let findGroundAt
+  (worldX: float32, chunks: Map<int, LayeredGrid2D<GridTile>>)
+  : float32 option =
+  let chunkX = Helpers.worldXToChunkX worldX
 
-  tiles
-  |> Array.tryFind(fun tile ->
-    let tileXPos = int(tile.Position.X / Constants.tileSize)
-    tileXPos = tileX && tile.TileType <> Empty && tile.TileType <> Hazard)
-  |> Option.map(fun tile -> tile.Position.Y)
+  match chunks.TryFind chunkX with
+  | Some chunk ->
+    let (grid, _) = LayeredGrid2D.getOrAddLayer 0 chunk
+    // Calculate local X in grid
+    let localX = int((worldX - chunk.Origin.X) / chunk.CellSize.X)
 
-/// Get all tiles visible in the given camera range
-let getVisibleTiles
-  (cameraX: float32)
-  (screenWidth: float32)
-  (tiles: Tile array)
-  : Tile array =
-  let margin = Constants.tileSize * 15.0f
-  let left = cameraX - margin
-  let right = cameraX + screenWidth + margin
+    // Find the highest solid tile in this column
+    let mutable result = None
 
-  tiles
-  |> Array.filter(fun tile ->
-    tile.Position.X >= left && tile.Position.X <= right)
+    for y = 0 to grid.Height - 1 do
+      // We search from top to bottom (y=0 is top)?
+      // Actually Terrain generation puts ground at high Y indices (bottom of screen)
+      // So we want the smallest Y that is not empty
+      if result.IsNone then
+        match CellGrid2D.get localX y grid with
+        | ValueSome tile when
+          tile.TileType <> TileType.Empty
+          && tile.TileType <> TileType.Hazard
+          && tile.TileType <> TileType.Decoration
+          ->
+          let pos = CellGrid2D.getWorldPos localX y grid
+          result <- Some pos.Y
+        | _ -> ()
+
+    result
+  | None -> None
 
 /// Render terrain tiles
 let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
   let viewportWidth = float32 ctx.GraphicsDevice.Viewport.Width
-  let visibleTiles = getVisibleTiles model.CameraX viewportWidth model.Map.Tiles
+  let cameraX = model.CameraX
+  let margin = Constants.tileSize * 15.0f
 
-  for tile in visibleTiles do
-    let rect =
-      match tile.TileType with
-      | Ground -> SpriteLoader.TileRegions.getGroundVariant tile.Variant
-      | Platform -> SpriteLoader.TileRegions.getPlatformVariant tile.Variant
-      | Hazard -> SpriteLoader.TileRegions.getHazardTile()
-      | Empty -> Rectangle.Empty
+  let viewBounds =
+    Rectangle(
+      int(cameraX - margin),
+      0,
+      int(viewportWidth + margin * 2.0f),
+      Constants.worldHeight * int Constants.tileSize
+    )
 
-    if rect <> Rectangle.Empty then
-      buffer.Sprite(
-        sprite {
-          texture model.TerrainAssets.GroundTile
-          sourceRect rect
-          at tile.Position.X tile.Position.Y
-          size Constants.tileSize Constants.tileSize
-          layer 0<RenderLayer>
-        }
-      )
-      |> ignore
+  // Determine which chunks are visible
+  let startChunk = Helpers.worldXToChunkX(cameraX - margin)
+  let endChunk = Helpers.worldXToChunkX(cameraX + viewportWidth + margin)
+
+  for cx = startChunk to endChunk do
+    match model.Map.Chunks.TryFind cx with
+    | Some chunk ->
+      let (grid, _) = LayeredGrid2D.getOrAddLayer 0 chunk
+      let (decorations, _) = LayeredGrid2D.getOrAddLayer 1 chunk
+
+      grid
+      |> CellGrid2D.iterVisible viewBounds (fun x y tile ->
+        let pos = CellGrid2D.getWorldPos x y grid
+
+        let rect =
+          match tile.TileType with
+          | TileType.Ground ->
+            SpriteLoader.TileRegions.getGroundVariant tile.Variant
+          | TileType.Platform ->
+            SpriteLoader.TileRegions.getPlatformVariant tile.Variant
+          | TileType.Hazard -> SpriteLoader.TileRegions.getHazardTile()
+          | TileType.Decoration -> Rectangle.Empty
+          | TileType.Empty -> Rectangle.Empty
+
+        if rect <> Rectangle.Empty then
+          buffer.Sprite(
+            sprite {
+              texture model.TerrainAssets.GroundTile
+              sourceRect rect
+              at pos.X pos.Y
+              size Constants.tileSize Constants.tileSize
+              layer 0<RenderLayer>
+            }
+          )
+          |> ignore)
+
+      // Draw decorations after the ground but below the player.
+      decorations
+      |> CellGrid2D.iterVisible viewBounds (fun x y tile ->
+        if tile.TileType = TileType.Decoration then
+          let pos = CellGrid2D.getWorldPos x y decorations
+
+          let rect =
+            SpriteLoader.TileRegions.getDecorationVariant(tile.Variant, model.TotalTime)
+
+          if rect <> Rectangle.Empty then
+            buffer.Sprite(
+              sprite {
+                texture model.TerrainAssets.GroundTile
+                sourceRect rect
+                at pos.X pos.Y
+                size Constants.tileSize Constants.tileSize
+                layer 1<RenderLayer>
+              }
+            )
+            |> ignore)
+    | None -> ()
 
   for occluder in model.Map.Occluders do
     buffer.Occluder(occluder) |> ignore
@@ -638,22 +843,41 @@ let view (ctx: GameContext) (model: Model) (buffer: RenderBuffer<RenderCmd2D>) =
 
 module TerrainStats =
   /// Count tiles of each type
-  let countTilesByType(tiles: Tile array) : Map<TileType, int> =
-    tiles
-    |> Array.groupBy(fun tile -> tile.TileType)
-    |> Array.map(fun (tileType, tileArray) -> (tileType, tileArray.Length))
-    |> Map.ofArray
+  let countTilesByType
+    (chunks: Map<int, LayeredGrid2D<GridTile>>)
+    : Map<TileType, int> =
+    let mutable counts = Map.empty
+
+    for kvp in chunks do
+      let (grid, _) = LayeredGrid2D.getOrAddLayer 0 kvp.Value
+
+      CellGrid2D.iter
+        (fun _ _ tile ->
+          let current =
+            counts |> Map.tryFind tile.TileType |> Option.defaultValue 0
+
+          counts <- counts |> Map.add tile.TileType (current + 1))
+        grid
+
+    counts
 
   /// Get total number of tiles
-  let totalTiles(tiles: Tile array) : int = tiles.Length
+  let totalTiles(chunks: Map<int, LayeredGrid2D<GridTile>>) : int =
+    chunks
+    |> Map.fold
+      (fun acc _ v ->
+        let (g, _) = LayeredGrid2D.getOrAddLayer 0 v
+        // Iterating to count populated cells
+        let mutable c = 0
+        CellGrid2D.iter (fun _ _ _ -> c <- c + 1) g
+        acc + c)
+      0
 
   /// Get the furthest generated chunk
   let getFurthestChunk(model: Model) : int = model.LastGeneratedChunk
 
   /// Estimate world width based on generated chunks
   let estimateWorldWidth(model: Model) : float32 =
-    float32(
-      (model.LastGeneratedChunk + 2)
-      * Constants.chunkWidth
-      * int Constants.tileSize
-    )
+    float32(model.LastGeneratedChunk + 2)
+    * float32 Constants.chunkWidth
+    * Constants.tileSize

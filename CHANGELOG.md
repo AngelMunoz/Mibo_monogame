@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Level Design: **2D Layout Engine**. Introduced a code-first, grid-based level design system in `Mibo.Layout`, featuring a composable DSL, optimized geometric primitives (`fill`, `rect`, `circle`, `line`), and domain-specific stamps for Platformers and Top-Down games.
+- Level Design: **3D Layout Engine**. Introduced a code-first, grid-based level design system in `Mibo.Layout3D`, featuring a composable DSL, 3D rasterization primitives (`sphere`, `cylinder`, `line`), and domain-specific stamps for Interiors and Terrain.
+- Documentation: **Comprehensive Level Design Guides**. Added guidance-focused documentation for both 2D and 3D engines, including the "Stamp" pattern for reusable components and idiomatic rendering using `RenderLayer`.
+
 ## [1.5.1] - 2026-01-29
 
 ### Fixed

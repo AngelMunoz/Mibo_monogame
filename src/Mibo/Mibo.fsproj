@@ -17,6 +17,16 @@
     <Compile Include="Elmish.Runtime.fs" />
     <Compile Include="Camera.fs" />
     <Compile Include="Input.fs" />
+    <Compile Include="Layout/Grid2D.fs" />
+    <Compile Include="Layout/Layout.fs" />
+    <Compile Include="Layout/Layered.fs" />
+    <Compile Include="Layout/Platformer.fs" />
+    <Compile Include="Layout/TopDown.fs" />
+    <Compile Include="Layout3D/Grid3D.fs" />
+    <Compile Include="Layout3D/Layout3D.fs" />
+    <Compile Include="Layout3D/Interior.fs" />
+    <Compile Include="Layout3D/Terrain.fs" />
+    <Compile Include="Layout3D/Renderer3D.fs" />
     <Compile Include="InputMapper.fs" />
     <Compile Include="Culling.fs" />
     <Compile Include="Assets.fs" />

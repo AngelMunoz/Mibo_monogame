@@ -1,6 +1,7 @@
 ---
 title: Rendering 3D
-category: Rendering
+category: 3D Rendering
+categoryindex: 4
 index: 12
 ---
 

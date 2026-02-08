@@ -1,6 +1,7 @@
 ---
 title: System Pipeline
 category: Architecture
+categoryindex: 1
 index: 3
 ---
 

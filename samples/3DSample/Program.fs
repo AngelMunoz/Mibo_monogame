@@ -7,6 +7,7 @@ open Mibo
 open Mibo.Elmish
 open Mibo.Elmish.Graphics3D
 open Mibo.Input
+open Mibo.Layout3D
 
 module Program =
 
@@ -63,39 +64,35 @@ module Program =
 
     inputMapRef.Value <- inputMap
 
-    // Load models and compute bounds
+    // Create level grid using Layout3D DSL
+    let levelGrid = Level.create()
+
+    // Load player model and compute bounds
     let playerModel = Assets.model "Models/Platform/ball_blue" ctx
     let playerBounds = Platform.computeBounds playerModel
 
-    let platformModel = Assets.model "Models/Platform/platform_4x4x1_blue" ctx
-    let platformBounds = Platform.computeBounds platformModel
-
-    // Create platforms with computed bounds
-    let platforms =
-      Platform.positions |> List.map(Platform.create platformBounds)
-
-    let gridVerts, gridLineCount = Grid.create platforms 3.0f Color.White
+    // Placeholder for grid rendering (can be removed or simplified)
     let gridEffect = Assets.effect "Effects/Grid" ctx
 
     let assets = {
       PlayerModel = playerModel
       PlayerBounds = playerBounds
-      PlatformModel = platformModel
-      PlatformBounds = platformBounds
-      PlatformGrid = gridVerts
-      PlatformGridLineCount = gridLineCount
+      PlatformModel = playerModel // Not used now, kept for compatibility
+      PlatformBounds = playerBounds
+      PlatformGrid = [||]
+      PlatformGridLineCount = 0
       GridEffect = gridEffect
     }
 
     {
-      PlayerPosition = Vector3(0f, 2f, 0f)
+      PlayerPosition = Vector3(24f, 2f, 24f) // Start near center of 64x64 level
       Velocity = Vector3.Zero
       Rotation = Quaternion.Identity
       IsGrounded = false
       Actions = ActionState.empty
       InputMap = inputMap
       Assets = assets
-      Platforms = platforms
+      LevelGrid = levelGrid
     },
     Cmd.none
 
@@ -119,7 +116,7 @@ module Program =
       |> System.finish id
 
   // ─────────────────────────────────────────────────────────────
-  // View: Render the 3D scene
+  // View: Render the 3D scene using grid iteration
   // ─────────────────────────────────────────────────────────────
 
   let view
@@ -128,7 +125,7 @@ module Program =
     (buffer: RenderBuffer<RenderCmd3D>)
     =
     // Camera follows player
-    let cameraOffset = Vector3(8f, 8f, 8f)
+    let cameraOffset = Vector3(12f, 12f, 12f)
     let cameraPos = state.PlayerPosition + cameraOffset
 
     let camera =
@@ -143,22 +140,36 @@ module Program =
 
     Draw3D.camera camera buffer
 
-    // Draw platforms
-    for (plat: PlatformData) in state.Platforms do
-      let platformMatrix = Matrix.CreateTranslation(plat.Position)
+    // Create view bounds for frustum culling (large radius around player)
+    let viewRadius = 50f
 
-      Draw3D.mesh state.Assets.PlatformModel platformMatrix
-      |> Draw3D.submit buffer
+    let viewBounds =
+      BoundingBox(
+        Vector3(
+          state.PlayerPosition.X - viewRadius,
+          -10f,
+          state.PlayerPosition.Z - viewRadius
+        ),
+        Vector3(
+          state.PlayerPosition.X + viewRadius,
+          50f,
+          state.PlayerPosition.Z + viewRadius
+        )
+      )
 
-    // Draw the distance-faded grid surrounding platforms
-    Grid.draw
-      state.PlayerPosition
-      7.0f
-      state.Assets.GridEffect
-      state.Assets.PlatformGrid
-      state.Assets.PlatformGridLineCount
-      buffer
+    // Render level geometry using iterVolume for frustum culling
+    // Only render anchor cells (Render = true), skip collision markers
+    state.LevelGrid
+    |> CellGrid3D.iterVolume viewBounds (fun x y z cell ->
+      if cell.Render then
+        let model = Assets.model cell.AssetName ctx
+        let worldPos = CellGrid3D.getWorldPos x y z state.LevelGrid
 
+        let matrix =
+          Matrix.CreateFromQuaternion(cell.Rotation)
+          * Matrix.CreateTranslation(worldPos)
+
+        Draw3D.mesh model matrix |> Draw3D.submit buffer)
 
     // Draw the player
     Player.view ctx state buffer
@@ -182,7 +193,7 @@ module Program =
       Program.mkProgram init update
       |> Program.withConfig(fun (game, graphics) ->
         game.Content.RootDirectory <- "Content"
-        game.Window.Title <- "Mibo 3D Platformer"
+        game.Window.Title <- "Mibo 3D Layout Engine Demo"
         graphics.PreferredBackBufferWidth <- 1280
         graphics.PreferredBackBufferHeight <- 720
         game.IsMouseVisible <- true)

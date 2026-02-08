@@ -1,7 +1,8 @@
 ---
 title: Primitives
 category: 3D Rendering
-index: 12
+categoryindex: 4
+index: 13
 ---
 
 # Primitives

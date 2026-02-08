@@ -1,6 +1,7 @@
 ---
 title: Assets
 category: Amenities
+categoryindex: 5
 index: 21
 ---
 

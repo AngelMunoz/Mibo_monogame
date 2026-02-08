@@ -1,6 +1,7 @@
 ---
 title: Camera
 category: Rendering
+categoryindex: 3
 index: 13
 ---
 

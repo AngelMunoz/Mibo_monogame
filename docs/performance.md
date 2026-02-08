@@ -1,7 +1,8 @@
 ---
 title: F# For Perf
 category: Architecture
-index: 5
+categoryindex: 1
+index: 6
 ---
 
 # F# For Perf (Patterns for Games)

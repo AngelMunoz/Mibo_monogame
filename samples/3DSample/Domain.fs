@@ -4,6 +4,7 @@ open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open Mibo.Input
+open Mibo.Layout3D
 
 // ─────────────────────────────────────────────────────────────
 // Core Types
@@ -18,7 +19,20 @@ type GameAction =
   | MoveBackward
   | Jump
 
-/// Platform with position and computed bounds
+/// Lightweight cell content - stores asset info and layout data
+/// - AssetName: Path to model asset
+/// - Rotation: Orientation
+/// - Size: Footprint in cells (e.g., 4x1x4 for a 4x4 floor tile)
+/// - Render: true = this is the anchor cell (renders model), false = collision marker only
+[<Struct>]
+type Cell = {
+  AssetName: string
+  Rotation: Quaternion
+  Size: Vector3
+  Render: bool
+}
+
+/// Platform with position and computed bounds (kept for player collision)
 [<Struct>]
 type PlatformData = {
   Position: Vector3
@@ -47,7 +61,8 @@ type State = {
   Actions: ActionState<GameAction>
   InputMap: InputMap<GameAction>
   Assets: GameAssets
-  Platforms: PlatformData list
+  /// The level grid - source of truth for all level geometry
+  LevelGrid: CellGrid3D<Cell>
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -57,7 +72,7 @@ type State = {
 module Constants =
   let gravity = -20.0f
   let jumpSpeed = 15.0f
-  let moveSpeed = 5.0f
+  let moveSpeed = 10.0f
   let acceleration = 25.0f
   let friction = 8.0f
   let fallLimit = -20.0f
