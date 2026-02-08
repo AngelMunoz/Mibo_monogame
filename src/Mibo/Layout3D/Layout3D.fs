@@ -38,7 +38,7 @@ module Layout3DHelpers =
   /// <summary>
   /// Wraps a raw grid in a root-level section.
   /// </summary>
-  let createSection(grid: CellGrid3D<'T>) : GridSection3D<'T> = {
+  let inline createSection(grid: CellGrid3D<'T>) : GridSection3D<'T> = {
     BackingGrid = grid
     OffsetX = 0
     OffsetY = 0
@@ -227,7 +227,13 @@ module Layout3D =
   /// <summary>
   /// Sets a single cell at (x, y, z).
   /// </summary>
-  let set x y z content (section: GridSection3D<'T>) : GridSection3D<'T> =
+  let inline set
+    x
+    y
+    z
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
     setLocal x y z content section
     section
 
@@ -585,7 +591,7 @@ module Layout3D =
   /// Creates a vertical column at (x, z) from y=0 to specified height.
   /// Alias for repeatY starting at y=0.
   /// </summary>
-  let column
+  let inline column
     x
     y
     z

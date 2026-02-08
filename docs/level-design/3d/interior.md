@@ -1,22 +1,24 @@
 ---
-title: Interior Stamps
+title: Building Interior Spaces
 category: Level Design
 categoryindex: 2
 index: 25
 ---
 
-# Interior Stamps
+# Building Interior Spaces
 
-The `Interior` module provides stamps for enclosed 3D spaces like rooms, corridors, dungeons, and building interiors. Import it with:
+Interior spaces (dungeons, buildings, FPS levels) are defined by enclosed areas connected by passages. The `Interior` module provides stamps for designing these efficiently.
+
+## Importing
 
 ```fsharp
 open Mibo.Layout3D
 open Mibo.Layout3D.Interior
 ```
 
-## DoorSide Direction
+## Understanding Directions
 
-Many interior stamps use `DoorSide` to specify which face to operate on:
+The `DoorSide` type specifies which face to operate on:
 
 ```fsharp
 type DoorSide =
@@ -26,308 +28,392 @@ type DoorSide =
   | West   // Left face (min X)
 ```
 
-## Available Stamps
+## Core Interior Patterns
 
-### room
+### Basic Room
 
-A fully enclosed room with floor, ceiling, and four walls:
-
-```fsharp
-section |> Interior.room 8 4 8 FloorCell WallCell CeilingCell
-```
-
-Parameters: `width`, `height`, `depth`, `floor`, `wall`, `ceiling`
-
-### openRoom
-
-A room with floor and walls but no ceiling (for open-top areas):
+Every interior level starts with rooms:
 
 ```fsharp
-section |> Interior.openRoom 8 4 8 FloorCell WallCell
-```
-
-Parameters: `width`, `height`, `depth`, `floor`, `wall`
-
-### corridorX
-
-A horizontal corridor (along X axis) with floor, walls, and ceiling:
-
-```fsharp
-section |> Interior.corridorX 10 2 3 FloorCell WallCell CeilingCell
-```
-
-Parameters: `length`, `width`, `height`, `floor`, `wall`, `ceiling`
-
-The corridor is open at both X ends.
-
-### corridorZ
-
-A depth corridor (along Z axis) with floor, walls, and ceiling:
-
-```fsharp
-section |> Interior.corridorZ 10 2 3 FloorCell WallCell CeilingCell
-```
-
-Parameters: `length`, `width`, `height`, `floor`, `wall`, `ceiling`
-
-The corridor is open at both Z ends.
-
-### doorway
-
-Clears a door-sized opening in a wall plane:
-
-```fsharp
-section |> Interior.doorway North 2 3
-```
-
-Parameters: `side`, `doorWidth`, `doorHeight`
-
-Used after creating a room to add exits:
-
-```fsharp
-let roomWithDoor =
-    Interior.room 8 4 8 FloorCell WallCell CeilingCell
-    >> Interior.doorway East 2 3
-```
-
-### window
-
-Clears a window opening in a wall:
-
-```fsharp
-section |> Interior.window North 3 2 1
-```
-
-Parameters: `side`, `windowWidth`, `windowHeight`, `sillHeight`
-
-The `sillHeight` specifies how many cells from the bottom the window starts.
-
-### stairs
-
-A staircase connecting two Y levels. Steps rise along the Z axis:
-
-```fsharp
-section |> Interior.stairs 2 4 4 StairCell
-```
-
-Parameters: `width`, `rise`, `run`, `step`
-
-- `width` - Width of the staircase in X
-- `rise` - Total height increase in Y
-- `run` - Length of the staircase in Z (number of steps)
-- `step` - Cell type for each step
-
-### shaft
-
-A vertical shaft (elevator, ladder space) with walls and hollow interior:
-
-```fsharp
-section |> Interior.shaft 2 2 10 WallCell
-```
-
-Parameters: `width`, `depth`, `height`, `wall`
-
-The shaft is hollow in the center with walls on all four sides.
-
-### pillar
-
-A vertical column with distinct base, middle, and top tiles:
-
-```fsharp
-section |> Interior.pillar 5 BaseCell MiddleCell TopCell
-```
-
-Parameters: `height`, `baseTile`, `middleTile`, `topTile`
-
-- Bottom cell uses `baseTile`
-- Middle cells use `middleTile`
-- Top cell uses `topTile`
-
-## Composing Interior Layouts
-
-### Simple Dungeon
-
-```fsharp
-let dungeon =
+let singleRoom =
     CellGrid3D.create 20 5 20 (Vector3(2f, 2f, 2f)) Vector3.Zero
-    |> Layout3D.run (fun section ->
-        section
-        // Main room
-        |> Layout3D.section 0 0 0 (Interior.room 8 4 8 FloorCell WallCell CeilingCell)
-
-        // Corridor leading east
-        |> Layout3D.section 8 0 3 (Interior.corridorX 6 2 3 FloorCell WallCell CeilingCell)
-
-        // Second room
-        |> Layout3D.section 14 0 0 (Interior.room 6 4 6 FloorCell WallCell CeilingCell)
-    )
+        |> Layout3D.run (fun section ->
+            section
+            |> Interior.room 12 4 12 FloorCell WallCell CeilingCell
+            |> Layout3D.section 6 2 (Layout3D.set 0 0 0 ChestCell)
+        )
 ```
 
-### Room with Exits
+### Connecting Rooms with Corridors
+
+Corridors connect spaces. Use X-aligned for east-west, Z-aligned for north-south:
 
 ```fsharp
-let centralRoom section =
+let connectedRooms =
     section
-    |> Interior.room 10 4 10 FloorCell WallCell CeilingCell
-    // Add doorways on all four sides
-    |> Interior.doorway North 2 3
-    |> Interior.doorway South 2 3
+    // Room 1 (spawn)
+    |> Layout3D.section 0 0 0 (Interior.room 10 4 10 FloorCell WallCell CeilingCell)
+    |> Layout3D.section 5 2 0 (Layout3D.set 0 0 0 SpawnCell)
+    
+    // Corridor to Room 2 (east)
     |> Interior.doorway East 2 3
+    |> Layout3D.section 10 0 3 (Interior.corridorX 8 2 3 FloorCell WallCell CeilingCell)
+    
+    // Room 2 (encounter)
     |> Interior.doorway West 2 3
+    |> Layout3D.section 18 0 0 (Interior.room 8 4 8 FloorCell WallCell CeilingCell)
+    |> Layout3D.section 22 2 0 (Layout3D.set 0 0 0 EnemyCell)
 ```
 
-### Multi-Level Room with Stairs
+**Door placement tip:** When using `doorway`, the corridor and room Y positions must align. A doorway at Y=0 connects to a corridor starting at Y=1 (door height is 3, so doorway spans Y=1,2,3).
+
+### Multi-Exit Hubs
+
+Central rooms connecting multiple areas:
 
 ```fsharp
-let roomWithUpperLevel section =
+let hubRoom =
     section
-    // Lower room
-    |> Layout3D.section 0 0 0 (Interior.room 8 4 8 FloorCell WallCell CeilingCell)
-    // Stairs going up
-    |> Layout3D.section 2 0 3 (Interior.stairs 2 4 4 StairCell)
-    // Upper platform
-    |> Layout3D.section 0 4 0 (Interior.openRoom 6 2 6 FloorCell WallCell)
+    |> Interior.room 14 4 14 FloorCell WallCell CeilingCell
+    
+    // Four exits
+    |> Interior.doorway North 2 3  // Exit to north area
+    |> Interior.doorway South 2 3  // Exit to south area
+    |> Interior.doorway East 2 3   // Exit to east area
+    |> Interior.doorway West 2 3   // Exit to west area
+    
+    // Central marker
+    |> Layout3D.center 1 1 1 (Layout3D.set 0 0 0 HubIconCell)
 ```
 
-### Building with Windows
+### Enclosed vs Open-Top Rooms
+
+Use fully enclosed rooms for most interiors, open-top for exterior or rooftop areas:
 
 ```fsharp
-let roomWithWindows section =
+let mixedRooms =
+    section
+    // Fully enclosed indoor room
+    |> Layout3D.section 0 0 0 (Interior.room 10 4 10 FloorCell WallCell CeilingCell)
+    
+    // Open-top area (patio, rooftop, exterior room)
+    |> Layout3D.section 15 0 0 (Interior.openRoom 8 2 8 FloorCell WallCell)
+```
+
+## Adding Architectural Details
+
+### Windows
+
+Windows break up wall surfaces and provide visual interest:
+
+```fsharp
+let roomWithWindows =
+    section
+    |> Interior.room 12 5 12 FloorCell WallCell CeilingCell
+    
+    // North wall windows
+    |> Interior.window North 4 3 2  // Width=4, Height=3, Sill=2
+    |> Interior.window North 4 3 2  // Second window (same pattern)
+    
+    // East wall window
+    |> Interior.window East 3 3 2
+```
+
+**Window design:**
+- `windowWidth`: 2-4 cells for standard windows
+- `windowHeight`: 2-3 cells for vertical space
+- `sillHeight`: 1-2 cells from floor (eye level)
+
+### Pillars and Columns
+
+Pillars add vertical interest and cover for gameplay:
+
+```fsharp
+let pillaredRoom =
+    section
+    |> Interior.room 14 5 14 FloorCell WallCell CeilingCell
+    
+    // Four corner pillars
+    |> Layout3D.section 2 0 2 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+    |> Layout3D.section 10 0 2 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+    |> Layout3D.section 2 0 10 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+    |> Layout3D.section 10 0 10 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+```
+
+**Pillar usage:**
+- 2-4 tiles high for visual pillars
+- 4-6 tiles high for climbable columns
+- Base/middle/top tiles for visual variety
+
+### Vertical Shafts
+
+Shafts provide vertical transport (elevators, ladders):
+
+```fsharp
+let elevatorShaft =
+    section
+    |> Interior.shaft 2 2 12 WallCell  // 2x2 shaft, 12 tiles tall
+```
+
+Use shafts between floors with doors opening into them:
+
+```fsharp
+let floorWithShaft =
     section
     |> Interior.room 10 5 10 FloorCell WallCell CeilingCell
-    // Add windows on north wall
-    |> Interior.window North 3 2 2
-    |> Interior.window North 3 2 2
-    // Add windows on east wall
-    |> Interior.window East 3 2 2
+    
+    // Shaft in corner
+    |> Layout3D.section 8 0 8 (Interior.shaft 2 2 12 WallCell)
+    
+    // Door to shaft
+    |> Interior.doorway South 2 3
+```
+
+## Vertical Traversal
+
+### Staircases
+
+Stairs connect floors smoothly:
+
+```fsharp
+let stairSection =
+    section
+    // Lower room
+    |> Layout3D.section 0 0 0 (Interior.room 10 4 10 FloorCell WallCell CeilingCell)
+    
+    // Stairs going up
+    |> Interior.doorway East 2 3
+    |> Layout3D.section 10 0 3 (Interior.stairs 2 4 4 StairCell)
+    
+    // Upper room
+    |> Interior.doorway West 2 3
+    |> Layout3D.section 18 0 0 (Interior.room 8 4 8 FloorCell WallCell CeilingCell)
+```
+
+**Stair design:**
+- `width`: 2-3 cells for player comfort
+- `rise`: 4-6 cells for one floor
+- `run`: 2-3 cells per step for comfortable climbing
+
+### Multi-Level Layouts
+
+Combine rooms, stairs, and balconies:
+
+```fsharp
+let multiLevel =
+    section
+    // Ground floor lobby
+    |> Layout3D.section 0 0 0 (Interior.room 12 5 12 FloorCell WallCell CeilingCell)
+    |> Interior.doorway East 2 3
+    
+    // Staircase
+    |> Layout3D.section 12 0 4 (Interior.stairs 2 5 5 StairCell)
+    
+    // Second floor balcony (open-top)
+    |> Interior.doorway West 2 3
+    |> Layout3D.section 0 5 0 (Interior.openRoom 10 3 12 FloorCell WallCell)
+    
+    // Windows for exterior view
+    |> Interior.window North 4 2 1
+    |> Interior.window South 4 2 1
 ```
 
 ## Building Custom Interior Stamps
 
-Create game-specific stamps:
+Encapsulate common room patterns:
 
 ```fsharp
 module MyInterior =
-    /// A room with a door and a torch on each side
+    /// A room with a door and torches on each wall
     let torchRoom width height depth floor wall ceiling =
         Interior.room width height depth floor wall ceiling
         >> Interior.doorway North 2 3
         >> Interior.doorway South 2 3
-        >> Layout3D.set 1 2 1 TorchCell
-        >> Layout3D.set (width - 2) 2 1 TorchCell
-
-    /// A corridor with alcoves for torches
+        >> Layout3D.set 1 2 0 TorchCell
+        >> Layout3D.set (width - 2) 2 0 TorchCell
+    
+    /// A corridor with torches at both ends
     let litCorridor length width height floor wall ceiling =
         Interior.corridorX length width height floor wall ceiling
-        >> Layout3D.set 2 2 1 TorchWallCell
-        >> Layout3D.set (length - 3) 2 1 TorchWallCell
-
-    /// A room with a central pillar and 4 pillars in corners
-    let pillaredRoom width height depth floor wall ceiling pillarBase pillarMiddle pillarTop =
+        >> Layout3D.set 2 2 0 TorchCell
+        >> Layout3D.set (length - 3) 2 0 TorchCell
+    
+    /// A guard room with weapon racks
+    let armory width height depth floor wall ceiling =
         Interior.room width height depth floor wall ceiling
-        >> Layout3D.center 1 1 1 (Interior.pillar height pillarBase pillarMiddle pillarTop)
-        >> Layout3D.set 1 1 1 (Interior.pillar height pillarBase pillarMiddle pillarTop)
-        >> Layout3D.set (width - 2) 1 1 (Interior.pillar height pillarBase pillarMiddle pillarTop)
-        >> Layout3D.set 1 1 (depth - 2) (Interior.pillar height pillarBase pillarMiddle pillarTop)
-        >> Layout3D.set (width - 2) 1 (depth - 2) (Interior.pillar height pillarBase pillarMiddle pillarTop)
-
+        >> Layout3D.section 1 2 1 (Layout3D.fill 0 0 0 3 1 WeaponRackCell)
+        >> Layout3D.section (width - 4) 2 (depth - 2) (Layout3D.fill 0 0 0 3 1 WeaponRackCell)
+    
     /// An L-shaped room combination
     let lRoom room1W room1D room2W room2D height floor wall ceiling =
         Layout3D.section 0 0 0 (Interior.room room1W height room1D floor wall ceiling)
         >> Layout3D.section (room1W - 1) 0 0 (Interior.room room2W height room2D floor wall ceiling)
-        >> Layout3D.clear (room1W - 1) 0 1 1 height 1  // Open passage
+        >> Layout3D.clear (room1W - 1) 0 1 1 height 1
 ```
 
-## Example: Complete FPS Level Section
+### Using Custom Stamps
+
+```fsharp
+let customInterior =
+    section
+    |> Layout3D.section 0 0 0 (MyInterior.torchRoom 12 4 12 FloorCell WallCell CeilingCell)
+    |> Layout3D.section 12 0 3 (MyInterior.litCorridor 10 2 3 FloorCell WallCell CeilingCell)
+    |> Layout3D.section 22 0 0 (MyInterior.armory 10 5 10 FloorCell WallCell CeilingCell)
+```
+
+## Complete FPS Level Example
 
 ```fsharp
 let levelSection section =
     section
-    // Spawn room
-    |> Layout3D.section 0 0 0 (Interior.room 8 4 8 FloorCell WallCell CeilingCell)
+    // === AREA 1: Spawn ===
+    // Starting room
+    |> Layout3D.section 0 0 0 (Interior.room 10 4 10 FloorCell WallCell CeilingCell)
     |> Interior.doorway East 2 3
-
-    // Corridor with turns
-    |> Layout3D.section 8 0 3 (Interior.corridorX 6 2 3 FloorCell WallCell CeilingCell)
-    |> Layout3D.section 14 0 0 (Interior.room 4 3 6 FloorCell WallCell CeilingCell)
-    |> Interior.doorway South 2 3
-
-    // Side corridor with weapons
-    |> Layout3D.section 10 0 0 (Interior.corridorZ 4 2 3 FloorCell WallCell CeilingCell)
-    |> Layout3D.set 11 0 1 WeaponCell
-
-    // Main hall
-    |> Layout3D.section 14 0 6 (Interior.room 12 6 12 FloorCell WallCell CeilingCell)
-    |> Interior.doorway West 2 4
+    |> Layout3D.section 5 2 0 (Layout3D.set 0 0 0 SpawnCell)
+    
+    // === AREA 2: Corridor Network ===
+    // Main corridor with turns
+    |> Layout3D.section 10 0 3 (Interior.corridorX 6 2 3 FloorCell WallCell CeilingCell)
+    
+    // Side room (ammo pickup)
+    |> Layout3D.section 10 0 0 (Interior.room 4 3 4 FloorCell WallCell CeilingCell)
+    |> Layout3D.set 12 1 1 AmmoCell
+    
+    // Continue corridor
+    |> Layout3D.section 14 0 3 (Interior.corridorX 6 2 3 FloorCell WallCell CeilingCell)
+    
+    // === AREA 3: Combat Hall ===
+    // Large hall with pillars
+    |> Interior.doorway West 2 3
+    |> Layout3D.section 20 0 0 (Interior.room 16 5 16 FloorCell WallCell CeilingCell)
+    
+    // Pillars for cover
+    |> Layout3D.section 4 0 4 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+    |> Layout3D.section 12 0 4 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+    |> Layout3D.section 4 0 12 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+    |> Layout3D.section 12 0 12 (Interior.pillar 4 PillarBase PillarMid PillarTop)
+    
+    // Enemy spawns
+    |> Layout3D.section 6 2 4 (Layout3D.set 0 0 0 EnemyCell)
+    |> Layout3D.section 14 2 10 (Layout3D.set 0 0 0 EnemyCell)
+    
+    // Exits to other areas
     |> Interior.doorway East 2 4
     |> Interior.doorway South 3 4
-
-    // Pillars in main hall
-    |> Layout3D.section 16 0 8 (Interior.pillar 4 PillarBase PillarMiddle PillarTop)
-    |> Layout3D.section 22 0 8 (Interior.pillar 4 PillarBase PillarMiddle PillarTop)
-
-    // Stairs to upper level
-    |> Layout3D.section 20 0 2 (Interior.stairs 2 4 4 StairCell)
-
-    // Upper balcony
-    |> Layout3D.section 16 4 0 (Interior.openRoom 10 2 12 FloorCell WallCell)
-    |> Interior.window North 3 2 1
-    |> Interior.window South 3 2 1
-
-    // Windows in main hall
-    |> Interior.window North 4 3 2
-    |> Interior.window North 4 3 2
-    |> Interior.window South 4 3 2
-    |> Interior.window South 4 3 2
-
-    // Exit shaft
+    
+    // === AREA 4: Upper Balcony ===
+    // Stairs up
+    |> Layout3D.section 20 0 2 (Interior.stairs 2 5 5 StairCell)
+    
+    // Balcony (open-top for exterior feel)
+    |> Layout3D.section 20 5 0 (Interior.openRoom 12 3 16 FloorCell WallCell)
+    
+    // Windows looking down into hall
+    |> Interior.window North 4 2 1
+    |> Interior.window South 4 2 1
+    
+    // Treasure
+    |> Layout3D.section 28 6 8 (Layout3D.set 0 0 0 ChestCell)
+    
+    // === AREA 5: Exit ===
+    // Shaft to next level
     |> Layout3D.section 0 0 0 (Interior.shaft 2 2 10 WallCell)
+    |> Interior.doorway South 2 3
+
+let level =
+    CellGrid3D.create 40 10 20 (Vector3(2f, 2f, 2f)) Vector3.Zero
+        |> Layout3D.run levelSection
+```
+
+## Common Interior Patterns
+
+### The "Tunnel Run"
+
+Narrow corridor with no rooms, long linear passage:
+
+```fsharp
+let tunnelRun =
+    section
+    |> Interior.corridorX 20 2 3 FloorCell WallCell CeilingCell
+```
+
+Use for:
+- Introductions
+- Tension-building sections
+- Connecting distant areas
+
+### The "Hub and Spokes"
+
+Central room with 4 radiating corridors:
+
+```fsharp
+let hubAndSpokes =
+    section
+    // Central hub
+    |> Interior.room 10 4 10 FloorCell WallCell CeilingCell
+    |> Interior.doorway North 2 3
+    |> Interior.doorway South 2 3
+    |> Interior.doorway East 2 3
+    |> Interior.doorway West 2 3
+    
+    // North spoke (treasure)
+    |> Layout3D.section 4 0 4 (Interior.corridorZ 6 2 3 FloorCell WallCell CeilingCell)
+    |> Layout3D.section 4 0 0 (Interior.room 6 4 6 FloorCell WallCell CeilingCell)
+    
+    // South spoke (enemies)
+    |> Layout3D.section 4 0 10 (Interior.corridorZ 6 2 3 FloorCell WallCell CeilingCell)
+    |> Layout3D.section 4 0 10 (Interior.room 6 4 6 FloorCell WallCell CeilingCell)
+```
+
+### The "Multi-Floor Building"
+
+Three floors connected by stairs and shaft:
+
+```fsharp
+let multiFloor =
+    section
+    // Floor 1: Lobby
+    |> Layout3D.section 0 0 0 (Interior.room 10 4 10 FloorCell WallCell CeilingCell)
+    
+    // Stairs to floor 2
+    |> Layout3D.section 10 0 3 (Interior.stairs 2 5 5 StairCell)
+    
+    // Floor 2: Offices
+    |> Interior.doorway West 2 3
+    |> Layout3D.section 0 5 0 (Interior.room 10 4 10 FloorCell WallCell CeilingCell)
+    
+    // Shaft to floor 3
+    |> Layout3D.section 8 0 8 (Interior.shaft 2 2 5 WallCell)
+    
+    // Floor 3: Rooftop
+    |> Layout3D.section 0 10 0 (Interior.openRoom 10 2 10 FloorCell WallCell)
 ```
 
 ## Design Tips
 
-### Door Placement
+### Spatial Awareness
 
-When placing doors between rooms, ensure the door aligns with the corridor:
+- **Room size matters:** Large rooms feel grand but reduce tension. Small rooms feel claustrophobic but increase intensity.
+- **Corridor width:** 2 cells for tight passages, 3-4 for comfortable movement.
+- **Ceiling height:** 3-4 cells is standard for human-scale. 2 cells feels cramped, 5+ feels cavernous.
 
-```fsharp
-// Good - door aligns with corridor
-section
-|> Layout3D.section 0 0 0 (Interior.room 8 4 8 FloorCell WallCell CeilingCell)
-|> Interior.doorway East 2 3
-|> Layout3D.section 8 0 3 (Interior.corridorX 6 2 3 FloorCell WallCell CeilingCell)
+### Flow and Navigation
 
-// Bad - corridor Y offset doesn't match door Y position
-```
+- **Doors should be obvious:** Place doors on wall centers, mark with different tiles.
+- **Avoid dead ends:** Every area should lead somewhere (unless it's a deliberate trap).
+- **Provide shortcuts:** Players appreciate backtracking prevention (stairs between floors, hidden passages).
 
-### Stair Geometry
+### Visual Clarity
 
-For natural-feeling stairs:
-- Rise of 4-6 cells for typical stairs
-- Run of 2-3 cells per step for comfortable climbing
-- Width matches corridor width (usually 2-4 cells)
+- **Distinguish surfaces:** Different tiles for floors, walls, ceilings helps orientation.
+- **Mark exits:** Doors, stairs, and shafts should be visually distinct.
+- **Light sources:** Torches, lamps, or windows break up monotony.
 
-```fsharp
-// Typical stair
-Interior.stairs 2 4 4 StairCell  // width=2, rise=4, run=4
-```
+### Playtesting
 
-### Shaft Sizing
+- **Enemy placement test:** Can enemies reach players? Are there safe spots?
+- **Line of sight:** Check that corners provide actual cover.
+- **Door usability:** Do doors block movement awkwardly? Are they wide enough?
 
-For player-sized shafts (ladders, elevators):
-- Width/depth of 2 cells fits most player models
-- Height matches floor-to-floor distance
-
-```fsharp
-Interior.shaft 2 2 10 WallCell  // 2x2 shaft, 10 cells tall
-```
-
-### Window Placement
-
-Windows should be placed at eye level:
-- Sill height of 1-2 cells from floor
-- Window height of 2-3 cells
-
-```fsharp
-Interior.window North 3 2 1  // Width=3, Height=2, Sill=1
-```
+> **See also:** [API Reference](../../reference/index.html) for complete Interior module documentation

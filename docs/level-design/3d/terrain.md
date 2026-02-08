@@ -1,241 +1,243 @@
 ---
-title: Terrain Stamps
+title: Building Outdoor Terrain
 category: Level Design
 categoryindex: 2
 index: 26
 ---
 
-# Terrain Stamps
+# Building Outdoor Terrain
 
-The `Terrain` module provides stamps for outdoor 3D spaces like landscapes, paths, and landmarks. Import it with:
+Outdoor terrain (landscapes, wilderness, open worlds) is defined by natural elevation, paths, and landmarks. The `Terrain` module provides stamps for designing these efficiently.
+
+## Importing
 
 ```fsharp
 open Mibo.Layout3D
 open Mibo.Layout3D.Terrain
 ```
 
-## Available Stamps
+## Core Terrain Patterns
 
-### ground
+### Basic Ground Plane
 
-Creates a flat ground plane at Y=0:
-
-```fsharp
-section |> Terrain.ground 20 20 GrassCell
-```
-
-Parameters: `width`, `depth`, `content`
-
-The ground is a single cell thick at Y=0.
-
-### plateau
-
-An elevated flat top with vertical sides:
+Every outdoor level starts with a ground:
 
 ```fsharp
-section |> Terrain.plateau 10 10 5 TopCell SideCell
-```
-
-Parameters: `width`, `depth`, `height`, `top`, `side`
-
-- Creates a flat top at the specified height
-- Adds vertical sides connecting top to ground (Y=0)
-- Uses `top` for the flat surface and `side` for vertical faces
-
-### pit
-
-Carves a depression below ground level:
-
-```fsharp
-section |> Terrain.pit 5 5 3
-```
-
-Parameters: `width`, `depth`, `dropHeight`
-
-- Clears cells from Y=0 down to Y=-dropHeight
-- Useful for craters, basements, or sunken areas
-
-### rampX
-
-A ramp connecting two Y levels along the X axis:
-
-```fsharp
-section |> Terrain.rampX 10 5 4 RampCell
-```
-
-Parameters: `width`, `depth`, `rise`, `content`
-
-- Ramp rises from Y=0 to Y=rise across the X axis
-- Each cell's Y increases as X increases
-- Useful for stairs, inclines, or gradual height changes
-
-### rampZ
-
-A ramp connecting two Y levels along the Z axis:
-
-```fsharp
-section |> Terrain.rampZ 5 10 4 RampCell
-```
-
-Parameters: `width`, `depth`, `rise`, `content`
-
-- Ramp rises from Y=0 to Y=rise across the Z axis
-- Each cell's Y increases as Z increases
-
-### path
-
-Creates a path/road at ground level between waypoints:
-
-```fsharp
-let waypoints = [(0, 0, 0); (5, 0, 5); (10, 0, 10)]
-section |> Terrain.path waypoints 2 PathCell
-```
-
-Parameters: `points`, `width`, `content`
-
-- Points are (x, y, z) tuples
-- Uses 3D line rasterization to connect points
-- Path is at ground level (Y from points)
-
-### scatter
-
-Randomly places content on the ground plane:
-
-```fsharp
-section |> Terrain.scatter 10 42 TreeCell
-```
-
-Parameters: `count`, `seed`, `content`
-
-- Places `count` items at random X, Z positions at Y=0
-- Uses `seed` for deterministic random placement
-- Great for trees, rocks, props, or decorative elements
-
-### heightmap
-
-Generates terrain from a height function:
-
-```fsharp
-let hillHeight x z =
-    let dist = float (sqrt ((x-10)*(x-10) + (z-10)*(z-10)))
-    int (5.0 * exp (-dist/10.0))  // Gaussian hill centered at (10,10)
-
-section |> Terrain.heightmap hillHeight GrassCell
-```
-
-Parameters: `heightFn`, `content`
-
-- `heightFn` takes (x, z) grid coordinates and returns Y height
-- Uses `content` for all cells at specified heights
-- Great for hills, valleys, or procedural terrain
-
-### layeredHeightmap
-
-Generates multi-layer terrain with different materials at different depths:
-
-```fsharp
-let hillHeight x z =
-    let dist = float (sqrt ((x-10)*(x-10) + (z-10)*(z-10)))
-    int (8.0 * exp (-dist/10.0))  // Tall hill
-
-section |> Terrain.layeredHeightmap hillHeight GrassCell DirtCell 3 StoneCell
-```
-
-Parameters: `heightFn`, `topLayer`, `midLayer`, `midDepth`, `bottomLayer`
-
-- `heightFn` determines the surface height
-- `topLayer` is used for the surface (top `midDepth` cells)
-- `midLayer` fills from `midDepth` down to near bottom
-- `bottomLayer` fills the remaining cells
-
-## Composing Terrain Layouts
-
-### Simple Landscape
-
-```fsharp
-let landscape =
+let basicGround =
     CellGrid3D.create 30 10 30 (Vector3(2f, 2f, 2f)) Vector3.Zero
-    |> Layout3D.run (fun section ->
-        section
-        // Base ground
-        |> Terrain.ground 30 30 GrassCell
-        // Scattered trees
-        |> Terrain.scatter 20 42 TreeCell
-        |> Terrain.scatter 15 78 TreeCell
-        // A hill
-        |> Layout3D.section 10 0 10 (fun inner ->
-            let hillHeight x z =
-                let dist = float (sqrt ((x-5)*(x-5) + (z-5)*(z-5)))
-                int (5.0 * exp (-dist/5.0))
-            inner |> Terrain.heightmap hillHeight GrassCell
+        |> Layout3D.run (fun section ->
+            section
+            |> Terrain.ground 30 30 GrassCell
         )
-    )
 ```
 
-### Plateau with Access Ramp
+### Scattered Decorations
+
+Add trees, rocks, and landmarks:
 
 ```fsharp
-let elevatedArea =
-    CellGrid3D.create 20 10 20 (Vector3(2f, 2f, 2f)) Vector3.Zero
-    |> Layout3D.run (fun section ->
-        section
-        // Ground level
-        |> Terrain.ground 20 20 GrassCell
-        // Elevated plateau
-        |> Layout3D.section 5 0 5 (Terrain.plateau 10 10 4 TopCell SideCell)
-        // Ramp up to plateau
-        |> Layout3D.section 0 0 9 (Terrain.rampX 5 2 4 RampCell)
-    )
+let forestedGround =
+    section
+    |> Terrain.ground 30 30 GrassCell
+    
+    // Scattered trees (deterministic with seed)
+    |> Terrain.scatter 15 42 TreeCell
+    |> Terrain.scatter 20 156 TreeCell
+    
+    // Rocks
+    |> Terrain.scatter 8 789 RockCell
 ```
 
-### Valley with Path
+**Scatter design:**
+- `count`: 10-30 items for sparse decor, 50-100 for dense forests
+- `seed`: Any integer (same seed = same pattern every time)
+- Use multiple scatter calls with different seeds for varied placement
+
+### Elevation Changes
+
+Create plateaus (hills) and pits (depressions):
 
 ```fsharp
-let valleyWithPath =
-    CellGrid3D.create 40 15 40 (Vector3(2f, 2f, 2f)) Vector3.Zero
-    |> Layout3D.run (fun section ->
-        section
-        // Create a valley (high walls, low center)
-        |> Layout3D.section 0 0 0 (fun inner ->
-            let valleyHeight x z =
-                // Center of valley is at (20, 20)
-                let distFromCenter = float (sqrt ((x-20)*(x-20) + (z-20)*(z-20)))
-                int (8.0 * exp (-distFromCenter/15.0))  // 8 cells tall at center
-            inner |> Terrain.heightmap valleyHeight GrassCell
-        )
-        // Winding path through valley
-        |> Layout3D.section 5 0 5 (Terrain.path [(0,0,0); (10,0,10); (15,0,5); (25,0,15); (30,0,30)] 2 PathCell)
-        // Trees on the ridge
-        |> Layout3D.section 0 0 0 (fun inner ->
-            inner
-            |> Terrain.scatter 25 37 TreeCell
-            |> Terrain.scatter 20 91 TreeCell
-        )
+let variedTerrain =
+    section
+    // Base ground
+    |> Terrain.ground 40 40 GrassCell
+    
+    // Hill/plateau
+    |> Layout3D.section 10 0 10 (Terrain.plateau 12 12 5 HillTopCell HillSideCell)
+    
+    // Depression/crater
+    |> Layout3D.section 25 0 25 (Terrain.pit 8 8 3)
+    
+    // Water in crater
+    |> Layout3D.section 27 0 27 (Terrain.ground 4 4 WaterCell)
+```
+
+**Elevation tips:**
+- `plateau`: Use height of 3-6 cells for hills. Higher plateaus = bigger landmark.
+- `pit`: Use depth of 2-4 cells for shallow depressions, 5+ for craters.
+
+### Ramps and Inclines
+
+Gradual height changes for natural-looking terrain:
+
+```fsharp
+let rampedTerrain =
+    section
+    // Base ground
+    |> Terrain.ground 20 20 GrassCell
+    
+    // Ramp up to plateau
+    |> Layout3D.section 0 0 10 (Terrain.rampX 10 10 4 RampCell)
+    
+    // Plateau on hill
+    |> Layout3D.section 10 4 0 (Terrain.ground 8 8 GrassCell)
+```
+
+**Ramp design:**
+- `rise`: 4-6 cells for one story height
+- Ramp width/depth should match path width
+- Place ramps where terrain changes (road up hill, path to cave)
+
+## Pathways and Navigation
+
+### Simple Paths
+
+Create roads or trails between landmarks:
+
+```fsharp
+let simplePath =
+    section
+    |> Terrain.ground 30 30 GrassCell
+    
+    // Winding path through terrain
+    |> Layout3D.section 0 0 5 (Terrain.path [
+        (0, 0, 0)
+        (10, 0, 5)
+        (20, 0, 10)
+        (25, 0, 15)
+        (30, 0, 25)
+    ] 2 PathCell)
+```
+
+### Multi-Path Network
+
+Branching roads between multiple areas:
+
+```fsharp
+let pathNetwork =
+    section
+    |> Terrain.ground 40 40 GrassCell
+    
+    // Main path (east-west)
+    |> Layout3D.section 5 0 20 (Terrain.path [
+        (0, 0, 0)
+        (30, 0, 0)
+    ] 3 PathCell)
+    
+    // North branch to hill
+    |> Layout3D.section 15 0 20 (Terrain.path [
+        (0, 0, 0)
+        (0, 0, -10)
+    ] 2 PathCell)
+    
+    // South branch to water
+    |> Layout3D.section 15 0 20 (Terrain.path [
+        (0, 0, 0)
+        (0, 0, 10)
+    ] 2 PathCell)
+```
+
+### Path with Elevation
+
+Ramps integrated with paths:
+
+```fsharp
+let elevatedPath =
+    section
+    |> Terrain.ground 30 30 GrassCell
+    
+    // Path on ground
+    |> Layout3D.section 5 0 10 (Terrain.path [
+        (0, 0, 0)
+        (15, 0, 0)
+    ] 3 PathCell)
+    
+    // Ramp up to plateau
+    |> Layout3D.section 20 0 5 (Terrain.rampZ 5 10 4 RampCell)
+    
+    // Path on plateau
+    |> Layout3D.section 20 4 5 (Terrain.path [
+        (0, 0, 0)
+        (10, 0, 10)
+    ] 3 PathCell)
+```
+
+## Procedural Terrain
+
+### Heightmap Functions
+
+Generate terrain from functions:
+
+```fsharp
+let hillTerrain =
+    section
+    // Generate a single hill
+    |> Layout3D.section 0 0 0 (fun inner ->
+        let hillHeight x z =
+            // Distance from hill center at (12, 12)
+            let dist = float (sqrt ((x-12)*(x-12) + (z-12)*(z-12)))
+            int (6.0 * exp (-dist/30.0))  // 6 cells tall
+        inner |> Terrain.heightmap hillHeight GrassCell
     )
 ```
 
-### Multi-Layer Terrain
+### Multiple Features
+
+Combine multiple height functions:
+
+```fsharp
+let complexTerrain =
+    section
+    |> Layout3D.section 0 0 0 (fun inner ->
+        let terrainHeight x z =
+            // Hill 1 at (12, 12)
+            let h1 = 6.0 * exp (-((x-12)*(x-12) + (z-12)*(z-12))/30.0)
+            
+            // Hill 2 at (30, 20)
+            let h2 = 4.0 * exp (-((x-30)*(x-30) + (z-20)*(z-20))/40.0)
+            
+            // Small valley between hills
+            let valley = -1.0 * exp (-((x-21)*(x-21) + (z-16)*(z-16))/50.0)
+            
+            int (h1 + h2 + valley)
+        inner |> Terrain.heightmap terrainHeight GrassCell
+    )
+```
+
+### Layered Terrain
+
+Show different materials at depths (grass on surface, dirt below, stone deep):
 
 ```fsharp
 let layeredTerrain =
-    CellGrid3D.create 25 20 25 (Vector3(2f, 2f, 2f)) Vector3.Zero
-    |> Layout3D.run (fun section ->
-        section
-        // Create a hill with grass, dirt, and stone layers
-        |> Layout3D.section 0 0 0 (fun inner ->
-            let hillHeight x z =
-                let dist = float (sqrt ((x-12)*(x-12) + (z-12)*(z-12)))
-                int (10.0 * exp (-dist/8.0))
-            inner |> Terrain.layeredHeightmap hillHeight GrassCell DirtCell 4 StoneCell
-        )
-        // Add a pit with exposed layers
-        |> Layout3D.section 18 0 18 (Terrain.pit 5 5 6)
+    section
+    |> Layout3D.section 0 0 0 (fun inner ->
+        let mountainHeight x z =
+            let dist = float (sqrt ((x-15)*(x-15) + (z-15)*(z-15)))
+            int (10.0 * exp (-dist/20.0))  // 10 cells tall
+        inner |> Terrain.layeredHeightmap mountainHeight GrassCell DirtCell 3 StoneCell
     )
 ```
 
+**Layered terrain design:**
+- `topLayer`: 1-3 cells of surface material
+- `midLayer`: 3-6 cells of subsurface material
+- `bottomLayer`: Remaining cells fill with bedrock
+
 ## Building Custom Terrain Stamps
 
-Create game-specific terrain stamps:
+Encapsulate common terrain patterns:
 
 ```fsharp
 module MyTerrain =
@@ -244,7 +246,7 @@ module MyTerrain =
         let craterHeight x z =
             let dist = float (sqrt ((x-radius)*(x-radius) + (z-radius)*(z-radius)))
             if dist < float radius then
-                int (-float rimHeight * (1.0 - dist/float radius))  // Depression inside
+                int (-float rimHeight * (1.0 - dist/float radius))  // Depression
             elif dist < float radius + 2.0 then
                 rimHeight  // Raised rim
             else
@@ -253,24 +255,24 @@ module MyTerrain =
             let (w, d) = (radius * 2 + 4, radius * 2 + 4)
             section
             |> Layout3D.section 0 0 0 (fun inner ->
-                inner
-                |> Terrain.layeredHeightmap craterHeight CraterDirt CraterDirt 2 CraterRock
+                inner |> Terrain.layeredHeightmap craterHeight CraterDirt CraterDirt 2 CraterRock
             )
-
-    /// A road with barriers on the sides
-    let roadWithBarriers length width roadCell barrierCell section =
-        section
-        |> Terrain.path [(0, 0, 0); (length-1, 0, 0)] width roadCell
-        |> Layout3D.repeatX 0 0 1 length BarrierCell  // Left barrier
-        |> Layout3D.repeatX (width-1) 0 1 length BarrierCell  // Right barrier
-
-    /// A forest clearing with trees around the edges
-    let forestClearing width depth treeCount section =
-        section
-        |> Terrain.ground width depth GrassCell
-        |> Terrain.scatter treeCount 42 TreeCell
-        |> Layout3D.clear 2 0 2 (width-4) 1 (depth-4)  // Clear center
-
+    
+    /// A road with barriers on both sides
+    let roadWithBarriers length width roadCell barrierCell =
+        fun section ->
+            section
+            |> Terrain.path [(0, 0, 0); (length-1, 0, 0)] width roadCell
+            |> Layout3D.repeatX 0 0 1 length BarrierCell  // Left barrier
+            |> Layout3D.repeatX (width-1) 0 1 length BarrierCell  // Right barrier
+    
+    /// A forest clearing with trees around edges
+    let forestClearing width depth treeCount =
+        fun section ->
+            section
+            |> Terrain.ground width depth GrassCell
+            |> Terrain.scatter treeCount 42 TreeCell
+    
     /// A mountain peak with snow on top
     let mountain width depth maxHeight =
         let mountainHeight x z =
@@ -281,116 +283,166 @@ module MyTerrain =
             section
             |> Layout3D.section 0 0 0 (fun inner ->
                 inner
-                |> Terrain.layeredHeightmap mountainHeight SnowCell RockCell 3 StoneCell
-            )
-
-    /// A river cutting through terrain
-    let river width depth riverWidth section =
-        let riverHeight x z =
-            // Create a river running down the middle (z axis)
-            let distFromCenter = abs (x - width/2)
-            if distFromCenter < riverWidth then
-                -3  // Riverbed is lower
-            elif distFromCenter < riverWidth + 2 then
-                1   // Small bank
-            else
-                2   // Higher ground
-        fun section ->
-            section
-            |> Layout3D.section 0 0 0 (fun inner ->
-                inner
-                |> Terrain.layeredHeightmap riverHeight WaterCell RiverbedCell 2 GrassCell
+                |> Terrain.layeredHeightmap mountainHeight SnowCell RockCell 2 StoneCell
             )
 ```
 
-## Example: Complete Outdoor Area
+### Using Custom Stamps
+
+```fsharp
+let customTerrain =
+    section
+    |> Layout3D.section 5 0 5 (MyTerrain.crater 6 3)
+    |> Layout3D.section 20 0 10 (MyTerrain.mountain 20 20 12)
+    |> Layout3D.section 5 0 20 (MyTerrain.roadWithBarriers 15 3 RoadCell BarrierCell)
+    |> Layout3D.section 35 0 5 (MyTerrain.forestClearing 15 15 20)
+```
+
+## Complete Outdoor Area Example
 
 ```fsharp
 let outdoorArea =
-    CellGrid3D.create 50 20 50 (Vector3(2f, 2f, 2f)) Vector3.Zero
-    |> Layout3D.run (fun section ->
-        section
-        // Base terrain with hills
-        |> Layout3D.section 0 0 0 (fun inner ->
-            let hillHeight x z =
-                let h1 = 5.0 * exp (-((x-15.0)*(x-15.0) + (z-15.0)*(z-15.0))/50.0)
-                let h2 = 8.0 * exp (-((x-35.0)*(x-35.0) + (z-35.0)*(z-35.0))/80.0)
-                int (h1 + h2)
-            inner |> Terrain.layeredHeightmap hillHeight GrassCell DirtCell 3 StoneCell
+    CellGrid3D.create 50 15 50 (Vector3(2f, 2f, 2f)) Vector3.Zero
+        |> Layout3D.run (fun section ->
+            section
+            // Base terrain with gentle hills
+            |> Layout3D.section 0 0 0 (fun inner ->
+                let gentleHills x z =
+                    let h1 = 5.0 * exp (-((x-15)*(x-15) + (z-15)*(z-15))/60.0)
+                    let h2 = 4.0 * exp (-((x-35)*(x-35) + (z-35)*(z-35))/50.0)
+                    int (h1 + h2)
+                inner |> Terrain.layeredHeightmap gentleHills GrassCell DirtCell 3 StoneCell
+            )
+            
+            // Main road through terrain
+            |> Layout3D.section 0 0 20 (Terrain.path [
+                (0, 0, 0)
+                (49, 0, 25)
+                (49, 0, 49)
+            ] 4 RoadCell)
+            
+            // Side path to village
+            |> Layout3D.section 15 0 20 (Terrain.path [
+                (0, 0, 0)
+                (15, 0, 15)
+            ] 2 PathCell)
+            
+            // Hill with village
+            |> Layout3D.section 0 4 0 (fun inner ->
+                let hillHeight x z =
+                    let dist = float (sqrt ((x-8)*(x-8) + (z-8)*(z-8)))
+                    int (8.0 * exp (-dist/20.0))
+                inner
+                |> Terrain.layeredHeightmap hillHeight GrassCell DirtCell 3 StoneCell
+            )
+            
+            // Village buildings (houses)
+            |> Layout3D.section 4 8 4 (Layout3D.fill 0 0 0 3 2 3 HouseFloorCell)
+            |> Layout3D.section 4 8 8 (Layout3D.fill 0 0 0 3 2 3 HouseFloorCell)
+            |> Layout3D.section 12 8 4 (Layout3D.fill 0 0 0 4 2 4 HouseFloorCell)
+            
+            // Forest clearing
+            |> Layout3D.section 30 0 30 (MyTerrain.forestClearing 15 15 40)
+            
+            // Water/lake area
+            |> Layout3D.section 35 0 35 (Terrain.pit 10 10 2)
+            |> Layout3D.section 37 0 37 (Terrain.ground 6 6 WaterCell)
+            
+            // Scattered decor
+            |> Terrain.scatter 30 123 TreeCell
+            |> Terrain.scatter 50 456 RockCell
         )
+```
 
-        // Path connecting areas
-        |> Layout3D.section 5 0 5 (Terrain.path [(0,0,0); (15,0,15); (25,0,20); (40,0,40)] 2 PathCell)
+## Common Terrain Patterns
 
-        // Elevated plateau near first hill
-        |> Layout3D.section 10 0 10 (Terrain.plateau 8 8 4 TopCell SideCell)
-        |> Layout3D.section 10 0 8 (Terrain.rampZ 8 2 4 RampCell)
+### The "Rolling Hills"
 
-        // Forest area
-        |> Layout3D.section 20 0 30 (fun inner ->
-            inner
-            |> Terrain.scatter 40 123 TreeCell
-            |> Terrain.scatter 30 456 TreeCell
-        )
+Gentle, varied elevation without sharp changes:
 
-        // Lake (pit filled with water)
-        |> Layout3D.section 35 0 35 (Terrain.pit 8 8 4)
-        |> Layout3D.section 36 0 36 (Terrain.ground 6 6 WaterCell)
+```fsharp
+let rollingHills =
+    section
+    |> Layout3D.section 0 0 0 (fun inner ->
+        let hillHeight x z =
+            // Overlapping hills create natural variation
+            let h1 = 4.0 * exp (-((x-10)*(x-10) + (z-10)*(z-10))/40.0)
+            let h2 = 3.0 * exp (-((x-25)*(x-25) + (z-20)*(z-20))/35.0)
+            let h3 = 5.0 * exp (-((x-15)*(x-15) + (z-35)*(z-35))/50.0)
+            int (h1 + h2 + h3)
+        inner |> Terrain.heightmap hillHeight GrassCell
+    )
+```
 
-        // Rocks scattered around
-        |> Terrain.scatter 15 789 RockCell
-        |> Terrain.scatter 20 234 RockCell
+### The "Valley Pass"
 
-        // Small village on the plateau
-        |> Layout3D.section 11 4 11 (Layout3D.fill 0 0 0 3 2 3 HouseFloorCell)
-        |> Layout3D.section 15 4 13 (Layout3D.fill 0 0 0 3 2 3 HouseFloorCell)
+Low path between high areas:
+
+```fsharp
+let valleyPass =
+    section
+    // High terrain on both sides
+    |> Layout3D.section 0 0 0 (fun inner ->
+        let valleyHeight x z =
+            // High ridges at edges, low in center
+            let distFromCenter = abs (x - 25)
+            int (8.0 * exp (-distFromCenter*distFromCenter/200.0))
+        inner |> Terrain.heightmap valleyHeight GrassCell
+    )
+    
+    // Path through valley
+    |> Layout3D.section 0 0 25 (Terrain.path [
+        (0, 0, 0)
+        (49, 0, 0)
+    ] 3 PathCell)
+```
+
+### The "Island"
+
+Land surrounded by water:
+
+```fsharp
+let island =
+    section
+    // Water base
+    |> Terrain.ground 40 40 WaterCell
+    
+    // Island landmass
+    |> Layout3D.section 10 0 10 (fun inner ->
+        let islandHeight x z =
+            let dist = float (sqrt ((x-10)*(x-10) + (z-10)*(z-10)))
+            if dist < 15.0 then
+                int (4.0 * (1.0 - dist/15.0))  // Slopes up to center
+            else
+                0
+        inner |> Terrain.layeredHeightmap islandHeight GrassCell DirtCell 2 SandCell
     )
 ```
 
 ## Design Tips
 
-### Heightmap Functions
+### Terrain Naturalness
 
-For natural-looking terrain:
-- Use Gaussian functions for smooth hills: `h * exp(-dist^2 / scale)`
-- Combine multiple hills by adding heights together
-- Use noise functions for more varied terrain
+- **Combine features:** Don't just use one function type. Mix plates, pits, ramps for realism.
+- **Smooth transitions:** Use ramps between elevation levels, avoid sudden cliffs.
+- **Layer depth:** Use `layeredHeightmap` so hills have proper interior (not hollow).
 
-```fsharp
-let naturalTerrain x z =
-    let h1 = 5.0 * exp (-((x-10.0)*(x-10.0) + (z-10.0)*(z-10.0))/50.0)
-    let h2 = 3.0 * exp (-((x-30.0)*(x-30.0) + (z-25.0)*(z-25.0))/40.0)
-    let h3 = 2.0 * sin(x/5.0) * cos(z/5.0)  // Gentle undulation
-    int (h1 + h2 + h3)
-```
+### Navigation Design
 
-### Path Placement
+- **Path width:** 2-3 cells for walking, 4-5 for roads.
+- **Slope angle:** Rise/run of 1:2 or 1:3 is comfortable. 1:1 is steep climb.
+- **Avoid dead ends:** Paths should loop or connect to areas of interest.
 
-Paths should follow natural contours:
-- Use multiple waypoints for winding paths
-- Path width of 2-4 cells is typical
-- Consider adding ramps for steep sections
+### Visual Variety
 
-### Layered Terrain
+- **Material changes:** Use different tiles for different elevations (grass low, rock high).
+- **Scatter patterns:** Multiple scatter calls with different seeds prevent uniform distribution.
+- **Landmark visibility:** Make key areas (hills, islands) visually distinct.
 
-Use `layeredHeightmap` for realistic terrain:
-- Top layer: Grass, snow, or sand (1-3 cells)
-- Middle layer: Dirt, gravel (3-5 cells)
-- Bottom layer: Stone, bedrock (remaining cells)
+### Performance Considerations
 
-```fsharp
-Terrain.layeredHeightmap heightFn GrassCell DirtCell 3 StoneCell
-```
+- **Large heightmaps:** For grids 100x100+, consider generating in sections.
+- **Complex functions:** Expensive math in height functions can slow generation.
+- **Culling:** Use `iterVolume` when rendering to only process visible cells.
 
-### Scatter Placement
-
-Use different seeds for variety:
-- Different seed values give different patterns
-- Multiple scatter calls with different contents create variety
-- Combine with terrain features (trees on hills, rocks near mountains)
-
-```fsharp
-section
-|> Terrain.scatter 10 42 TreeCell    // Forest pattern
-|> Terrain.scatter 15 789 RockCell   // Different rock arrangement
-```
+> **See also:** [API Reference](../../reference/index.html) for complete Terrain module documentation

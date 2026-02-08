@@ -61,7 +61,7 @@ grid
 )
 
 // Iterate only visible cells (culled to frustum)
-// This is the foundation of efficient rendering in 3D, ensuring 
+// This is the foundation of efficient rendering in 3D, ensuring
 // you only spawn/render models within the camera's view.
 let viewBounds = BoundingBox(min, max)
 grid
@@ -261,16 +261,7 @@ level
 
 ### The Stamp Pattern
 
-Think of stamps like HTML elements:
-
-| HTML | Layout3D Stamps |
-|------|-----------------|
-| `<div>` | `Layout3D.section` |
-| `<div style="padding">` | `Layout3D.padding` |
-| CSS Flexbox | `Layout3D.flowX`, `Layout3D.flowY`, `Layout3D.flowZ` |
-| Custom component | Your stamp function |
-| Nesting `<div>`s | Nesting `Layout3D.section` calls |
-| Composing components | Using `>>` |
+Think of stamps Lego blocks, using a few blocks on top of each other you can build a bigger thing.
 
 The key insight: **stamps are just functions**. You can store them, pass them around, compose them, and build complex structures from simple pieces.
 
@@ -322,22 +313,12 @@ CellGridRenderer3D.renderVolume frustumBounds grid (fun worldPos content ->
 )
 ```
 
-## Performance Notes
-
-- **Flat array storage** - O(1) access via index calculation
-- **Clip-then-Loop** - Volume operations (`fill`, `clear`, `repeat`, `planes`) calculate valid bounds once, eliminating inner-loop checks
-- **In-place mutation** - All operations mutate the backing array directly
-- **Zero-copy sections** - Sections are lightweight structs pointing to the same grid
-- **Struct voption** - No heap allocation for empty cells
-- **`[<InlineIfLambda>]`** - Lambda-taking functions are inlined for zero closure allocation
-
 For large grids (1000+ cells), prefer `Layout3D.generate` over setting cells individually - it's a single pass with no intermediate allocations.
 
 ## 3D-Specific Considerations
 
 ### Multi-Cell Models
 
-Models larger than one cell are a **user concern**:
 1. Use anchor-cell only and handle size at render time
 2. Create stamps that fill all occupied cells for blocking/collision
 
