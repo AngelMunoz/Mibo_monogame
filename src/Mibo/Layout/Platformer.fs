@@ -39,9 +39,7 @@ module Platformer =
     fill
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
-    section
-    |> Layout.fill 0 0 width height fill
-    |> Layout.border 0 0 width height border
+    section |> Layout.rect 0 0 width height border fill
 
   /// <summary>
   /// Generates a horizontal platform.

@@ -24,10 +24,15 @@ type CellGrid2D<'T> = {
   /// <summary>
   /// The raw backing store. direct access is discouraged; use 'get'/'set' for bounds safety.
   /// </summary>
-  Cells: 'T voption[,]
+  Cells: 'T voption[]
 }
 
 module CellGrid2D =
+  /// <summary>
+  /// Computes the flat array index from 2D coordinates.
+  /// </summary>
+  let inline private toIndex x y width = x + y * width
+
   /// <summary>
   /// Allocates a new grid. This is an O(Width * Height) operation that allocates a single contiguous array.
   /// </summary>
@@ -42,7 +47,7 @@ module CellGrid2D =
       CellSize = cellSize
       Width = width
       Height = height
-      Cells = Array2D.create width height ValueNone
+      Cells = Array.create (width * height) ValueNone
     }
 
   /// <summary>
@@ -51,7 +56,8 @@ module CellGrid2D =
   /// </summary>
   let inline set x y (content: 'T) (grid: CellGrid2D<'T>) : unit =
     if x >= 0 && x < grid.Width && y >= 0 && y < grid.Height then
-      grid.Cells.[x, y] <- ValueSome content
+      let idx = toIndex x y grid.Width
+      grid.Cells.[idx] <- ValueSome content
 
   /// <summary>
   /// Retrieves a cell's value. Returns ValueNone for out-of-bounds coordinates.
@@ -59,7 +65,8 @@ module CellGrid2D =
   /// </summary>
   let inline get x y (grid: CellGrid2D<'T>) : 'T voption =
     if x >= 0 && x < grid.Width && y >= 0 && y < grid.Height then
-      grid.Cells.[x, y]
+      let idx = toIndex x y grid.Width
+      grid.Cells.[idx]
     else
       ValueNone
 
@@ -81,9 +88,15 @@ module CellGrid2D =
     ([<InlineIfLambda>] action: int -> int -> 'T -> unit)
     (grid: CellGrid2D<'T>)
     : unit =
-    for x in 0 .. grid.Width - 1 do
-      for y in 0 .. grid.Height - 1 do
-        grid |> get x y |> ValueOption.iter(action x y)
+    let w = grid.Width
+
+    for i in 0 .. grid.Cells.Length - 1 do
+      match grid.Cells.[i] with
+      | ValueSome content ->
+        let x = i % w
+        let y = i / w
+        action x y content
+      | ValueNone -> ()
 
   /// <summary>
   /// Optimization for rendering: only iterates cells that intersect the given world-space bounds.
@@ -107,6 +120,14 @@ module CellGrid2D =
         (grid.Height - 1)
         ((bounds.Bottom - int grid.Origin.Y) / int grid.CellSize.Y)
 
-    for x in startX..endX do
-      for y in startY..endY do
-        grid |> get x y |> ValueOption.iter(action x y)
+    let w = grid.Width
+
+    for y in startY..endY do
+      let yOffset = y * w
+
+      for x in startX..endX do
+        let idx = yOffset + x
+
+        match grid.Cells.[idx] with
+        | ValueSome content -> action x y content
+        | ValueNone -> ()

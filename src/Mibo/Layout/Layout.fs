@@ -86,7 +86,12 @@ module Layout =
   /// <param name="x">Relative X position.</param>
   /// <param name="y">Relative Y position.</param>
   /// <param name="f">The layout function to run inside the new section.</param>
-  let inline section x y ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>) (parent: GridSection2D<'T>) : GridSection2D<'T> =
+  let inline section
+    x
+    y
+    ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
+    (parent: GridSection2D<'T>)
+    : GridSection2D<'T> =
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + x
@@ -94,15 +99,22 @@ module Layout =
       Width = parent.Width - x
       Height = parent.Height - y
     }
+
     f childSection |> ignore
     parent
 
   /// <summary>
-  /// Web Analog: padding. 
+  /// Web Analog: padding.
   /// Creates a sub-section that is shrunk by 'n' on all sides.
   /// </summary>
-  let inline padding n ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>) (parent: GridSection2D<'T>) : GridSection2D<'T> =
-    if n <= 0 then f parent |> ignore; parent
+  let inline padding
+    n
+    ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
+    (parent: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    if n <= 0 then
+      f parent |> ignore
+      parent
     else
       let childSection = {
         BackingGrid = parent.BackingGrid
@@ -111,13 +123,21 @@ module Layout =
         Width = max 0 (parent.Width - 2 * n)
         Height = max 0 (parent.Height - 2 * n)
       }
+
       f childSection |> ignore
       parent
 
   /// <summary>
   /// Creates a sub-section with explicit padding for each side.
   /// </summary>
-  let inline paddingEx left top right bottom ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>) (parent: GridSection2D<'T>) : GridSection2D<'T> =
+  let inline paddingEx
+    left
+    top
+    right
+    bottom
+    ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
+    (parent: GridSection2D<'T>)
+    : GridSection2D<'T> =
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + left
@@ -125,6 +145,7 @@ module Layout =
       Width = max 0 (parent.Width - left - right)
       Height = max 0 (parent.Height - top - bottom)
     }
+
     f childSection |> ignore
     parent
 
@@ -132,9 +153,15 @@ module Layout =
   /// Web Analog: margin: auto.
   /// Centers a block of a specific size within the current section.
   /// </summary>
-  let inline center w h ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>) (parent: GridSection2D<'T>) : GridSection2D<'T> =
+  let inline center
+    w
+    h
+    ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
+    (parent: GridSection2D<'T>)
+    : GridSection2D<'T> =
     let x = (parent.Width - w) / 2
     let y = (parent.Height - h) / 2
+
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + x
@@ -142,6 +169,7 @@ module Layout =
       Width = w
       Height = h
     }
+
     f childSection |> ignore
     parent
 
@@ -149,22 +177,34 @@ module Layout =
   /// Web Analog: flex-direction: row.
   /// Places a sequence of stamps horizontally with a fixed step between them.
   /// </summary>
-  let inline flowX step (stamps: (GridSection2D<'T> -> GridSection2D<'T>) seq) (parent: GridSection2D<'T>) : GridSection2D<'T> =
+  let inline flowX
+    step
+    (stamps: (GridSection2D<'T> -> GridSection2D<'T>) seq)
+    (parent: GridSection2D<'T>)
+    : GridSection2D<'T> =
     let mutable i = 0
+
     for stamp in stamps do
       section (i * step) 0 stamp parent |> ignore
       i <- i + 1
+
     parent
 
   /// <summary>
   /// Web Analog: flex-direction: column.
   /// Places a sequence of stamps vertically with a fixed step between them.
   /// </summary>
-  let inline flowY step (stamps: (GridSection2D<'T> -> GridSection2D<'T>) seq) (parent: GridSection2D<'T>) : GridSection2D<'T> =
+  let inline flowY
+    step
+    (stamps: (GridSection2D<'T> -> GridSection2D<'T>) seq)
+    (parent: GridSection2D<'T>)
+    : GridSection2D<'T> =
     let mutable i = 0
+
     for stamp in stamps do
       section 0 (i * step) stamp parent |> ignore
       i <- i + 1
+
     parent
 
   /// <summary>
@@ -172,6 +212,58 @@ module Layout =
   /// </summary>
   let set x y content (section: GridSection2D<'T>) : GridSection2D<'T> =
     setLocal x y content section
+    section
+
+  /// <summary>
+  /// Repeats content horizontally 'count' times starting at (x, y).
+  /// </summary>
+  let repeatX
+    x
+    y
+    count
+    content
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    if y >= 0 && y < section.Height then
+      let x1 = max 0 x
+      let x2 = min section.Width (x + count)
+
+      if x2 > x1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let startX = section.OffsetX + x1
+        let gy = section.OffsetY + y
+        let idxBase = gy * gw + startX
+
+        for i in 0 .. x2 - x1 - 1 do
+          grid.Cells.[idxBase + i] <- ValueSome content
+
+    section
+
+  /// <summary>
+  /// Repeats content vertically 'count' times starting at (x, y).
+  /// </summary>
+  let repeatY
+    x
+    y
+    count
+    content
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    if x >= 0 && x < section.Width then
+      let y1 = max 0 y
+      let y2 = min section.Height (y + count)
+
+      if y2 > y1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let gx = section.OffsetX + x
+        let startY = section.OffsetY + y1
+        let idxBase = startY * gw + gx
+
+        for i in 0 .. y2 - y1 - 1 do
+          grid.Cells.[idxBase + i * gw] <- ValueSome content
+
     section
 
   /// <summary>
@@ -185,9 +277,24 @@ module Layout =
     content
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
-    for fx in x .. x + width - 1 do
-      for fy in y .. y + height - 1 do
-        setLocal fx fy content section
+    let x1 = max 0 x
+    let y1 = max 0 y
+    let x2 = min section.Width (x + width)
+    let y2 = min section.Height (y + height)
+
+    if x2 > x1 && y2 > y1 then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let startX = section.OffsetX + x1
+      let startY = section.OffsetY + y1
+      let fillW = x2 - x1
+      let fillH = y2 - y1
+
+      for fy in 0 .. fillH - 1 do
+        let rowStart = startX + (startY + fy) * gw
+
+        for fx in 0 .. fillW - 1 do
+          grid.Cells.[rowStart + fx] <- ValueSome content
 
     section
 
@@ -202,15 +309,47 @@ module Layout =
     content
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
-    for bx in x .. x + width - 1 do
-      setLocal bx y content section
-      setLocal bx (y + height - 1) content section
+    if width > 0 && height > 0 then
+      section
+      |> repeatX x y width content
+      |> repeatX x (y + height - 1) width content
+      |> repeatY x (y + 1) (height - 2) content
+      |> repeatY (x + width - 1) (y + 1) (height - 2) content
+    else
+      section
 
-    for by in y + 1 .. y + height - 2 do
-      setLocal x by content section
-      setLocal (x + width - 1) by content section
-
+  /// <summary>
+  /// Draws a filled rectangle with a border.
+  /// </summary>
+  let rect
+    x
+    y
+    width
+    height
+    borderContent
+    fillContent
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
     section
+    |> fill x y width height fillContent
+    |> border x y width height borderContent
+
+  /// <summary>
+  /// Draws only the four corners of a rectangle.
+  /// </summary>
+  let corners
+    x
+    y
+    width
+    height
+    content
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    section
+    |> set x y content
+    |> set (x + width - 1) y content
+    |> set x (y + height - 1) content
+    |> set (x + width - 1) (y + height - 1) content
 
   /// <summary>
   /// Fills a rectangular area by calling a generator function for each cell.
@@ -243,6 +382,8 @@ module Layout =
     ([<InlineIfLambda>] action: int -> int -> 'T voption -> unit)
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
+    let w = section.BackingGrid.Width
+
     for fx in x .. x + width - 1 do
       for fy in y .. y + height - 1 do
         let gx = section.OffsetX + fx
@@ -254,7 +395,8 @@ module Layout =
           && gy >= 0
           && gy < section.BackingGrid.Height
         then
-          let cell = section.BackingGrid.Cells.[gx, gy]
+          let idx = gx + gy * w
+          let cell = section.BackingGrid.Cells.[idx]
           action fx fy cell
 
     section
@@ -271,6 +413,8 @@ module Layout =
     ([<InlineIfLambda>] mapping: 'T -> 'T)
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
+    let w = section.BackingGrid.Width
+
     for fx in x .. x + width - 1 do
       for fy in y .. y + height - 1 do
         let gx = section.OffsetX + fx
@@ -282,40 +426,12 @@ module Layout =
           && gy >= 0
           && gy < section.BackingGrid.Height
         then
-          match section.BackingGrid.Cells.[gx, gy] with
+          let idx = gx + gy * w
+
+          match section.BackingGrid.Cells.[idx] with
           | ValueSome content ->
-            section.BackingGrid.Cells.[gx, gy] <- ValueSome(mapping content)
+            section.BackingGrid.Cells.[idx] <- ValueSome(mapping content)
           | ValueNone -> ()
-
-    section
-
-  /// <summary>
-  /// Repeats content horizontally 'count' times starting at (x, y).
-  /// </summary>
-  let repeatX
-    x
-    y
-    count
-    content
-    (section: GridSection2D<'T>)
-    : GridSection2D<'T> =
-    for i in 0 .. count - 1 do
-      setLocal (x + i) y content section
-
-    section
-
-  /// <summary>
-  /// Repeats content vertically 'count' times starting at (x, y).
-  /// </summary>
-  let repeatY
-    x
-    y
-    count
-    content
-    (section: GridSection2D<'T>)
-    : GridSection2D<'T> =
-    for i in 0 .. count - 1 do
-      setLocal x (y + i) content section
 
     section
 
@@ -528,18 +644,24 @@ module Layout =
   /// Clears (sets to ValueNone) a rectangular area.
   /// </summary>
   let clear x y width height (section: GridSection2D<'T>) : GridSection2D<'T> =
-    for cx in x .. x + width - 1 do
-      for cy in y .. y + height - 1 do
-        let gx = section.OffsetX + cx
-        let gy = section.OffsetY + cy
+    let x1 = max 0 x
+    let y1 = max 0 y
+    let x2 = min section.Width (x + width)
+    let y2 = min section.Height (y + height)
 
-        if
-          gx >= 0
-          && gx < section.BackingGrid.Width
-          && gy >= 0
-          && gy < section.BackingGrid.Height
-        then
-          section.BackingGrid.Cells.[gx, gy] <- ValueNone
+    if x2 > x1 && y2 > y1 then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let startX = section.OffsetX + x1
+      let startY = section.OffsetY + y1
+      let fillW = x2 - x1
+      let fillH = y2 - y1
+
+      for fy in 0 .. fillH - 1 do
+        let rowStart = startX + (startY + fy) * gw
+
+        for fx in 0 .. fillW - 1 do
+          grid.Cells.[rowStart + fx] <- ValueNone
 
     section
 
@@ -552,6 +674,8 @@ module Layout =
     newContent
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
+    let w = section.BackingGrid.Width
+
     for x in 0 .. section.Width - 1 do
       for y in 0 .. section.Height - 1 do
         let gx = section.OffsetX + x
@@ -563,9 +687,11 @@ module Layout =
           && gy >= 0
           && gy < section.BackingGrid.Height
         then
-          match section.BackingGrid.Cells.[gx, gy] with
+          let idx = gx + gy * w
+
+          match section.BackingGrid.Cells.[idx] with
           | ValueSome c when c = oldContent ->
-            section.BackingGrid.Cells.[gx, gy] <- ValueSome newContent
+            section.BackingGrid.Cells.[idx] <- ValueSome newContent
           | _ -> ()
 
     section
@@ -584,10 +710,11 @@ module Layout =
       && gy >= 0
       && gy < section.BackingGrid.Height
     then
-      let cell = &section.BackingGrid.Cells.[gx, gy]
+      let w = section.BackingGrid.Width
+      let idx = gx + gy * w
+      let cell = &section.BackingGrid.Cells.[idx]
 
       if cell.IsNone then
         cell <- ValueSome content
 
     section
-

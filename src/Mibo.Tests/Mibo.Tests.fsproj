@@ -17,6 +17,7 @@
     <Compile Include="Sprite3DTests.fs" />
     <Compile Include="RenderBufferTests.fs" />
     <Compile Include="LayoutTests.fs" />
+    <Compile Include="Layout3DTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 

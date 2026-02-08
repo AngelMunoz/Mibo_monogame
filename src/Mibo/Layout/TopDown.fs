@@ -140,6 +140,4 @@ module TopDown =
     wall
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
-    section
-    |> Layout.fill 0 0 width height floor
-    |> Layout.border 0 0 width height wall
+    section |> Layout.rect 0 0 width height wall floor

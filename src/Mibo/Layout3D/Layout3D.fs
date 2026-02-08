@@ -244,10 +244,33 @@ module Layout3D =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for fz in z .. z + d - 1 do
-      for fy in y .. y + h - 1 do
-        for fx in x .. x + w - 1 do
-          setLocal fx fy fz content section
+    let x1 = max 0 x
+    let y1 = max 0 y
+    let z1 = max 0 z
+    let x2 = min section.Width (x + w)
+    let y2 = min section.Height (y + h)
+    let z2 = min section.Depth (z + d)
+
+    if x2 > x1 && y2 > y1 && z2 > z1 then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let gh = grid.Height
+      let wh = gw * gh
+      let startX = section.OffsetX + x1
+      let startY = section.OffsetY + y1
+      let startZ = section.OffsetZ + z1
+      let fillW = x2 - x1
+      let fillH = y2 - y1
+      let fillD = z2 - z1
+
+      for fz in 0 .. fillD - 1 do
+        let zOffset = (startZ + fz) * wh
+
+        for fy in 0 .. fillH - 1 do
+          let yzOffset = zOffset + (startY + fy) * gw
+
+          for fx in 0 .. fillW - 1 do
+            grid.Cells.[yzOffset + startX + fx] <- ValueSome content
 
     section
 
@@ -255,10 +278,33 @@ module Layout3D =
   /// Clears (sets to ValueNone) a cuboid volume.
   /// </summary>
   let clear x y z w h d (section: GridSection3D<'T>) : GridSection3D<'T> =
-    for cz in z .. z + d - 1 do
-      for cy in y .. y + h - 1 do
-        for cx in x .. x + w - 1 do
-          clearLocal cx cy cz section
+    let x1 = max 0 x
+    let y1 = max 0 y
+    let z1 = max 0 z
+    let x2 = min section.Width (x + w)
+    let y2 = min section.Height (y + h)
+    let z2 = min section.Depth (z + d)
+
+    if x2 > x1 && y2 > y1 && z2 > z1 then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let gh = grid.Height
+      let wh = gw * gh
+      let startX = section.OffsetX + x1
+      let startY = section.OffsetY + y1
+      let startZ = section.OffsetZ + z1
+      let fillW = x2 - x1
+      let fillH = y2 - y1
+      let fillD = z2 - z1
+
+      for fz in 0 .. fillD - 1 do
+        let zOffset = (startZ + fz) * wh
+
+        for fy in 0 .. fillH - 1 do
+          let yzOffset = zOffset + (startY + fy) * gw
+
+          for fx in 0 .. fillW - 1 do
+            grid.Cells.[yzOffset + startX + fx] <- ValueNone
 
     section
 
@@ -278,9 +324,29 @@ module Layout3D =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for fz in z .. z + d - 1 do
-      for fx in x .. x + w - 1 do
-        setLocal fx y fz content section
+    if y >= 0 && y < section.Height then
+      let x1 = max 0 x
+      let z1 = max 0 z
+      let x2 = min section.Width (x + w)
+      let z2 = min section.Depth (z + d)
+
+      if x2 > x1 && z2 > z1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let gh = grid.Height
+        let wh = gw * gh
+        let startX = section.OffsetX + x1
+        let gy = section.OffsetY + y
+        let startZ = section.OffsetZ + z1
+        let fillW = x2 - x1
+        let fillD = z2 - z1
+
+        for fz in 0 .. fillD - 1 do
+          let zOffset = (startZ + fz) * wh
+          let yzOffset = zOffset + gy * gw
+
+          for fx in 0 .. fillW - 1 do
+            grid.Cells.[yzOffset + startX + fx] <- ValueSome content
 
     section
 
@@ -296,9 +362,29 @@ module Layout3D =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for fy in y .. y + h - 1 do
-      for fx in x .. x + w - 1 do
-        setLocal fx fy z content section
+    if z >= 0 && z < section.Depth then
+      let x1 = max 0 x
+      let y1 = max 0 y
+      let x2 = min section.Width (x + w)
+      let y2 = min section.Height (y + h)
+
+      if x2 > x1 && y2 > y1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let gh = grid.Height
+        let wh = gw * gh
+        let startX = section.OffsetX + x1
+        let startY = section.OffsetY + y1
+        let gz = section.OffsetZ + z
+        let fillW = x2 - x1
+        let fillH = y2 - y1
+        let zOffset = gz * wh
+
+        for fy in 0 .. fillH - 1 do
+          let yzOffset = zOffset + (startY + fy) * gw
+
+          for fx in 0 .. fillW - 1 do
+            grid.Cells.[yzOffset + startX + fx] <- ValueSome content
 
     section
 
@@ -314,9 +400,28 @@ module Layout3D =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for fz in z .. z + d - 1 do
-      for fy in y .. y + h - 1 do
-        setLocal x fy fz content section
+    if x >= 0 && x < section.Width then
+      let y1 = max 0 y
+      let z1 = max 0 z
+      let y2 = min section.Height (y + h)
+      let z2 = min section.Depth (z + d)
+
+      if y2 > y1 && z2 > z1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let gh = grid.Height
+        let wh = gw * gh
+        let gx = section.OffsetX + x
+        let startY = section.OffsetY + y1
+        let startZ = section.OffsetZ + z1
+        let fillH = y2 - y1
+        let fillD = z2 - z1
+
+        for fz in 0 .. fillD - 1 do
+          let zOffset = (startZ + fz) * wh
+
+          for fy in 0 .. fillH - 1 do
+            grid.Cells.[zOffset + (startY + fy) * gw + gx] <- ValueSome content
 
     section
 
@@ -397,8 +502,22 @@ module Layout3D =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for i in 0 .. count - 1 do
-      setLocal (x + i) y z content section
+    if y >= 0 && y < section.Height && z >= 0 && z < section.Depth then
+      let x1 = max 0 x
+      let x2 = min section.Width (x + count)
+
+      if x2 > x1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let gh = grid.Height
+        let wh = gw * gh
+        let startX = section.OffsetX + x1
+        let gy = section.OffsetY + y
+        let gz = section.OffsetZ + z
+        let idxBase = gz * wh + gy * gw + startX
+
+        for i in 0 .. x2 - x1 - 1 do
+          grid.Cells.[idxBase + i] <- ValueSome content
 
     section
 
@@ -413,8 +532,22 @@ module Layout3D =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for i in 0 .. count - 1 do
-      setLocal x (y + i) z content section
+    if x >= 0 && x < section.Width && z >= 0 && z < section.Depth then
+      let y1 = max 0 y
+      let y2 = min section.Height (y + count)
+
+      if y2 > y1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let gh = grid.Height
+        let wh = gw * gh
+        let gx = section.OffsetX + x
+        let startY = section.OffsetY + y1
+        let gz = section.OffsetZ + z
+        let idxBase = gz * wh + startY * gw + gx
+
+        for i in 0 .. y2 - y1 - 1 do
+          grid.Cells.[idxBase + i * gw] <- ValueSome content
 
     section
 
@@ -429,8 +562,22 @@ module Layout3D =
     content
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for i in 0 .. count - 1 do
-      setLocal x y (z + i) content section
+    if x >= 0 && x < section.Width && y >= 0 && y < section.Height then
+      let z1 = max 0 z
+      let z2 = min section.Depth (z + count)
+
+      if z2 > z1 then
+        let grid = section.BackingGrid
+        let gw = grid.Width
+        let gh = grid.Height
+        let wh = gw * gh
+        let gx = section.OffsetX + x
+        let gy = section.OffsetY + y
+        let startZ = section.OffsetZ + z1
+        let idxBase = startZ * wh + gy * gw + gx
+
+        for i in 0 .. z2 - z1 - 1 do
+          grid.Cells.[idxBase + i * wh] <- ValueSome content
 
     section
 
