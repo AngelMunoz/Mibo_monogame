@@ -92,12 +92,14 @@ module Layout =
     ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
     (parent: GridSection2D<'T>)
     : GridSection2D<'T> =
+    let x = max 0 (min parent.Width x)
+    let y = max 0 (min parent.Height y)
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + x
       OffsetY = parent.OffsetY + y
-      Width = parent.Width - x
-      Height = parent.Height - y
+      Width = max 0 (parent.Width - x)
+      Height = max 0 (parent.Height - y)
     }
 
     f childSection |> ignore
@@ -112,7 +114,8 @@ module Layout =
     ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
     (parent: GridSection2D<'T>)
     : GridSection2D<'T> =
-    if n <= 0 then
+    let n = max 0 n
+    if n = 0 then
       f parent |> ignore
       parent
     else
@@ -138,6 +141,10 @@ module Layout =
     ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
     (parent: GridSection2D<'T>)
     : GridSection2D<'T> =
+    let left = max 0 left
+    let top = max 0 top
+    let right = max 0 right
+    let bottom = max 0 bottom
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + left
@@ -159,6 +166,8 @@ module Layout =
     ([<InlineIfLambda>] f: GridSection2D<'T> -> GridSection2D<'T>)
     (parent: GridSection2D<'T>)
     : GridSection2D<'T> =
+    let w = max 0 (min parent.Width w)
+    let h = max 0 (min parent.Height h)
     let x = (parent.Width - w) / 2
     let y = (parent.Height - h) / 2
 

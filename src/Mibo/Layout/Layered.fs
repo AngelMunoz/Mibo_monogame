@@ -34,7 +34,7 @@ module LayeredGrid2D =
 
   /// <summary>
   /// Retrieves (or creates) the grid for a specific layer.
-  /// Note: This copies the map structure but shares the underlying grid references (fast).
+  /// Note: This mutates the internal dictionary in-place.
   /// </summary>
   let getOrAddLayer
     index

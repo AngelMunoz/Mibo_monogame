@@ -123,34 +123,36 @@ module Interior =
     : GridSection3D<'T> =
     let roomWidth = section.Width
     let roomDepth = section.Depth
+    let startY = 1
+    let endY = min (startY + doorHeight - 1) (section.Height - 2)
 
     match side with
     | North ->
       // Clear on North face (Z = depth - 1)
       let startX = (roomWidth - doorWidth) / 2
 
-      for dy in 1..doorHeight do
+      for dy in startY..endY do
         for dx in 0 .. doorWidth - 1 do
           clearLocal (startX + dx) dy (roomDepth - 1) section
     | South ->
       // Clear on South face (Z = 0)
       let startX = (roomWidth - doorWidth) / 2
 
-      for dy in 1..doorHeight do
+      for dy in startY..endY do
         for dx in 0 .. doorWidth - 1 do
           clearLocal (startX + dx) dy 0 section
     | East ->
       // Clear on East face (X = width - 1)
       let startZ = (roomDepth - doorWidth) / 2
 
-      for dy in 1..doorHeight do
+      for dy in startY..endY do
         for dz in 0 .. doorWidth - 1 do
           clearLocal (roomWidth - 1) dy (startZ + dz) section
     | West ->
       // Clear on West face (X = 0)
       let startZ = (roomDepth - doorWidth) / 2
 
-      for dy in 1..doorHeight do
+      for dy in startY..endY do
         for dz in 0 .. doorWidth - 1 do
           clearLocal 0 dy (startZ + dz) section
 
@@ -241,30 +243,32 @@ module Interior =
     : GridSection3D<'T> =
     let roomWidth = section.Width
     let roomDepth = section.Depth
+    let startY = max 1 sillHeight
+    let endY = min (startY + windowHeight - 1) (section.Height - 2)
 
     match side with
     | North ->
       let startX = (roomWidth - windowWidth) / 2
 
-      for dy in sillHeight .. sillHeight + windowHeight - 1 do
+      for dy in startY..endY do
         for dx in 0 .. windowWidth - 1 do
           clearLocal (startX + dx) dy (roomDepth - 1) section
     | South ->
       let startX = (roomWidth - windowWidth) / 2
 
-      for dy in sillHeight .. sillHeight + windowHeight - 1 do
+      for dy in startY..endY do
         for dx in 0 .. windowWidth - 1 do
           clearLocal (startX + dx) dy 0 section
     | East ->
       let startZ = (roomDepth - windowWidth) / 2
 
-      for dy in sillHeight .. sillHeight + windowHeight - 1 do
+      for dy in startY..endY do
         for dz in 0 .. windowWidth - 1 do
           clearLocal (roomWidth - 1) dy (startZ + dz) section
     | West ->
       let startZ = (roomDepth - windowWidth) / 2
 
-      for dy in sillHeight .. sillHeight + windowHeight - 1 do
+      for dy in startY..endY do
         for dz in 0 .. windowWidth - 1 do
           clearLocal 0 dy (startZ + dz) section
 

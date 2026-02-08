@@ -128,6 +128,9 @@ module Layout3D =
     ([<InlineIfLambda>] f: GridSection3D<'T> -> GridSection3D<'T>)
     (parent: GridSection3D<'T>)
     : GridSection3D<'T> =
+    let x = max 0 (min parent.Width x)
+    let y = max 0 (min parent.Height y)
+    let z = max 0 (min parent.Depth z)
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + x
@@ -149,7 +152,8 @@ module Layout3D =
     ([<InlineIfLambda>] f: GridSection3D<'T> -> GridSection3D<'T>)
     (parent: GridSection3D<'T>)
     : GridSection3D<'T> =
-    if n <= 0 then
+    let n = max 0 n
+    if n = 0 then
       f parent |> ignore
       parent
     else
@@ -180,6 +184,12 @@ module Layout3D =
     ([<InlineIfLambda>] f: GridSection3D<'T> -> GridSection3D<'T>)
     (parent: GridSection3D<'T>)
     : GridSection3D<'T> =
+    let left = max 0 left
+    let bottom = max 0 bottom
+    let back = max 0 back
+    let right = max 0 right
+    let top = max 0 top
+    let front = max 0 front
     let childSection = {
       BackingGrid = parent.BackingGrid
       OffsetX = parent.OffsetX + left
@@ -203,6 +213,9 @@ module Layout3D =
     ([<InlineIfLambda>] f: GridSection3D<'T> -> GridSection3D<'T>)
     (parent: GridSection3D<'T>)
     : GridSection3D<'T> =
+    let w = max 0 (min parent.Width w)
+    let h = max 0 (min parent.Height h)
+    let d = max 0 (min parent.Depth d)
     let x = (parent.Width - w) / 2
     let y = (parent.Height - h) / 2
     let z = (parent.Depth - d) / 2
