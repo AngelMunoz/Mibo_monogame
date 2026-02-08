@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.6.0]
+
 ### Added
 
 - Level Design: **2D Layout Engine**. Introduced a code-first, grid-based level design system in `Mibo.Layout`, featuring a composable DSL, optimized geometric primitives (`fill`, `rect`, `circle`, `line`), and domain-specific stamps for Platformers and Top-Down games.
