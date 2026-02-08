@@ -1,6 +1,7 @@
 ---
 title: Rendering in Mibo
 category: Rendering
+categoryindex: 3
 index: 10
 ---
 

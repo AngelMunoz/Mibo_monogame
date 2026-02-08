@@ -83,11 +83,20 @@ Run one of the samples, then copy its program setup (composition root) into your
   - [Scaling Mibo (Simple → Complex)](scaling.html)
   - [F# For Perf](performance.html)
 
-- Rendering
-  - [Rendering overview + custom renderers](rendering.html)
-  - [Rendering 2D](rendering2d.html)
+ - Rendering
+   - [Rendering overview + custom renderers](rendering.html)
+   - [Rendering 2D](rendering2d.html)
 
-- 3D Rendering
+ - Level Design
+   - [Level Design Overview](level-design/overview.html)
+   - [2D Layout Engine](level-design/2d/core.html)
+   - [Platformer Stamps](level-design/2d/platformer.html)
+   - [TopDown Stamps](level-design/2d/topdown.html)
+   - [3D Layout Engine](level-design/3d/core.html)
+   - [Interior Stamps](level-design/3d/interior.html)
+   - [Terrain Stamps](level-design/3d/terrain.html)
+
+ - 3D Rendering
   - [Rendering3D Overview](3d-rendering/overview.html)
   - [Rendering3D: Pipeline](3d-rendering/pipeline.html)
   - [Rendering3D: Materials](3d-rendering/materials.html)

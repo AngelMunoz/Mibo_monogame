@@ -1,7 +1,8 @@
 ---
 title: Platformer Layout
-category: Layout
-index: 21
+category: Level Design
+categoryindex: 2
+index: 22
 ---
 
 # Platformer Layout

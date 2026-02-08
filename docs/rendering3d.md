@@ -1,7 +1,8 @@
 ---
 title: Rendering 3D (Legacy)
 category: Rendering
-index: 15
+categoryindex: 3
+index: 16
 ---
 
 # Rendering 3D (Legacy)

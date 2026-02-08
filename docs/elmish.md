@@ -1,6 +1,7 @@
 ---
 title: The Elmish Architecture
 category: Architecture
+categoryindex: 1
 index: 1
 ---
 

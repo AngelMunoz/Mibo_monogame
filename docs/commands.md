@@ -1,6 +1,7 @@
 ---
 title: Commands (async + effects)
 category: Amenities
+categoryindex: 5
 index: 23
 ---
 

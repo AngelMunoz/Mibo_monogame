@@ -1,6 +1,7 @@
 ---
 title: Subscriptions (external events)
 category: Amenities
+categoryindex: 5
 index: 24
 ---
 

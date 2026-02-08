@@ -1,7 +1,8 @@
 ---
 title: TopDown Layout
-category: Layout
-index: 22
+category: Level Design
+categoryindex: 2
+index: 23
 ---
 
 # TopDown Layout

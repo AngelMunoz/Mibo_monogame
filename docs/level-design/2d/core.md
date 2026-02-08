@@ -1,10 +1,11 @@
 ---
-title: Layout Engine
-category: Layout
-index: 20
+title: 2D Layout Engine
+category: Level Design
+categoryindex: 2
+index: 21
 ---
 
-# Layout Engine
+# 2D Layout Engine
 
 The Layout engine provides a tile-based level design system for 2D games. It lives in `Mibo.Layout`.
 
@@ -55,6 +56,8 @@ grid
 )
 
 // Iterate only visible cells (culled to viewport)
+// This is critical for performance in large levels, as it avoids
+// processing tiles that aren't on screen.
 let viewBounds = Rectangle(cameraX, cameraY, viewportWidth, viewportHeight)
 grid
 |> CellGrid2D.iterVisible viewBounds (fun x y tile ->
@@ -112,21 +115,17 @@ section
 
 ```fsharp
 // Padding - shrink section by N cells on all sides
-section |> Layout.padding 2 (fun inner ->
-    inner |> Layout.fill 0 0 inner.Width inner.Height content
-)
+section |> Layout.padding 2 (fun inner -> ...)
+
+// PaddingEx - explicit padding for each side: left, top, right, bottom
+section |> Layout.paddingEx 1 2 1 2 (fun inner -> ...)
 
 // Center - position a fixed-size block in the center
-section |> Layout.center 4 4 (fun inner ->
-    inner |> Layout.fill 0 0 4 4 content
-)
+section |> Layout.center 4 4 (fun inner -> ...)
 
 // Flow - place stamps horizontally or vertically with spacing
-section |> Layout.flowX 5 [
-    (fun s -> s |> Layout.fill 0 0 3 3 content)
-    (fun s -> s |> Layout.fill 0 0 3 3 content)
-    (fun s -> s |> Layout.fill 0 0 3 3 content)
-]
+section |> Layout.flowX 5 stamps
+section |> Layout.flowY 5 stamps
 ```
 
 ### Primitives
@@ -135,8 +134,10 @@ section |> Layout.flowX 5 [
 Layout.set x y content section         // Single cell
 Layout.fill x y w h content section    // Rectangle
 Layout.border x y w h content section  // Hollow rectangle
-Layout.repeatX x y count content       // Horizontal line
-Layout.repeatY x y count content       // Vertical line
+Layout.rect x y w h bContent fContent section // Filled rectangle with border
+Layout.corners x y w h content section // Only the four corners
+Layout.repeatX x y count content section // Horizontal line
+Layout.repeatY x y count content section // Vertical line
 Layout.clear x y w h section           // Clear cells to empty
 ```
 
@@ -156,24 +157,57 @@ Layout.scatter count seed content section      // Random placement
 Layout.generate x y w h (fun x y -> ...) section  // Procedural
 ```
 
+### Iteration / Transformation
+
+Non-destructive operations for modifying existing content:
+
+```fsharp
+Layout.iter x y w h action section    // Read access to volume
+Layout.map x y w h mapping section    // Transform existing content
+Layout.replace oldContent newContent section  // Find and replace
+Layout.setIfEmpty x y content section  // Conditional set
+```
+
 ## Layered Composition
 
-For multi-layer content (background, foreground, decorations), use `LayeredGrid2D`:
+For multi-layer content (background, foreground, decorations), use `LayeredGrid2D`. This manages a collection of grids sharing the same dimensions, keyed by an integer index (usually representing depth).
 
 ```fsharp
 let level =
     LayeredGrid2D.create 100 50 (Vector2(32f, 32f)) Vector2.Zero
     |> LayeredLayout.layer 0 (fun section ->
-        // Physical/collision layer
+        // Layer 0: Ground/Collision
         section |> Layout.fill 0 45 100 5 GroundTile
     )
     |> LayeredLayout.layer 1 (fun section ->
-        // Decoration layer
+        // Layer 1: Foliage
         section |> Layout.scatter 50 42 GrassDecoration
     )
 ```
 
-Layers are created on-demand.
+### Rendering Layers
+
+When rendering a layered grid, you don't need to manually sort the layers. Instead, you can map the grid's layer index to Mibo's `RenderLayer` measure. The engine's deferred rendering system will handle the sorting for you:
+
+```fsharp
+// Render each layer into the buffer
+for KeyValue(layerIndex, layerGrid) in level.Layers do
+    layerGrid
+    |> CellGrid2D.iterVisible viewBounds (fun x y tile ->
+        let pos = CellGrid2D.getWorldPos x y layerGrid
+
+        buffer.Sprite(sprite {
+            texture myTexture
+            at pos.X pos.Y
+            // Tag with the layer index using the RenderLayer measure
+            layer (layerIndex<RenderLayer>)
+        })
+    )
+```
+
+This approach is efficient because Mibo's `RenderBuffer` performs a single, optimized CPU-side sort of all collected draw commands before sending them to the GPU. This ensures your layout layers are drawn in the correct back-to-front order and allows them to interact correctly with other game entities (like players or particles) that are also tagged with `RenderLayer` values.
+
+Layers are created on-demand, so only layers you've painted into will consume memory.
 
 ## Creating Your Own Stamps
 
@@ -244,16 +278,7 @@ level
 
 ### The Stamp Pattern
 
-Think of stamps like HTML elements:
-
-| HTML | Layout Stamps |
-|------|---------------|
-| `<div>` | `Layout.section` |
-| `<div style="padding">` | `Layout.padding` |
-| CSS Flexbox | `Layout.flowX`, `Layout.flowY` |
-| Custom component | Your stamp function |
-| Nesting `<div>`s | Nesting `Layout.section` calls |
-| Composing components | Using `>>` |
+Think about stamps like Lego pieces, you can use a few blocks to build a bigger thing.
 
 The key insight: **stamps are just functions**. You can store them, pass them around, compose them, and build complex structures from simple pieces.
 
@@ -261,16 +286,7 @@ The key insight: **stamps are just functions**. You can store them, pass them ar
 
 Mibo includes pre-built stamps for common game types:
 
-- **[Platformer](platformer.md)** - Boxes, platforms, ledges, walls, pillars, stairs, slopes, pits
-- **[TopDown](topdown.md)** - Rooms, corridors, wall segments, doorways
+- **[Platformer](platformer.html)** - Boxes, platforms, ledges, walls, pillars, stairs, slopes, pits
+- **[TopDown](topdown.html)** - Rooms, corridors, wall segments, doorways
 
 These serve as examples and starting points. Copy and modify them for your game's needs.
-
-## Performance Notes
-
-- **In-place mutation** - All operations mutate the backing array directly (O(1) per cell)
-- **Zero-copy sections** - Sections are lightweight structs pointing to the same grid
-- **Struct voption** - No heap allocation for empty cells
-- **`[<InlineIfLambda>]`** - Lambda-taking functions are inlined for zero closure allocation
-
-For large grids (1000+ cells), prefer `Layout.generate` over setting cells individually - it's a single pass with no intermediate allocations.

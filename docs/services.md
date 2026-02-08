@@ -1,6 +1,7 @@
 ---
 title: Service Composition
 category: Architecture
+categoryindex: 1
 index: 4
 ---
 

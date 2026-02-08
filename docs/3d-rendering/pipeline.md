@@ -1,6 +1,7 @@
 ---
 title: Pipeline
 category: 3D Rendering
+categoryindex: 4
 index: 10
 ---
 
