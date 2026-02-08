@@ -154,13 +154,35 @@ module Terrain =
       section
 
   /// <summary>
-  /// Scatters content randomly on a ground plane (Y = 0).
-  /// Useful for placing trees, rocks, or props.
+  /// Scatters content randomly on a plane at a specific Y level.
+  /// Useful for placing items on plateaus or different floor levels.
   /// </summary>
-  /// <param name="count">Number of items to place.</param>
-  /// <param name="seed">Random seed for reproducibility.</param>
-  /// <param name="content">Content to scatter.</param>
+  let inline scatterAt
+    y
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    Layout3D.scatterXZ y count seed content section
+
+  /// <summary>
+  /// Scatters content randomly on the ground plane (Y = 0).
+  /// </summary>
   let inline scatter
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    scatterAt 0 count seed content section
+
+  /// <summary>
+  /// Scatters content randomly across a varying surface defined by a height function.
+  /// Perfect for placing trees, rocks, or grass on hills and valleys.
+  /// </summary>
+  let inline scatterSurface
+    ([<InlineIfLambda>] heightFn: int -> int -> int)
     count
     seed
     content
@@ -171,7 +193,86 @@ module Terrain =
     for _ in 1..count do
       let x = rng.Next(0, section.Width)
       let z = rng.Next(0, section.Depth)
-      setLocal x 0 z content section
+      let y = heightFn x z
+      setLocal x y z content section
+
+    section
+
+  /// <summary>
+  /// Fills the terrain surface with a checkerboard pattern following the height function.
+  /// </summary>
+  let inline checkerSurface
+    ([<InlineIfLambda>] heightFn: int -> int -> int)
+    odd
+    even
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    for fz in 0 .. section.Depth - 1 do
+      for fx in 0 .. section.Width - 1 do
+        let y = heightFn fx fz
+        let content = if (fx + fz) % 2 = 0 then odd else even
+        setLocal fx y fz content section
+
+    section
+
+  /// <summary>
+  /// Generates content for the terrain surface using a generator function.
+  /// The generator is called for each (x, z) coordinate at the height determined by heightFn.
+  /// </summary>
+  let inline generateSurface
+    ([<InlineIfLambda>] heightFn: int -> int -> int)
+    ([<InlineIfLambda>] generator: int -> int -> int -> 'T)
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    for fz in 0 .. section.Depth - 1 do
+      for fx in 0 .. section.Width - 1 do
+        let y = heightFn fx fz
+        let content = generator fx y fz
+        setLocal fx y fz content section
+
+    section
+
+  /// <summary>
+  /// Scatters content randomly along a multi-point path at ground level (Y=0).
+  /// </summary>
+  let inline scatterPath
+    (points: (int * int * int) list)
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    match points with
+    | []
+    | [ _ ] -> section
+    | _ ->
+      let rng = System.Random(seed)
+
+      for i in 0 .. points.Length - 2 do
+        let (x1, y1, z1) = points.[i]
+        let (x2, y2, z2) = points.[i + 1]
+        // Partition the count roughly between segments based on distance (or just distribute)
+        let segCount = max 1 (count / (points.Length - 1))
+        section |> Layout3D.scatterLine x1 y1 z1 x2 y2 z2 segCount (rng.Next()) content |> ignore
+
+      section
+
+  /// <summary>
+  /// Scatters a stamp randomly on an XZ plane at a specific Y level.
+  /// </summary>
+  let inline scatterStampAt
+    y
+    count
+    seed
+    ([<InlineIfLambda>] stamp: GridSection3D<'T> -> GridSection3D<'T>)
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let x = rng.Next(0, section.Width)
+      let z = rng.Next(0, section.Depth)
+      section |> Layout3D.section x y z stamp |> ignore
 
     section
 

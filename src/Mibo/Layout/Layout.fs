@@ -352,6 +352,89 @@ module Layout =
     |> set (x + width - 1) (y + height - 1) content
 
   /// <summary>
+  /// Scatters content randomly on the four edges of a rectangle.
+  /// Ideal for adding "noise" (vines, cracks, dirt) to room boundaries.
+  /// </summary>
+  let scatterBorder
+    x
+    y
+    width
+    height
+    count
+    seed
+    content
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let side = rng.Next(0, 4)
+
+      match side with
+      | 0 -> setLocal (x + rng.Next(0, width)) y content section // Top
+      | 1 -> setLocal (x + rng.Next(0, width)) (y + height - 1) content section // Bottom
+      | 2 -> setLocal x (y + rng.Next(0, height)) content section // Left
+      | 3 -> setLocal (x + width - 1) (y + rng.Next(0, height)) content section // Right
+      | _ -> ()
+
+    section
+
+  /// <summary>
+  /// Scatters content randomly along a 2D line.
+  /// Useful for decorating ledges, paths, or wires.
+  /// </summary>
+  let scatterLine
+    x1
+    y1
+    x2
+    y2
+    count
+    seed
+    content
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    let dx = abs(x2 - x1)
+    let dy = abs(y2 - y1)
+    let dm = max dx dy
+
+    if dm > 0 then
+      let rng = System.Random(seed)
+
+      for _ in 1..count do
+        let t = rng.NextDouble()
+        let lx = x1 + int(float(x2 - x1) * t)
+        let ly = y1 + int(float(y2 - y1) * t)
+        setLocal lx ly content section
+
+    section
+
+  /// <summary>
+  /// Applies a checkerboard pattern only to the border of a rectangle.
+  /// </summary>
+  let checkerBorder
+    x
+    y
+    width
+    height
+    odd
+    even
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    for bx in 0 .. width - 1 do
+      let top = if bx % 2 = 0 then odd else even
+      let bottom = if (bx + height - 1) % 2 = 0 then odd else even
+      setLocal (x + bx) y top section |> ignore
+      setLocal (x + bx) (y + height - 1) bottom section |> ignore
+
+    for by in 1 .. height - 2 do
+      let left = if by % 2 = 0 then odd else even
+      let right = if (by + width - 1) % 2 = 0 then odd else even
+      setLocal x (y + by) left section |> ignore
+      setLocal (x + width - 1) (y + by) right section |> ignore
+
+    section
+
+  /// <summary>
   /// Fills a rectangular area by calling a generator function for each cell.
   /// Useful for procedural content (noise, auto-tiling) where the content depends on position.
   /// </summary>
@@ -363,10 +446,26 @@ module Layout =
     ([<InlineIfLambda>] generator: int -> int -> 'T)
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
-    for fx in x .. x + width - 1 do
-      for fy in y .. y + height - 1 do
-        let content = generator fx fy
-        setLocal fx fy content section
+    let x1 = max 0 x
+    let y1 = max 0 y
+    let x2 = min section.Width (x + width)
+    let y2 = min section.Height (y + height)
+
+    if x2 > x1 && y2 > y1 then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let startX = section.OffsetX + x1
+      let startY = section.OffsetY + y1
+      let fillW = x2 - x1
+      let fillH = y2 - y1
+
+      for fy in 0 .. fillH - 1 do
+        let ly = y1 + fy
+        let rowStart = startX + (startY + fy) * gw
+
+        for fx in 0 .. fillW - 1 do
+          let lx = x1 + fx
+          grid.Cells.[rowStart + fx] <- ValueSome(generator lx ly)
 
     section
 
@@ -612,12 +711,17 @@ module Layout =
   /// Fills the section with a checkerboard pattern.
   /// </summary>
   let checker odd even (section: GridSection2D<'T>) : GridSection2D<'T> =
-    for x in 0 .. section.Width - 1 do
-      for y in 0 .. section.Height - 1 do
-        if (x + y) % 2 = 0 then
-          setLocal x y odd section
-        else
-          setLocal x y even section
+    let grid = section.BackingGrid
+    let gw = grid.Width
+    let startX = section.OffsetX
+    let startY = section.OffsetY
+
+    for fy in 0 .. section.Height - 1 do
+      let rowStart = startX + (startY + fy) * gw
+
+      for fx in 0 .. section.Width - 1 do
+        let content = if (fx + fy) % 2 = 0 then odd else even
+        grid.Cells.[rowStart + fx] <- ValueSome content
 
     section
 
@@ -693,6 +797,59 @@ module Layout =
           | ValueSome c when c = oldContent ->
             section.BackingGrid.Cells.[idx] <- ValueSome newContent
           | _ -> ()
+
+    section
+
+  /// <summary>
+  /// Probabilistically replaces occurrences of 'oldContent' with 'newContent'.
+  /// Perfect for "weathering" or adding visual noise to large surfaces.
+  /// </summary>
+  let replaceScatter
+    oldContent
+    newContent
+    (probability: float32)
+    seed
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    let rng = System.Random(seed)
+
+    for x in 0 .. section.Width - 1 do
+      for y in 0 .. section.Height - 1 do
+        let gx = section.OffsetX + x
+        let gy = section.OffsetY + y
+
+        if
+          gx >= 0
+          && gx < section.BackingGrid.Width
+          && gy >= 0
+          && gy < section.BackingGrid.Height
+        then
+          let idx = gx + gy * section.BackingGrid.Width
+
+          match section.BackingGrid.Cells.[idx] with
+          | ValueSome c when c = oldContent ->
+            if float32(rng.NextDouble()) < probability then
+              section.BackingGrid.Cells.[idx] <- ValueSome newContent
+          | _ -> ()
+
+    section
+
+  /// <summary>
+  /// Randomly applies a stamp 'count' times within the section.
+  /// Use this to populate a level with complex multi-tile objects.
+  /// </summary>
+  let inline scatterStamp
+    count
+    seed
+    ([<InlineIfLambda>] stamp: GridSection2D<'T> -> GridSection2D<'T>)
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let x = rng.Next(0, section.Width)
+      let y = rng.Next(0, section.Height)
+      section |> Layout.section x y stamp |> ignore
 
     section
 

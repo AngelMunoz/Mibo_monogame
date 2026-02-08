@@ -40,18 +40,22 @@ let forestedGround =
     section
     |> Terrain.ground 30 30 GrassCell
     
-    // Scattered trees (deterministic with seed)
+    // Scattered trees on the ground (Y=0)
     |> Terrain.scatter 15 42 TreeCell
-    |> Terrain.scatter 20 156 TreeCell
     
-    // Rocks
-    |> Terrain.scatter 8 789 RockCell
+    // Scatters trees on an elevated plateau at Y=5
+    |> Terrain.scatterAt 5 10 156 TreeCell
+    
+    // Scatters flowers across a varying hill surface
+    |> Terrain.scatterSurface hillHeight 20 789 FlowerCell
 ```
 
 **Scatter design:**
-- `count`: 10-30 items for sparse decor, 50-100 for dense forests
-- `seed`: Any integer (same seed = same pattern every time)
-- Use multiple scatter calls with different seeds for varied placement
+- `scatter`: Random X, Z at Y=0.
+- `scatterAt`: Random X, Z at a specific Y level (ideal for plateaus).
+- `scatterSurface`: Random X, Z with Y determined by a height function (ideal for hills).
+- `seed`: Any integer (same seed = same pattern every time).
+- Use multiple scatter calls with different seeds for varied placement.
 
 ### Elevation Changes
 
@@ -228,6 +232,20 @@ let layeredTerrain =
             int (10.0 * exp (-dist/20.0))  // 10 cells tall
         inner |> Terrain.layeredHeightmap mountainHeight GrassCell DirtCell 3 StoneCell
     )
+```
+
+### Surface Patterns
+
+Apply patterns that follow the terrain's height function:
+
+```fsharp
+// Tiled/Chessboard valley
+section |> Terrain.checkerSurface valleyHeight StoneCell GrassCell
+
+// Procedural surface detail (e.g., moisture-driven foliage)
+section |> Terrain.generateSurface hillHeight (fun x y z ->
+    if moisture x z > 0.8 then FlowerCell else GrassCell
+)
 ```
 
 **Layered terrain design:**

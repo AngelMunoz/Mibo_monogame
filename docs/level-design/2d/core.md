@@ -152,8 +152,11 @@ Layout.polygon points filled content           // Arbitrary polygon
 ### Patterns
 
 ```fsharp
-Layout.checker oddContent evenContent section  // Checkerboard
+Layout.checker oddContent evenContent section  // 3D checkerboard
+Layout.checkerBorder x y w h odd even section  // Only on perimeter
 Layout.scatter count seed content section      // Random placement
+Layout.scatterBorder x y w h count seed content section // On perimeter
+Layout.scatterLine x1 y1 x2 y2 count seed content section // Along line
 Layout.generate x y w h (fun x y -> ...) section  // Procedural
 ```
 
@@ -165,6 +168,8 @@ Non-destructive operations for modifying existing content:
 Layout.iter x y w h action section    // Read access to volume
 Layout.map x y w h mapping section    // Transform existing content
 Layout.replace oldContent newContent section  // Find and replace
+Layout.replaceScatter old new prob seed section // Probabilistic replace
+Layout.scatterStamp count seed stamp section  // Place complex components
 Layout.setIfEmpty x y content section  // Conditional set
 ```
 

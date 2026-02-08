@@ -161,3 +161,28 @@ module Platformer =
   /// <param name="height">Height of the gap.</param>
   let inline gap width height (section: GridSection2D<'T>) : GridSection2D<'T> =
     Layout.clear 0 0 width height section
+
+  /// <summary>
+  /// Scatters content along the outer edges of the current section.
+  /// Useful for adding "vines" or "spikes" to platforms.
+  /// </summary>
+  let inline scatterEdges
+    count
+    seed
+    content
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    Layout.scatterBorder 0 0 section.Width section.Height count seed content section
+
+  /// <summary>
+  /// Non-destructively decorates existing surfaces by replacing a percentage of tiles.
+  /// Perfect for adding moss to stone or cracks to walls.
+  /// </summary>
+  let inline weather
+    oldContent
+    newContent
+    probability
+    seed
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    Layout.replaceScatter oldContent newContent probability seed section

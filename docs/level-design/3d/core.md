@@ -177,9 +177,19 @@ Layout3D.cylinder cx cz y radius height filled content section // Cylinder (Y-al
 ### Patterns
 
 ```fsharp
-Layout3D.checker3D oddContent evenContent section  // 3D checkerboard
-Layout3D.scatter3D count seed content section      // Random placement
-Layout3D.generate x y z w h d (fun x y z -> ...) section  // Procedural
+Layout3D.checker3D odd even section                // 3D checkerboard
+Layout3D.checkerXZ y odd even section              // Planar checker (Floor)
+Layout3D.checkerXY z odd even section              // Planar checker (Wall)
+Layout3D.checkerYZ x odd even section              // Planar checker (Wall)
+Layout3D.checkerShell x y z w h d odd even section // Box skin checker
+
+Layout3D.scatter3D count seed content section      // Volumetric scatter
+Layout3D.scatterXZ y count seed content section    // Planar scatter
+Layout3D.scatterShell x y z w h d count seed content section
+
+Layout3D.generate x y z w h d generator section    // Volumetric generate
+Layout3D.generateXZ y generator section            // Planar generate
+Layout3D.generateShell x y z w h d generator section
 ```
 
 ### Iteration / Transformation

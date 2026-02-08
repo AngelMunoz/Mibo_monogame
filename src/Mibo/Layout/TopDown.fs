@@ -141,3 +141,26 @@ module TopDown =
     (section: GridSection2D<'T>)
     : GridSection2D<'T> =
     section |> Layout.rect 0 0 width height wall floor
+
+  /// <summary>
+  /// Scatters content along the outer edges of the current section.
+  /// </summary>
+  let inline scatterEdges
+    count
+    seed
+    content
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    Layout.scatterBorder 0 0 section.Width section.Height count seed content section
+
+  /// <summary>
+  /// Non-destructively decorates existing surfaces by replacing a percentage of tiles.
+  /// </summary>
+  let inline weather
+    oldContent
+    newContent
+    probability
+    seed
+    (section: GridSection2D<'T>)
+    : GridSection2D<'T> =
+    Layout.replaceScatter oldContent newContent probability seed section

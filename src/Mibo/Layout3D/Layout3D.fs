@@ -493,9 +493,85 @@ module Layout3D =
 
     section
 
-  // ============================================================================
+  /// <summary>
+  /// Scatters content randomly on the 12 edges of a box.
+  /// Ideal for adding localized "noise" (dust, moss, vines) to corners and edges.
+  /// </summary>
+  let scatterEdges
+    x
+    y
+    z
+    w
+    h
+    d
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let edge = rng.Next(0, 12)
+
+      match edge with
+      // 4 edges along X axis
+      | 0 -> setLocal (x + rng.Next(0, w)) y z content section
+      | 1 -> setLocal (x + rng.Next(0, w)) (y + h - 1) z content section
+      | 2 -> setLocal (x + rng.Next(0, w)) y (z + d - 1) content section
+      | 3 ->
+        setLocal (x + rng.Next(0, w)) (y + h - 1) (z + d - 1) content section
+      // 4 edges along Y axis
+      | 4 -> setLocal x (y + rng.Next(0, h)) z content section
+      | 5 -> setLocal (x + w - 1) (y + rng.Next(0, h)) z content section
+      | 6 -> setLocal x (y + rng.Next(0, h)) (z + d - 1) content section
+      | 7 -> setLocal (x + w - 1) (y + rng.Next(0, h)) (z + d - 1) content section
+      // 4 edges along Z axis
+      | 8 -> setLocal x y (z + rng.Next(0, d)) content section
+      | 9 -> setLocal (x + w - 1) y (z + rng.Next(0, d)) content section
+      | 10 -> setLocal x (y + h - 1) (z + rng.Next(0, d)) content section
+      | 11 ->
+        setLocal (x + w - 1) (y + h - 1) (z + rng.Next(0, d)) content section
+      | _ -> ()
+
+    section
+
+  /// <summary>
+  /// Scatters content along a 3D line.
+  /// Useful for decorating paths, wires, or structural beams.
+  /// </summary>
+  let scatterLine
+    x1
+    y1
+    z1
+    x2
+    y2
+    z2
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let dx = abs(x2 - x1)
+    let dy = abs(y2 - y1)
+    let dz = abs(z2 - z1)
+    let dm = max dx (max dy dz)
+
+    if dm > 0 then
+      let rng = System.Random(seed)
+
+      for _ in 1..count do
+        let t = rng.NextDouble()
+        let lx = x1 + int(float(x2 - x1) * t)
+        let ly = y1 + int(float(y2 - y1) * t)
+        let lz = z1 + int(float(z2 - z1) * t)
+        setLocal lx ly lz content section
+
+    section
+
+  // ================= ===========================================================
   // Repetition
-  // ============================================================================
+  // ================= ===========================================================
 
   /// <summary>
   /// Repeats content along X axis starting at (x, y, z).
@@ -731,11 +807,36 @@ module Layout3D =
     ([<InlineIfLambda>] generator: int -> int -> int -> 'T)
     (section: GridSection3D<'T>)
     : GridSection3D<'T> =
-    for fz in z .. z + d - 1 do
-      for fy in y .. y + h - 1 do
-        for fx in x .. x + w - 1 do
-          let content = generator fx fy fz
-          setLocal fx fy fz content section
+    let x1 = max 0 x
+    let y1 = max 0 y
+    let z1 = max 0 z
+    let x2 = min section.Width (x + w)
+    let y2 = min section.Height (y + h)
+    let z2 = min section.Depth (z + d)
+
+    if x2 > x1 && y2 > y1 && z2 > z1 then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let gh = grid.Height
+      let wh = gw * gh
+      let startX = section.OffsetX + x1
+      let startY = section.OffsetY + y1
+      let startZ = section.OffsetZ + z1
+      let fillW = x2 - x1
+      let fillH = y2 - y1
+      let fillD = z2 - z1
+
+      for fz in 0 .. fillD - 1 do
+        let lz = z1 + fz
+        let zOffset = (startZ + fz) * wh
+
+        for fy in 0 .. fillH - 1 do
+          let ly = y1 + fy
+          let yzOffset = zOffset + (startY + fy) * gw
+
+          for fx in 0 .. fillW - 1 do
+            let lx = x1 + fx
+            grid.Cells.[yzOffset + startX + fx] <- ValueSome(generator lx ly lz)
 
     section
 
@@ -760,16 +861,288 @@ module Layout3D =
     section
 
   /// <summary>
+  /// Scatters content on an XZ plane at a specific Y level.
+  /// Useful for floors or ceilings at any height.
+  /// </summary>
+  let scatterXZ
+    y
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let x = rng.Next(0, section.Width)
+      let z = rng.Next(0, section.Depth)
+      setLocal x y z content section
+
+    section
+
+  /// <summary>
+  /// Scatters content on an XY plane at a specific Z level.
+  /// Useful for decorating front/back walls.
+  /// </summary>
+  let scatterXY
+    z
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let x = rng.Next(0, section.Width)
+      let y = rng.Next(0, section.Height)
+      setLocal x y z content section
+
+    section
+
+  /// <summary>
+  /// Scatters content on a YZ plane at a specific X level.
+  /// Useful for decorating side walls.
+  /// </summary>
+  let scatterYZ
+    x
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let y = rng.Next(0, section.Height)
+      let z = rng.Next(0, section.Depth)
+      setLocal x y z content section
+
+    section
+
+  /// <summary>
+  /// Scatters content randomly on the 6 outer faces of a cuboid.
+  /// Perfect for adding "noise" (cracks, moss, barnacles) to rooms or boxes.
+  /// </summary>
+  let scatterShell
+    x
+    y
+    z
+    w
+    h
+    d
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let face = rng.Next(0, 6)
+
+      match face with
+      | 0 -> setLocal (x + rng.Next(0, w)) y (z + rng.Next(0, d)) content section // Bottom
+      | 1 ->
+        setLocal
+          (x + rng.Next(0, w))
+          (y + h - 1)
+          (z + rng.Next(0, d))
+          content
+          section // Top
+      | 2 -> setLocal x (y + rng.Next(0, h)) (z + rng.Next(0, d)) content section // West
+      | 3 ->
+        setLocal
+          (x + w - 1)
+          (y + rng.Next(0, h))
+          (z + rng.Next(0, d))
+          content
+          section // East
+      | 4 -> setLocal (x + rng.Next(0, w)) (y + rng.Next(0, h)) z content section // South
+      | 5 ->
+        setLocal
+          (x + rng.Next(0, w))
+          (y + rng.Next(0, h))
+          (z + d - 1)
+          content
+          section // North
+      | _ -> ()
+
+    section
+
+  /// <summary>
   /// Fills the section with a 3D checkerboard pattern.
   /// </summary>
   let checker3D odd even (section: GridSection3D<'T>) : GridSection3D<'T> =
-    for z in 0 .. section.Depth - 1 do
-      for y in 0 .. section.Height - 1 do
-        for x in 0 .. section.Width - 1 do
-          if (x + y + z) % 2 = 0 then
-            setLocal x y z odd section
-          else
-            setLocal x y z even section
+    let grid = section.BackingGrid
+    let gw = grid.Width
+    let gh = grid.Height
+    let wh = gw * gh
+    let startX = section.OffsetX
+    let startY = section.OffsetY
+    let startZ = section.OffsetZ
+
+    for fz in 0 .. section.Depth - 1 do
+      let zOffset = (startZ + fz) * wh
+
+      for fy in 0 .. section.Height - 1 do
+        let yzOffset = zOffset + (startY + fy) * gw
+
+        for fx in 0 .. section.Width - 1 do
+          let content = if (fx + fy + fz) % 2 = 0 then odd else even
+          grid.Cells.[yzOffset + startX + fx] <- ValueSome content
+
+    section
+
+  /// <summary>
+  /// Fills an XZ plane with a checkerboard pattern at a specific Y level.
+  /// Ideal for tiled floors or patterned ceilings.
+  /// </summary>
+  let checkerXZ y odd even (section: GridSection3D<'T>) : GridSection3D<'T> =
+    if y >= 0 && y < section.Height then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let wh = gw * grid.Height
+      let gy = section.OffsetY + y
+      let startX = section.OffsetX
+      let startZ = section.OffsetZ
+
+      for fz in 0 .. section.Depth - 1 do
+        let zOffset = (startZ + fz) * wh + gy * gw
+
+        for fx in 0 .. section.Width - 1 do
+          let content = if (fx + fz) % 2 = 0 then odd else even
+          grid.Cells.[zOffset + startX + fx] <- ValueSome content
+
+    section
+
+  /// <summary>
+  /// Fills an XY plane with a checkerboard pattern at a specific Z level.
+  /// </summary>
+  let checkerXY z odd even (section: GridSection3D<'T>) : GridSection3D<'T> =
+    if z >= 0 && z < section.Depth then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let wh = gw * grid.Height
+      let gz = section.OffsetZ + z
+      let startX = section.OffsetX
+      let startY = section.OffsetY
+      let zOffset = gz * wh
+
+      for fy in 0 .. section.Height - 1 do
+        let yzOffset = zOffset + (startY + fy) * gw
+
+        for fx in 0 .. section.Width - 1 do
+          let content = if (fx + fy) % 2 = 0 then odd else even
+          grid.Cells.[yzOffset + startX + fx] <- ValueSome content
+
+    section
+
+  /// <summary>
+  /// Fills a YZ plane with a checkerboard pattern at a specific X level.
+  /// </summary>
+  let checkerYZ x odd even (section: GridSection3D<'T>) : GridSection3D<'T> =
+    if x >= 0 && x < section.Width then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let wh = gw * grid.Height
+      let gx = section.OffsetX + x
+      let startY = section.OffsetY
+      let startZ = section.OffsetZ
+
+      for fz in 0 .. section.Depth - 1 do
+        let zOffset = (startZ + fz) * wh
+
+        for fy in 0 .. section.Height - 1 do
+          let content = if (fy + fz) % 2 = 0 then odd else even
+          grid.Cells.[zOffset + (startY + fy) * gw + gx] <- ValueSome content
+
+    section
+
+  /// <summary>
+  /// Applies a checkerboard pattern to the 6 outer faces of a cuboid.
+  /// </summary>
+  let checkerShell x y z w h d odd even (section: GridSection3D<'T>) : GridSection3D<'T> =
+    section
+    |> section x y z (fun s ->
+        s
+        |> checkerXZ 0 odd even
+        |> checkerXZ (h - 1) odd even
+        |> checkerXY 0 odd even
+        |> checkerXY (d - 1) odd even
+        |> checkerYZ 0 odd even
+        |> checkerYZ (w - 1) odd even)
+
+  /// <summary>
+  /// Generates content for an XZ plane using a generator function.
+  /// </summary>
+  let inline generateXZ
+    y
+    ([<InlineIfLambda>] generator: int -> int -> 'T)
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    if y >= 0 && y < section.Height then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let wh = gw * grid.Height
+      let gy = section.OffsetY + y
+      let startX = section.OffsetX
+      let startZ = section.OffsetZ
+
+      for fz in 0 .. section.Depth - 1 do
+        let zOffset = (startZ + fz) * wh + gy * gw
+
+        for fx in 0 .. section.Width - 1 do
+          grid.Cells.[zOffset + startX + fx] <- ValueSome(generator fx fz)
+
+    section
+
+  /// <summary>
+  /// Generates content for an XY plane using a generator function.
+  /// </summary>
+  let inline generateXY
+    z
+    ([<InlineIfLambda>] generator: int -> int -> 'T)
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    if z >= 0 && z < section.Depth then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let wh = gw * grid.Height
+      let gz = section.OffsetZ + z
+      let startX = section.OffsetX
+      let startY = section.OffsetY
+      let zOffset = gz * wh
+
+      for fy in 0 .. section.Height - 1 do
+        let yzOffset = zOffset + (startY + fy) * gw
+
+        for fx in 0 .. section.Width - 1 do
+          grid.Cells.[yzOffset + startX + fx] <- ValueSome(generator fx fy)
+
+    section
+
+  /// <summary>
+  /// Generates content for a YZ plane using a generator function.
+  /// </summary>
+  let inline generateYZ
+    x
+    ([<InlineIfLambda>] generator: int -> int -> 'T)
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    if x >= 0 && x < section.Width then
+      let grid = section.BackingGrid
+      let gw = grid.Width
+      let wh = gw * grid.Height
+      let gx = section.OffsetX + x
+      let startY = section.OffsetY
+      let startZ = section.OffsetZ
+
+      for fz in 0 .. section.Depth - 1 do
+        let zOffset = (startZ + fz) * wh
+
+        for fy in 0 .. section.Height - 1 do
+          grid.Cells.[zOffset + (startY + fy) * gw + gx] <- ValueSome(generator fy fz)
 
     section
 
@@ -882,6 +1255,67 @@ module Layout3D =
             | ValueSome c when c = oldContent ->
               section.BackingGrid.Cells.[idx] <- ValueSome newContent
             | _ -> ()
+
+    section
+
+  /// <summary>
+  /// Probabilistically replaces occurrences of 'oldContent' with 'newContent'.
+  /// Perfect for "weathering" or "distressing" large surfaces (e.g. 5% of walls are cracked).
+  /// </summary>
+  let replaceScatter
+    oldContent
+    newContent
+    (probability: float32)
+    seed
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for z in 0 .. section.Depth - 1 do
+      for y in 0 .. section.Height - 1 do
+        for x in 0 .. section.Width - 1 do
+          let gx = section.OffsetX + x
+          let gy = section.OffsetY + y
+          let gz = section.OffsetZ + z
+
+          if
+            gx >= 0
+            && gx < section.BackingGrid.Width
+            && gy >= 0
+            && gy < section.BackingGrid.Height
+            && gz >= 0
+            && gz < section.BackingGrid.Depth
+          then
+            let idx =
+              gx
+              + gy * section.BackingGrid.Width
+              + gz * section.BackingGrid.Width * section.BackingGrid.Height
+
+            match section.BackingGrid.Cells.[idx] with
+            | ValueSome c when c = oldContent ->
+              if float32(rng.NextDouble()) < probability then
+                section.BackingGrid.Cells.[idx] <- ValueSome newContent
+            | _ -> ()
+
+    section
+
+  /// <summary>
+  /// Randomly applies a stamp (a component function) 'count' times within the section.
+  /// Use this to populate a volume with complex multi-cell objects (e.g. trees, props).
+  /// </summary>
+  let inline scatterStamp
+    count
+    seed
+    ([<InlineIfLambda>] stamp: GridSection3D<'T> -> GridSection3D<'T>)
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    let rng = System.Random(seed)
+
+    for _ in 1..count do
+      let x = rng.Next(0, section.Width)
+      let y = rng.Next(0, section.Height)
+      let z = rng.Next(0, section.Depth)
+      section |> Layout3D.section x y z stamp |> ignore
 
     section
 

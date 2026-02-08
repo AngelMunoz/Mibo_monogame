@@ -269,3 +269,42 @@ module Interior =
           clearLocal 0 dy (startZ + dz) section
 
     section
+
+  /// <summary>
+  /// Scatters content randomly on a specific wall/side of the current section.
+  /// </summary>
+  let inline scatterWall
+    side
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    match side with
+    | North -> Layout3D.scatterXY (section.Depth - 1) count seed content section
+    | South -> Layout3D.scatterXY 0 count seed content section
+    | East -> Layout3D.scatterYZ (section.Width - 1) count seed content section
+    | West -> Layout3D.scatterYZ 0 count seed content section
+
+  /// <summary>
+  /// Scatters content along all room edges/corners.
+  /// </summary>
+  let inline scatterEdges
+    count
+    seed
+    content
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    Layout3D.scatterEdges 0 0 0 section.Width section.Height section.Depth count seed content
+
+  /// <summary>
+  /// Non-destructively decorates existing surfaces by replacing a percentage of tiles.
+  /// </summary>
+  let inline weather
+    oldContent
+    newContent
+    probability
+    seed
+    (section: GridSection3D<'T>)
+    : GridSection3D<'T> =
+    Layout3D.replaceScatter oldContent newContent probability seed section
