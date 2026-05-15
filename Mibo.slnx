@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Mibo/Mibo.fsproj" />
+    <Project Path="src/Mibo.Rendering3D/Mibo.Rendering3D.fsproj" />
     <Project Path="src/Mibo.Tests/Mibo.Tests.fsproj" />
     <Project Path="src/Templates/Mibo.Templates.csproj" />
   </Folder>
