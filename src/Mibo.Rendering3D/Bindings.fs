@@ -5,85 +5,6 @@ open Microsoft.Xna.Framework.Graphics
 open Mibo.Rendering
 open Mibo.Rendering.Graphics3D
 
-[<Struct>]
-type PBRMaterialData = {
-  AlbedoColor: Color
-  AlbedoMap: Texture2D voption
-  Metallic: float32
-  Roughness: float32
-  EmissiveColor: Color
-  EmissiveIntensity: float32
-  NormalMap: Texture2D voption
-  MetallicRoughnessMap: Texture2D voption
-  AmbientOcclusionMap: Texture2D voption
-}
-
-module PBRMaterial =
-
-  let defaults: PBRMaterialData = {
-    AlbedoColor = Color.White
-    AlbedoMap = ValueNone
-    Metallic = 0f
-    Roughness = 0.5f
-    EmissiveColor = Color.Black
-    EmissiveIntensity = 0f
-    NormalMap = ValueNone
-    MetallicRoughnessMap = ValueNone
-    AmbientOcclusionMap = ValueNone
-  }
-
-  let defaultsUnlit: PBRMaterialData = {
-    defaults with
-        Metallic = 0f
-        Roughness = 1f
-  }
-
-  let inline withAlbedo (color: Color) (mat: PBRMaterialData) = {
-    mat with
-        AlbedoColor = color
-  }
-
-  let inline withAlbedoMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        AlbedoMap = ValueSome tex
-  }
-
-  let inline withMetallic (value: float32) (mat: PBRMaterialData) = {
-    mat with
-        Metallic = value
-  }
-
-  let inline withRoughness (value: float32) (mat: PBRMaterialData) = {
-    mat with
-        Roughness = value
-  }
-
-  let inline withEmissive
-    (color: Color)
-    (intensity: float32)
-    (mat: PBRMaterialData)
-    =
-    {
-      mat with
-          EmissiveColor = color
-          EmissiveIntensity = intensity
-    }
-
-  let inline withNormalMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        NormalMap = ValueSome tex
-  }
-
-  let inline withMetallicRoughnessMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        MetallicRoughnessMap = ValueSome tex
-  }
-
-  let inline withAmbientOcclusionMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        AmbientOcclusionMap = ValueSome tex
-  }
-
 module Bindings =
 
   let inline resolveParam
@@ -168,7 +89,7 @@ module Bindings =
       Effect = effect
       MaterialKey = materialKey
       BindGlobal = bindGlobal
-      BindPerMaterial = fun () -> ()
+      BindPerMaterial = fun _ -> ()
       BindPerInstance =
         fun transform bones ->
           setMatrix worldParam transform
@@ -197,6 +118,11 @@ module Bindings =
     let ambientColorParam = resolveParam effect "AmbientColor"
     let lightCountParam = resolveParam effect "LightCount"
     let lightDataTexParam = resolveParam effect "LightDataTexture"
+    let tileDataTexParam = resolveParam effect "TileDataTexture"
+    let tileSizeParam = resolveParam effect "TileSize"
+    let tilesXParam = resolveParam effect "TilesX"
+    let tilesYParam = resolveParam effect "TilesY"
+    let maxLightsPerTileParam = resolveParam effect "MaxLightsPerTile"
     let shadowAtlasParam = resolveParam effect "ShadowAtlas"
     let shadowBiasParam = resolveParam effect "ShadowBias"
     let shadowNormalBiasParam = resolveParam effect "ShadowNormalBias"
@@ -216,6 +142,15 @@ module Bindings =
         setFloat lightCountParam (float32 ctx.LightCount)
       | ValueNone -> setFloat lightCountParam 0.0f
 
+      match ctx.TileDataTexture with
+      | ValueSome tex ->
+        setTexture tileDataTexParam (tex :> Texture)
+        setFloat tileSizeParam (float32 ctx.TileSize)
+        setFloat tilesXParam (float32 ctx.TilesX)
+        setFloat tilesYParam (float32 ctx.TilesY)
+        setFloat maxLightsPerTileParam (float32 ctx.MaxLightsPerTile)
+      | ValueNone -> ()
+
       match ctx.ShadowAtlas with
       | ValueSome atlas ->
         setTexture shadowAtlasParam (atlas :> Texture)
@@ -231,27 +166,28 @@ module Bindings =
         setFloat shadowMatrixCountParam (float32 ctx.ShadowMatrixCount)
       | ValueNone -> ()
 
-    let bindPerMaterial() =
-      setColorAsVector3 albedoColorParam material.AlbedoColor
-      setFloat metallicParam material.Metallic
-      setFloat roughnessParam material.Roughness
-      setVector3 emissiveColorParam (material.EmissiveColor.ToVector3())
-      setFloat emissiveIntensityParam material.EmissiveIntensity
+    let bindPerMaterial(overrideData: PBRMaterialData voption) =
+      let data = overrideData |> ValueOption.defaultValue material
+      setColorAsVector3 albedoColorParam data.AlbedoColor
+      setFloat metallicParam data.Metallic
+      setFloat roughnessParam data.Roughness
+      setVector3 emissiveColorParam (data.EmissiveColor.ToVector3())
+      setFloat emissiveIntensityParam data.EmissiveIntensity
 
-      match material.AlbedoMap with
+      match data.AlbedoMap with
       | ValueSome tex ->
         setFloat hasAlbedoMapParam 1.0f
         setTexture albedoMapParam (tex :> Texture)
       | ValueNone -> setFloat hasAlbedoMapParam 0.0f
 
-      material.NormalMap
+      data.NormalMap
       |> ValueOption.iter(fun tex -> setTexture normalMapParam (tex :> Texture))
 
-      material.MetallicRoughnessMap
+      data.MetallicRoughnessMap
       |> ValueOption.iter(fun tex ->
         setTexture metallicRoughnessMapParam (tex :> Texture))
 
-      material.AmbientOcclusionMap
+      data.AmbientOcclusionMap
       |> ValueOption.iter(fun tex ->
         setTexture ambientOcclusionMapParam (tex :> Texture))
 

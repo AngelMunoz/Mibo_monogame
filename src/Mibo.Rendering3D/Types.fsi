@@ -10,11 +10,58 @@ open Mibo.Rendering.Graphics3D
 type MaterialKey
 
 [<Struct>]
+type PBRMaterialData = {
+  AlbedoColor: Color
+  AlbedoMap: Texture2D voption
+  Metallic: float32
+  Roughness: float32
+  EmissiveColor: Color
+  EmissiveIntensity: float32
+  NormalMap: Texture2D voption
+  MetallicRoughnessMap: Texture2D voption
+  AmbientOcclusionMap: Texture2D voption
+}
+
+module PBRMaterial =
+  val defaults: PBRMaterialData
+  val defaultsUnlit: PBRMaterialData
+  val inline withAlbedo: color: Color -> mat: PBRMaterialData -> PBRMaterialData
+
+  val inline withAlbedoMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
+
+  val inline withMetallic:
+    value: float32 -> mat: PBRMaterialData -> PBRMaterialData
+
+  val inline withRoughness:
+    value: float32 -> mat: PBRMaterialData -> PBRMaterialData
+
+  val inline withEmissive:
+    color: Color ->
+    intensity: float32 ->
+    mat: PBRMaterialData ->
+      PBRMaterialData
+
+  val inline withNormalMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
+
+  val inline withMetallicRoughnessMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
+
+  val inline withAmbientOcclusionMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
+
+[<Struct>]
 type RenderContext = {
   Camera: Camera
   LightingState: LightingState
   LightDataTexture: Texture2D voption
   LightCount: int
+  TileDataTexture: Texture2D voption
+  TileSize: int
+  TilesX: int
+  TilesY: int
+  MaxLightsPerTile: int
   ShadowAtlas: Texture2D voption
   ShadowMatrixTexture: Texture2D voption
   ShadowMatrixCount: int
@@ -30,7 +77,7 @@ type EffectBinding = {
   Effect: Effect
   MaterialKey: int<MaterialKey>
   BindGlobal: RenderContext -> unit
-  BindPerMaterial: unit -> unit
+  BindPerMaterial: PBRMaterialData voption -> unit
   BindPerInstance: Matrix -> Matrix[] voption -> unit
 }
 
@@ -42,6 +89,7 @@ type Drawable = {
   BoundingSphere: BoundingSphere
   Pass: RenderPass
   MaterialKey: int<MaterialKey>
+  MaterialData: PBRMaterialData voption
   Binding: EffectBinding
 }
 
@@ -52,6 +100,17 @@ type SortKey = {
   MaterialKey: int<MaterialKey>
   Effect: Effect
 }
+
+module SortKey =
+  val inline create:
+    distance: float32 ->
+    pass: RenderPass ->
+    materialKey: int<MaterialKey> ->
+    effect: Effect ->
+      SortKey
+
+  val inline opaque: distance: float32 -> effect: Effect -> SortKey
+  val inline transparent: distance: float32 -> effect: Effect -> SortKey
 
 type RenderCommand =
   | SetCamera of camera: Camera

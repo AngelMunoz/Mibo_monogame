@@ -119,8 +119,10 @@ type FrameContext() =
   member val LightDataBuffer: Vector4[] = Array.empty with get, set
   member val ShadowMatrixBuffer: Vector4[] = Array.empty with get, set
   member val TileMasks: uint32[] = Array.empty with get, set
+  member val TileDataBuffer: float32[] = Array.empty with get, set
   member val LightDataTexture: Texture2D voption = ValueNone with get, set
   member val ShadowMatrixTexture: Texture2D voption = ValueNone with get, set
+  member val TileDataTexture: Texture2D voption = ValueNone with get, set
   member val MainSceneTarget: RenderTarget2D voption = ValueNone with get, set
   member val ShadowViewMatrices = ResizeArray<Matrix>(16)
   member val ShadowProjectionMatrices = ResizeArray<Matrix>(16)
@@ -205,11 +207,21 @@ type PipelineState
       |> ValueOption.map(fun atlas -> atlas.TilesAcross, float32 atlas.Size)
       |> ValueOption.defaultValue(0, 0f)
 
+    let tileSize = this.Config.TileSize
+    let viewport = this.Devices.Device.Viewport
+    let tilesX = (viewport.Width + tileSize - 1) / tileSize
+    let tilesY = (viewport.Height + tileSize - 1) / tileSize
+
     {
       Camera = this.Frame.Camera
       LightingState = this.Frame.Lighting
       LightDataTexture = this.Frame.LightDataTexture
       LightCount = this.Frame.AccumulatedLights.Count
+      TileDataTexture = this.Frame.TileDataTexture
+      TileSize = tileSize
+      TilesX = tilesX
+      TilesY = tilesY
+      MaxLightsPerTile = 32
       ShadowAtlas =
         this.ShadowAtlas
         |> ValueOption.map(fun a -> a.RenderTarget :> Texture2D)
@@ -552,6 +564,41 @@ module Tiling =
 
     tileMasks
 
+  let packTileData(state: PipelineState) =
+    let tileMasks = cullLights state
+    let frame = state.Frame
+    let tileSize = state.Config.TileSize
+    let viewport = state.Devices.Device.Viewport
+    let tilesX = (viewport.Width + tileSize - 1) / tileSize
+    let tilesY = (viewport.Height + tileSize - 1) / tileSize
+    let requiredTiles = tilesX * tilesY
+
+    let needed = requiredTiles
+    if frame.TileDataBuffer.Length < needed then
+      frame.TileDataBuffer <- Array.zeroCreate needed
+    else
+      Array.Clear(frame.TileDataBuffer, 0, needed)
+
+    for i in 0 .. min (tileMasks.Length - 1) (needed - 1) do
+      frame.TileDataBuffer.[i] <- float32 tileMasks.[i]
+
+    let gd = state.Devices.Device
+
+    let tex =
+      match frame.TileDataTexture with
+      | ValueSome t when t.Width = needed -> t
+      | ValueSome t ->
+        t.Dispose()
+        let newTex = new Texture2D(gd, needed, 1, false, SurfaceFormat.Single)
+        frame.TileDataTexture <- ValueSome newTex
+        newTex
+      | ValueNone ->
+        let newTex = new Texture2D(gd, needed, 1, false, SurfaceFormat.Single)
+        frame.TileDataTexture <- ValueSome newTex
+        newTex
+
+    tex.SetData(frame.TileDataBuffer, 0, needed)
+
 module ShadowPass =
 
   let computeSpotShadowMatrices(sl: SpotLight) =
@@ -886,7 +933,7 @@ module Drawing =
       ShadowPass.render state
       LightPacking.packLightData state
       LightPacking.packShadowMatrices state
-      Tiling.cullLights state |> ignore
+      Tiling.packTileData state
       state.Cache.RenderContext <- ValueSome(state.BuildRenderContext())
       state.Frame.LightingPrepared <- true
 
@@ -960,11 +1007,16 @@ module Drawing =
           lastEffect <- ValueSome binding.Effect
           lastMaterialKey <- ValueNone
 
-        match lastMaterialKey with
-        | ValueSome mk when mk = binding.MaterialKey -> ()
-        | _ ->
-          binding.BindPerMaterial()
-          lastMaterialKey <- ValueSome binding.MaterialKey
+        match drawable.MaterialData with
+        | ValueSome data ->
+          binding.BindPerMaterial(ValueSome data)
+          lastMaterialKey <- ValueNone
+        | ValueNone ->
+          match lastMaterialKey with
+          | ValueSome mk when mk = binding.MaterialKey -> ()
+          | _ ->
+            binding.BindPerMaterial(ValueNone)
+            lastMaterialKey <- ValueSome binding.MaterialKey
 
         binding.BindPerInstance drawable.Transform drawable.Bones
 

@@ -20,6 +20,7 @@ module Drawable =
       BoundingSphere = mesh.BoundingSphere.Transform(transform)
       Pass = Opaque
       MaterialKey = binding.MaterialKey
+      MaterialData = ValueNone
       Binding = binding
     }
 
@@ -50,3 +51,9 @@ module Drawable =
     (d: Mibo.Rendering3D.Drawable)
     : Mibo.Rendering3D.Drawable =
     { d with MaterialKey = key }
+
+  let inline withMaterialData
+    (data: PBRMaterialData)
+    (d: Mibo.Rendering3D.Drawable)
+    : Mibo.Rendering3D.Drawable =
+    { d with MaterialData = ValueSome data }

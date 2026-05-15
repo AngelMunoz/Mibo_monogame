@@ -218,25 +218,33 @@ Reference binding implementations will be provided as sample code, not as framew
 ## 6. Implementation Phases
 
 ### Phase 1: Foundation (Types + Bindings)
-- [ ] Create `Mibo.Rendering3D` project
-- [ ] Define `RenderContext`, `EffectBinding`, `Drawable`, `SortKey` types
-- [ ] Implement `Bindings` module with `basicEffect` and `pbr` reference bindings
-- [ ] Ensure pre-resolved `EffectParameter` handle capture in closures
+- [x] Create `Mibo.Rendering3D` project
+- [x] Define `RenderContext`, `EffectBinding`, `Drawable`, `SortKey` types
+- [x] Implement `Bindings` module with `basicEffect` and `pbr` reference bindings
+- [x] Ensure pre-resolved `EffectParameter` handle capture in closures
 - [ ] Write unit tests for binding creation and parameter resolution
 
 ### Phase 2: Pipeline Orchestration
-- [ ] Implement `Pipeline3DConfig` with prepare/apply split
-- [ ] Adopt `RendererBuffers` caching pattern from 2D (`LightingPrepared` flag, matrix comparison)
-- [ ] Implement three-phase binding execution in `Drawing.fs`
-- [ ] Implement sort + batch: composite key (Effect → MaterialKey → Distance)
-- [ ] Wire up tiled culling (no longer discarded)
+- [x] Implement `Pipeline3DConfig` with prepare/apply split
+- [x] Adopt `RendererBuffers` caching pattern from 2D (`LightingPrepared` flag, matrix comparison)
+- [x] Implement three-phase binding execution in `Drawing.fs`
+- [x] Implement sort + batch: composite key (Effect → MaterialKey → Distance)
+- [x] Wire up tiled culling — packed into `TileDataTexture` and exposed via `RenderContext`
 
 ### Phase 3: Render Commands + View API
-- [ ] Define revised `RenderCommand` union
-- [ ] Implement `DrawCustom(SortKey * (GameContext * RenderContext -> unit))`
-- [ ] Implement `draw { ... }` computation expression for new Drawable
-- [ ] Implement shadow pass orchestration
-- [ ] Implement `CustomPostProcessPass` for 3D (adopted from 2D)
+- [x] Define revised `RenderCommand` union
+- [x] Implement `DrawCustom(SortKey * (GameContext * RenderContext -> unit))`
+- [x] Implement `draw { ... }` computation expression for new Drawable
+- [x] Implement shadow pass orchestration
+- [x] Implement `CustomPostProcessPass` for 3D (adopted from 2D)
+- [x] Add `PBRMaterialData` type and `PBRMaterial` module
+- [x] Add per-frame material override (`MaterialData` on `Drawable`, `BindPerMaterial` accepts `PBRMaterialData voption`)
+- [x] Add `withEmissive`, `withAlbedo`, `withMetallic`, `withRoughness` CE operations
+- [x] Add `withMaterialData` on `Drawable` module
+- [x] Add `SortKey.create`, `SortKey.opaque`, `SortKey.transparent` helpers
+- [x] Fix `withBinding` resetting Pass to Opaque (bug)
+- [x] Add `TileDataTexture`, `TileSize`, `TilesX`, `TilesY`, `MaxLightsPerTile` to `RenderContext`
+- [x] PBR binding now sets tile data parameters on shader
 
 ### Phase 4: Sample Migration + Tests
 - [ ] Migrate `samples/3DSample/` to new API

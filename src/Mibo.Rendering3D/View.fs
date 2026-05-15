@@ -13,6 +13,7 @@ type DrawState = {
   LocalRotation: Quaternion
   LocalScale: Vector3
   Binding: EffectBinding voption
+  MaterialData: PBRMaterialData voption
   Parent: Matrix voption
   Bones: Matrix[] voption
   Pass: Mibo.Rendering.Graphics3D.RenderPass
@@ -26,6 +27,7 @@ module DrawState =
     LocalRotation = Quaternion.Identity
     LocalScale = Vector3.One
     Binding = ValueNone
+    MaterialData = ValueNone
     Parent = ValueNone
     Bones = ValueNone
     Pass = Mibo.Rendering.Graphics3D.Opaque
@@ -53,6 +55,7 @@ module DrawState =
         BoundingSphere = mesh.BoundingSphere.Transform(transform)
         Pass = state.Pass
         MaterialKey = binding.MaterialKey
+        MaterialData = state.MaterialData
         Binding = binding
       }
     | _ -> ValueNone
@@ -157,8 +160,64 @@ type DrawableBuilder() =
   member _.WithBinding(state: DrawState, binding: EffectBinding) = {
     state with
         Binding = ValueSome binding
-        Pass = Mibo.Rendering.Graphics3D.Opaque
   }
+
+  [<CustomOperation("withMaterialData")>]
+  member _.WithMaterialData(state: DrawState, data: PBRMaterialData) = {
+    state with
+        MaterialData = ValueSome data
+  }
+
+  [<CustomOperation("withEmissive")>]
+  member _.WithEmissive
+    (state: DrawState, color: Color, intensity: float32)
+    =
+    let data =
+      state.MaterialData
+      |> ValueOption.defaultValue PBRMaterial.defaults
+
+    {
+      state with
+          MaterialData =
+            ValueSome {
+              data with
+                  EmissiveColor = color
+                  EmissiveIntensity = intensity
+            }
+    }
+
+  [<CustomOperation("withAlbedo")>]
+  member _.WithAlbedo(state: DrawState, color: Color) =
+    let data =
+      state.MaterialData
+      |> ValueOption.defaultValue PBRMaterial.defaults
+
+    {
+      state with
+          MaterialData = ValueSome { data with AlbedoColor = color }
+    }
+
+  [<CustomOperation("withMetallic")>]
+  member _.WithMetallic(state: DrawState, value: float32) =
+    let data =
+      state.MaterialData
+      |> ValueOption.defaultValue PBRMaterial.defaults
+
+    {
+      state with
+          MaterialData = ValueSome { data with Metallic = value }
+    }
+
+  [<CustomOperation("withRoughness")>]
+  member _.WithRoughness(state: DrawState, value: float32) =
+    let data =
+      state.MaterialData
+      |> ValueOption.defaultValue PBRMaterial.defaults
+
+    {
+      state with
+          MaterialData = ValueSome { data with Roughness = value }
+    }
 
   [<CustomOperation("withBones")>]
   member _.WithBones(state: DrawState, bones: Matrix[]) = {

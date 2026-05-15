@@ -13,6 +13,7 @@ type DrawState = {
   LocalRotation: Quaternion
   LocalScale: Vector3
   Binding: EffectBinding voption
+  MaterialData: PBRMaterialData voption
   Parent: Matrix voption
   Bones: Matrix[] voption
   Pass: Mibo.Rendering.Graphics3D.RenderPass
@@ -49,6 +50,16 @@ type DrawableBuilder =
   member ScaledByVec: state: DrawState * scale: Vector3 -> DrawState
   member WithTransform: state: DrawState * transform: Matrix -> DrawState
   member WithBinding: state: DrawState * binding: EffectBinding -> DrawState
+
+  member WithMaterialData:
+    state: DrawState * data: PBRMaterialData -> DrawState
+
+  member WithEmissive:
+    state: DrawState * color: Color * intensity: float32 -> DrawState
+
+  member WithAlbedo: state: DrawState * color: Color -> DrawState
+  member WithMetallic: state: DrawState * value: float32 -> DrawState
+  member WithRoughness: state: DrawState * value: float32 -> DrawState
   member WithBones: state: DrawState * bones: Matrix[] -> DrawState
   member Opaque: state: DrawState -> DrawState
   member Transparent: state: DrawState -> DrawState
@@ -201,8 +212,7 @@ module Buffer =
       RenderBuffer<unit, RenderCommand>
 
   val clearDepth:
-    buffer: RenderBuffer<unit, RenderCommand> ->
-      RenderBuffer<unit, RenderCommand>
+    buffer: RenderBuffer<unit, RenderCommand> -> RenderBuffer<unit, RenderCommand>
 
   val custom:
     sortKey: SortKey ->

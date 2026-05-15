@@ -11,11 +11,95 @@ open FSharp.UMX
 type MaterialKey
 
 [<Struct>]
+type PBRMaterialData = {
+  AlbedoColor: Color
+  AlbedoMap: Texture2D voption
+  Metallic: float32
+  Roughness: float32
+  EmissiveColor: Color
+  EmissiveIntensity: float32
+  NormalMap: Texture2D voption
+  MetallicRoughnessMap: Texture2D voption
+  AmbientOcclusionMap: Texture2D voption
+}
+
+module PBRMaterial =
+
+  let defaults: PBRMaterialData = {
+    AlbedoColor = Color.White
+    AlbedoMap = ValueNone
+    Metallic = 0f
+    Roughness = 0.5f
+    EmissiveColor = Color.Black
+    EmissiveIntensity = 0f
+    NormalMap = ValueNone
+    MetallicRoughnessMap = ValueNone
+    AmbientOcclusionMap = ValueNone
+  }
+
+  let defaultsUnlit: PBRMaterialData = {
+    defaults with
+        Metallic = 0f
+        Roughness = 1f
+  }
+
+  let inline withAlbedo (color: Color) (mat: PBRMaterialData) = {
+    mat with
+        AlbedoColor = color
+  }
+
+  let inline withAlbedoMap (tex: Texture2D) (mat: PBRMaterialData) = {
+    mat with
+        AlbedoMap = ValueSome tex
+  }
+
+  let inline withMetallic (value: float32) (mat: PBRMaterialData) = {
+    mat with
+        Metallic = value
+  }
+
+  let inline withRoughness (value: float32) (mat: PBRMaterialData) = {
+    mat with
+        Roughness = value
+  }
+
+  let inline withEmissive
+    (color: Color)
+    (intensity: float32)
+    (mat: PBRMaterialData)
+    =
+    {
+      mat with
+          EmissiveColor = color
+          EmissiveIntensity = intensity
+    }
+
+  let inline withNormalMap (tex: Texture2D) (mat: PBRMaterialData) = {
+    mat with
+        NormalMap = ValueSome tex
+  }
+
+  let inline withMetallicRoughnessMap (tex: Texture2D) (mat: PBRMaterialData) = {
+    mat with
+        MetallicRoughnessMap = ValueSome tex
+  }
+
+  let inline withAmbientOcclusionMap (tex: Texture2D) (mat: PBRMaterialData) = {
+    mat with
+        AmbientOcclusionMap = ValueSome tex
+  }
+
+[<Struct>]
 type RenderContext = {
   Camera: Camera
   LightingState: LightingState
   LightDataTexture: Texture2D voption
   LightCount: int
+  TileDataTexture: Texture2D voption
+  TileSize: int
+  TilesX: int
+  TilesY: int
+  MaxLightsPerTile: int
   ShadowAtlas: Texture2D voption
   ShadowMatrixTexture: Texture2D voption
   ShadowMatrixCount: int
@@ -31,7 +115,7 @@ type EffectBinding = {
   Effect: Effect
   MaterialKey: int<MaterialKey>
   BindGlobal: RenderContext -> unit
-  BindPerMaterial: unit -> unit
+  BindPerMaterial: PBRMaterialData voption -> unit
   BindPerInstance: Matrix -> Matrix[] voption -> unit
 }
 
@@ -43,6 +127,7 @@ type Drawable = {
   BoundingSphere: BoundingSphere
   Pass: RenderPass
   MaterialKey: int<MaterialKey>
+  MaterialData: PBRMaterialData voption
   Binding: EffectBinding
 }
 
@@ -53,6 +138,29 @@ type SortKey = {
   MaterialKey: int<MaterialKey>
   Effect: Effect
 }
+
+module SortKey =
+
+  let inline create (distance: float32) (pass: RenderPass) (materialKey: int<MaterialKey>) (effect: Effect) : SortKey = {
+    Distance = distance
+    Pass = pass
+    MaterialKey = materialKey
+    Effect = effect
+  }
+
+  let inline opaque (distance: float32) (effect: Effect) : SortKey = {
+    Distance = distance
+    Pass = RenderPass.Opaque
+    MaterialKey = 0<MaterialKey>
+    Effect = effect
+  }
+
+  let inline transparent (distance: float32) (effect: Effect) : SortKey = {
+    Distance = distance
+    Pass = RenderPass.Transparent
+    MaterialKey = 0<MaterialKey>
+    Effect = effect
+  }
 
 type RenderCommand =
   | SetCamera of camera: Camera
