@@ -15,6 +15,8 @@
     <Compile Include="Drawable.fs" />
     <Compile Include="Bindings.fsi" />
     <Compile Include="Bindings.fs" />
+    <Compile Include="View.fsi" />
+    <Compile Include="View.fs" />
     <Compile Include="Config.fsi" />
     <Compile Include="Config.fs" />
     <Compile Include="PipelineInternals.fsi" />

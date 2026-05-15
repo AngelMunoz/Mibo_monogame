@@ -791,8 +791,8 @@ module Drawing =
         |> ValueOption.defaultValue(state.BuildRenderContext())
 
       let opaqueComparer
-        (struct (da, d1): struct (float32 * Drawable))
-        (struct (db, d2): struct (float32 * Drawable))
+        (struct (da, (d1: Drawable)))
+        (struct (db, (d2: Drawable)))
         =
         let c =
           compare
@@ -807,7 +807,10 @@ module Drawing =
 
       frame.OpaqueDrawables.Sort opaqueComparer
 
-      let transparentComparer (struct (da, d1)) (struct (db, d2)) =
+      let transparentComparer
+        (struct (da, (d1: Drawable)))
+        (struct (db, (d2: Drawable)))
+        =
         let c = compare db da
 
         if c <> 0 then
