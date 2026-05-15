@@ -179,6 +179,21 @@ type PipelineState
     |> ValueOption.iter(fun cfg ->
       this.ShadowAtlas <- ValueSome(ShadowAtlas.create gd cfg))
 
+    this.Config.ShadowCasterAsset
+    |> ValueOption.iter(fun asset ->
+      let effect = game.Content.Load<Effect>(asset)
+      this.Devices.CustomShaders.["ShadowCaster"] <- effect)
+
+    this.Config.BloomEffectAsset
+    |> ValueOption.iter(fun asset ->
+      let effect = game.Content.Load<Effect>(asset)
+      this.Devices.CustomShaders.["Bloom"] <- effect)
+
+    this.Config.PostProcessEffectAsset
+    |> ValueOption.iter(fun asset ->
+      let effect = game.Content.Load<Effect>(asset)
+      this.Devices.CustomShaders.["PostProcess"] <- effect)
+
   member this.BuildRenderContext() : RenderContext =
     let shadowBias, shadowNormalBias =
       this.Config.Shadows
@@ -761,6 +776,109 @@ module ShadowPass =
         | ValueNone -> devices.Device.SetRenderTarget(null)
     | ValueNone -> ()
 
+module PostProcess =
+
+  let private quadVertices: VertexPositionTexture[] = [|
+    VertexPositionTexture(Vector3(-1f, 1f, 0f), Vector2(0f, 0f))
+    VertexPositionTexture(Vector3(1f, 1f, 0f), Vector2(1f, 0f))
+    VertexPositionTexture(Vector3(-1f, -1f, 0f), Vector2(0f, 1f))
+    VertexPositionTexture(Vector3(1f, -1f, 0f), Vector2(1f, 1f))
+  |]
+
+  let render
+    (state: PipelineState)
+    (gameTime: GameTime)
+    (sceneTarget: RenderTarget2D)
+    =
+    match state.Config.PostProcess with
+    | ValueSome pp ->
+      let devices = state.Devices
+
+      let bloomTarget =
+        match pp.Bloom with
+        | ValueSome bloomCfg ->
+          match devices.CustomShaders.TryGetValue("Bloom") with
+          | true, bloomEffect ->
+            bloomEffect.SafeSetParam("Threshold", bloomCfg.Threshold)
+            bloomEffect.SafeSetParam("Intensity", bloomCfg.Intensity)
+            bloomEffect.SafeSetParam("SceneTexture", sceneTarget)
+
+            let texelSize =
+              Vector2(
+                1f / float32 sceneTarget.Width,
+                1f / float32 sceneTarget.Height
+              )
+
+            bloomEffect.SafeSetParam("TexelSize", texelSize)
+
+            let spec = {
+              Width = sceneTarget.Width / 2
+              Height = sceneTarget.Height / 2
+              Format = SurfaceFormat.Color
+              DepthFormat = DepthFormat.None
+            }
+
+            let rt = devices.RtPool.Acquire spec
+            devices.Device.SetRenderTarget(rt)
+
+            for pass in bloomEffect.CurrentTechnique.Passes do
+              pass.Apply()
+
+              devices.Device.DrawUserPrimitives(
+                PrimitiveType.TriangleStrip,
+                quadVertices,
+                0,
+                2
+              )
+
+            ValueSome rt
+          | false, _ -> ValueNone
+        | ValueNone -> ValueNone
+
+      let tmMode =
+        match pp.ToneMapping with
+        | ToneMappingConfig.NoToneMapping -> 0
+        | Reinhard -> 1
+        | ACES -> 2
+        | Filmic -> 3
+        | AgX -> 4
+
+      match devices.CustomShaders.TryGetValue("PostProcess") with
+      | true, ppEffect ->
+        devices.Device.SetRenderTarget(null)
+        ppEffect.SafeSetParam("SceneTexture", sceneTarget)
+        ppEffect.SafeSetParam("ToneMapping", float32 tmMode)
+
+        ppEffect.SafeSetParam(
+          "Time",
+          float32 gameTime.TotalGameTime.TotalSeconds
+        )
+
+        bloomTarget
+        |> ValueOption.iter(fun rt ->
+          ppEffect.SafeSetParam("BloomTexture", rt :> Texture))
+
+        for pass in ppEffect.CurrentTechnique.Passes do
+          pass.Apply()
+
+          devices.Device.DrawUserPrimitives(
+            PrimitiveType.TriangleStrip,
+            quadVertices,
+            0,
+            2
+          )
+      | false, _ ->
+        devices.Device.SetRenderTarget(null)
+
+        match devices.SpriteBatch with
+        | null -> ()
+        | sprite ->
+          sprite.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
+          devices.Device.SamplerStates.[0] <- SamplerState.PointClamp
+          sprite.Draw(sceneTarget, devices.Device.Viewport.Bounds, Color.White)
+          sprite.End()
+    | ValueNone -> ()
+
 module Drawing =
 
   let prepare(state: PipelineState) =
@@ -1211,6 +1329,7 @@ module Orchestrate =
         state.Devices.Device.SamplerStates.[0] <- SamplerState.PointClamp
         sprite.Draw(rt, state.Devices.Device.Viewport.Bounds, Color.White)
         sprite.End()
+    | ValueSome rt, ValueSome _ -> PostProcess.render state gameTime rt
     | _ -> ()
 
     if not(isNull(box state.Devices.RtPool)) then

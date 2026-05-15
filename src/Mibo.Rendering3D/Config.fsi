@@ -8,6 +8,9 @@ type Pipeline3DConfig = {
   PostProcess: PostProcessConfig voption
   DefaultLighting: LightingState voption
   TileSize: int
+  ShadowCasterAsset: string voption
+  BloomEffectAsset: string voption
+  PostProcessEffectAsset: string voption
 }
 
 module Pipeline3DConfig =
@@ -23,3 +26,12 @@ module Pipeline3DConfig =
     lighting: LightingState -> pc: Pipeline3DConfig -> Pipeline3DConfig
 
   val inline withTileSize: size: int -> pc: Pipeline3DConfig -> Pipeline3DConfig
+
+  val inline withShadowCasterAsset:
+    asset: string -> pc: Pipeline3DConfig -> Pipeline3DConfig
+
+  val inline withBloomEffectAsset:
+    asset: string -> pc: Pipeline3DConfig -> Pipeline3DConfig
+
+  val inline withPostProcessEffectAsset:
+    asset: string -> pc: Pipeline3DConfig -> Pipeline3DConfig

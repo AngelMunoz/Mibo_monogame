@@ -8,6 +8,9 @@ type Pipeline3DConfig = {
   PostProcess: PostProcessConfig voption
   DefaultLighting: LightingState voption
   TileSize: int
+  ShadowCasterAsset: string voption
+  BloomEffectAsset: string voption
+  PostProcessEffectAsset: string voption
 }
 
 module Pipeline3DConfig =
@@ -17,6 +20,9 @@ module Pipeline3DConfig =
     PostProcess = ValueNone
     DefaultLighting = ValueNone
     TileSize = 32
+    ShadowCasterAsset = ValueNone
+    BloomEffectAsset = ValueNone
+    PostProcessEffectAsset = ValueNone
   }
 
   let inline withShadows (cfg: ShadowConfig) (pc: Pipeline3DConfig) = {
@@ -41,4 +47,19 @@ module Pipeline3DConfig =
   let inline withTileSize (size: int) (pc: Pipeline3DConfig) = {
     pc with
         TileSize = size
+  }
+
+  let inline withShadowCasterAsset (asset: string) (pc: Pipeline3DConfig) = {
+    pc with
+        ShadowCasterAsset = ValueSome asset
+  }
+
+  let inline withBloomEffectAsset (asset: string) (pc: Pipeline3DConfig) = {
+    pc with
+        BloomEffectAsset = ValueSome asset
+  }
+
+  let inline withPostProcessEffectAsset (asset: string) (pc: Pipeline3DConfig) = {
+    pc with
+        PostProcessEffectAsset = ValueSome asset
   }
