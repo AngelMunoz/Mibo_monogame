@@ -2,6 +2,7 @@ namespace Mibo.Rendering3D.PipelineInternals
 
 open System
 open System.Collections.Generic
+open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
@@ -101,6 +102,7 @@ type FrameContext() =
   member val Camera: Camera = Camera.identity with get, set
   member val Lighting: LightingState = Lighting.ambient with get, set
   member val CameraWasSet: bool = false with get, set
+  member val LightingPrepared: bool = false with get, set
   member val AccumulatedLights = ResizeArray<Light>(32)
   member val OpaqueDrawables = ResizeArray<struct (float32 * Drawable)>(256)
   member val TransparentDrawables = ResizeArray<struct (float32 * Drawable)>(64)
@@ -155,6 +157,7 @@ type PipelineState
     this.Frame.AccumulatedLights.Clear()
     this.Frame.Lighting.Lights |> Array.iter this.Frame.AccumulatedLights.Add
     this.Frame.CameraWasSet <- false
+    this.Frame.LightingPrepared <- false
     this.Frame.OpaqueDrawables.Clear()
     this.Frame.TransparentDrawables.Clear()
     this.Frame.OpaqueSpriteCommands.Clear()
@@ -760,10 +763,18 @@ module ShadowPass =
 
 module Drawing =
 
-  let flush(state: PipelineState) =
+  let prepare(state: PipelineState) =
+    if not state.Frame.LightingPrepared then
+      ShadowPass.render state
+      LightPacking.packLightData state
+      LightPacking.packShadowMatrices state
+      Tiling.cullLights state |> ignore
+      state.Cache.RenderContext <- ValueSome(state.BuildRenderContext())
+      state.Frame.LightingPrepared <- true
+
+  let apply(state: PipelineState) =
     let devices = state.Devices
     let frame = state.Frame
-    let cache = state.Cache
 
     if
       frame.OpaqueDrawables.Count = 0
@@ -773,23 +784,46 @@ module Drawing =
     then
       ()
     else
-      frame.OpaqueDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
-        d1.CompareTo(d2))
+      prepare state
 
-      frame.TransparentDrawables.Sort(fun struct (d1, _) struct (d2, _) ->
-        d2.CompareTo(d1))
+      let ctx =
+        state.Cache.RenderContext
+        |> ValueOption.defaultValue(state.BuildRenderContext())
+
+      let opaqueComparer
+        (struct (da, d1): struct (float32 * Drawable))
+        (struct (db, d2): struct (float32 * Drawable))
+        =
+        let c =
+          compare
+            (RuntimeHelpers.GetHashCode d1.Binding.Effect)
+            (RuntimeHelpers.GetHashCode d2.Binding.Effect)
+
+        if c <> 0 then
+          c
+        else
+          let c = compare d1.MaterialKey d2.MaterialKey
+          if c <> 0 then c else compare da db
+
+      frame.OpaqueDrawables.Sort opaqueComparer
+
+      let transparentComparer (struct (da, d1)) (struct (db, d2)) =
+        let c = compare db da
+
+        if c <> 0 then
+          c
+        else
+          compare
+            (RuntimeHelpers.GetHashCode d1.Binding.Effect)
+            (RuntimeHelpers.GetHashCode d2.Binding.Effect)
+
+      frame.TransparentDrawables.Sort transparentComparer
 
       frame.Lighting <- {
         frame.Lighting with
             Lights = frame.AccumulatedLights.ToArray()
       }
 
-      ShadowPass.render state
-      LightPacking.packLightData state
-      LightPacking.packShadowMatrices state
-
-      let ctx = state.BuildRenderContext()
-      cache.RenderContext <- ValueSome ctx
       devices.Device.DepthStencilState <- DepthStencilState.Default
 
       let mutable lastEffect: Effect voption = ValueNone
@@ -1056,20 +1090,24 @@ module Orchestrate =
 
     match cmd with
     | RenderCommand.SetCamera camera ->
-      Drawing.flush state
+      Drawing.apply state
       frame.Camera <- camera
       frame.CameraWasSet <- true
+      frame.LightingPrepared <- false
       state.UpdateFrustum()
     | RenderCommand.SetLighting lighting ->
       frame.Lighting <- lighting
       frame.AccumulatedLights.Clear()
       lighting.Lights |> Array.iter frame.AccumulatedLights.Add
-    | RenderCommand.AddLight light -> frame.AccumulatedLights.Add(light)
+      frame.LightingPrepared <- false
+    | RenderCommand.AddLight light ->
+      frame.AccumulatedLights.Add(light)
+      frame.LightingPrepared <- false
     | RenderCommand.SetViewport viewport ->
-      Drawing.flush state
+      Drawing.apply state
       state.Devices.Device.Viewport <- viewport
     | RenderCommand.ClearTarget(colorOpt, clearDepth) ->
-      Drawing.flush state
+      Drawing.apply state
 
       let flags =
         match colorOpt, clearDepth with
@@ -1112,7 +1150,7 @@ module Orchestrate =
     | RenderCommand.DrawLinesEffect(_, _, _, _, pass) ->
       Culling.batchSpriteCommand frame pass 0f cmd
     | RenderCommand.DrawCustom(_, drawFn) ->
-      Drawing.flush state
+      Drawing.apply state
 
       let ctx =
         match state.Cache.RenderContext with
@@ -1156,7 +1194,8 @@ module Orchestrate =
       let struct (_, cmd) = buffer.[i]
       processCommand state cmd
 
-    Drawing.flush state
+    Drawing.prepare state
+    Drawing.apply state
 
     match sceneTarget, state.Config.PostProcess with
     | ValueSome rt, ValueNone ->
