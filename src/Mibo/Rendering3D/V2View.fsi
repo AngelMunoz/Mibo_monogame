@@ -1,4 +1,4 @@
-namespace Mibo.Rendering3D
+namespace Mibo.Rendering.Graphics3D.V2
 
 open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
@@ -22,13 +22,15 @@ type DrawState = {
 module DrawState =
   val empty: DrawState
   val computeTransform: state: DrawState -> Matrix
-  val toDrawable: state: DrawState -> Mibo.Rendering3D.Drawable voption
+
+  val toDrawable:
+    state: DrawState -> Mibo.Rendering.Graphics3D.V2.Drawable voption
 
 [<Sealed>]
 type DrawableBuilder =
   new: unit -> DrawableBuilder
   member Yield: unit -> DrawState
-  member Run: state: DrawState -> Mibo.Rendering3D.Drawable voption
+  member Run: state: DrawState -> Mibo.Rendering.Graphics3D.V2.Drawable voption
 
   member Mesh:
     state: DrawState * mesh: Mibo.Rendering.Graphics3D.Mesh -> DrawState
@@ -51,8 +53,7 @@ type DrawableBuilder =
   member WithTransform: state: DrawState * transform: Matrix -> DrawState
   member WithBinding: state: DrawState * binding: EffectBinding -> DrawState
 
-  member WithMaterialData:
-    state: DrawState * data: PBRMaterialData -> DrawState
+  member WithMaterialData: state: DrawState * data: PBRMaterialData -> DrawState
 
   member WithEmissive:
     state: DrawState * color: Color * intensity: float32 -> DrawState
@@ -167,13 +168,13 @@ type PipelineBufferExtensions =
   [<Extension>]
   static member Draw:
     this: RenderBuffer<unit, RenderCommand> *
-    drawable: Mibo.Rendering3D.Drawable voption ->
+    drawable: Mibo.Rendering.Graphics3D.V2.Drawable voption ->
       RenderBuffer<unit, RenderCommand>
 
   [<Extension>]
   static member DrawMany:
     this: RenderBuffer<unit, RenderCommand> *
-    drawables: seq<Mibo.Rendering3D.Drawable voption> ->
+    drawables: seq<Mibo.Rendering.Graphics3D.V2.Drawable voption> ->
       RenderBuffer<unit, RenderCommand>
 
   [<Extension>]
@@ -212,7 +213,8 @@ module Buffer =
       RenderBuffer<unit, RenderCommand>
 
   val clearDepth:
-    buffer: RenderBuffer<unit, RenderCommand> -> RenderBuffer<unit, RenderCommand>
+    buffer: RenderBuffer<unit, RenderCommand> ->
+      RenderBuffer<unit, RenderCommand>
 
   val custom:
     sortKey: SortKey ->
@@ -267,12 +269,12 @@ module Buffer =
       RenderBuffer<unit, RenderCommand>
 
   val draw:
-    d: Mibo.Rendering3D.Drawable voption ->
+    d: Mibo.Rendering.Graphics3D.V2.Drawable voption ->
     buffer: RenderBuffer<unit, RenderCommand> ->
       RenderBuffer<unit, RenderCommand>
 
   val drawMany:
-    ds: seq<Mibo.Rendering3D.Drawable voption> ->
+    ds: seq<Mibo.Rendering.Graphics3D.V2.Drawable voption> ->
     buffer: RenderBuffer<unit, RenderCommand> ->
       RenderBuffer<unit, RenderCommand>
 

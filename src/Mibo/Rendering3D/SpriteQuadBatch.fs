@@ -9,7 +9,7 @@ open Mibo.Rendering
 /// <summary>
 /// A simple batcher for drawing textured, vertex-colored quads in 3D.
 /// </summary>
-module internal SpriteQuadBatch =
+module SpriteQuadBatch =
 
   type State = {
     mutable Vertices: VertexPositionColorTexture[]

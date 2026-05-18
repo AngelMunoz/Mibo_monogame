@@ -1,16 +1,13 @@
-namespace Mibo.Rendering3D.PipelineInternals
+namespace Mibo.Rendering.Graphics3D.V2.Internals
 
 open System
-open System.Collections.Generic
 open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
 open Mibo.Rendering
 open Mibo.Rendering.Graphics3D
-open Mibo.Rendering3D
-
-module SpriteQuadBatch = Mibo.Elmish.Graphics3D.SpriteQuadBatch
+open Mibo.Rendering.Graphics3D.V2
 
 module ShadowAtlas =
 
@@ -76,7 +73,6 @@ type DeviceContext() =
   member val LineBatch: LineBatch.State = Unchecked.defaultof<_> with get, set
   member val SpriteEffect: BasicEffect = Unchecked.defaultof<_> with get, set
   member val LineEffect: BasicEffect = Unchecked.defaultof<_> with get, set
-  member val CustomShaders = Dictionary<string, Effect>()
 
 
   member this.Initialize(gd: GraphicsDevice) =
@@ -180,21 +176,6 @@ type PipelineState
     this.Config.Shadows
     |> ValueOption.iter(fun cfg ->
       this.ShadowAtlas <- ValueSome(ShadowAtlas.create gd cfg))
-
-    this.Config.ShadowCasterAsset
-    |> ValueOption.iter(fun asset ->
-      let effect = game.Content.Load<Effect>(asset)
-      this.Devices.CustomShaders.["ShadowCaster"] <- effect)
-
-    this.Config.BloomEffectAsset
-    |> ValueOption.iter(fun asset ->
-      let effect = game.Content.Load<Effect>(asset)
-      this.Devices.CustomShaders.["Bloom"] <- effect)
-
-    this.Config.PostProcessEffectAsset
-    |> ValueOption.iter(fun asset ->
-      let effect = game.Content.Load<Effect>(asset)
-      this.Devices.CustomShaders.["PostProcess"] <- effect)
 
   member this.BuildRenderContext() : RenderContext =
     let shadowBias, shadowNormalBias =
@@ -574,6 +555,7 @@ module Tiling =
     let requiredTiles = tilesX * tilesY
 
     let needed = requiredTiles
+
     if frame.TileDataBuffer.Length < needed then
       frame.TileDataBuffer <- Array.zeroCreate needed
     else
@@ -661,167 +643,140 @@ module ShadowPass =
 
     struct (view, proj)
 
-  let renderDrawableShadow
-    (devices: DeviceContext)
-    (frame: FrameContext)
-    (drawable: Drawable)
-    (shadowEffect: Effect)
-    (view: Matrix)
-    (projection: Matrix)
-    =
-    let mesh = drawable.Mesh
-    devices.Device.SetVertexBuffer(mesh.VertexBuffer)
-    devices.Device.Indices <- mesh.IndexBuffer
-    shadowEffect.SafeSetParam("World", drawable.Transform)
-    shadowEffect.SafeSetParam("View", view)
-    shadowEffect.SafeSetParam("Projection", projection)
+  let render(state: PipelineState) =
+    match state.ShadowAtlas, state.Config.ShadowCasterBinding with
+    | ValueSome atlas, ValueSome binding ->
+      state.Frame.Frustum.GetCorners(state.Frame.FrustumCorners)
+      let corners = state.Frame.FrustumCorners
+      let mutable shadowMapIndex = 0
+      let devices = state.Devices
+      let frame = state.Frame
 
-    drawable.Bones
-    |> ValueOption.iter(fun bones -> shadowEffect.SafeSetParam("Bones", bones))
+      devices.Device.SetRenderTarget(atlas.RenderTarget)
 
-    for pass in shadowEffect.CurrentTechnique.Passes do
-      pass.Apply()
-
-      devices.Device.DrawIndexedPrimitives(
-        PrimitiveType.TriangleList,
-        0,
-        0,
-        mesh.IndexCount / 3
+      devices.Device.Clear(
+        ClearOptions.Target ||| ClearOptions.DepthBuffer,
+        Color.White,
+        1.0f,
+        0
       )
 
-  let render(state: PipelineState) =
-    match state.ShadowAtlas with
-    | ValueSome atlas ->
-      let shadowEffect =
-        match state.Devices.CustomShaders.TryGetValue("ShadowCaster") with
-        | true, e -> e
-        | false, _ -> null
+      devices.Device.DepthStencilState <- DepthStencilState.Default
+      devices.Device.RasterizerState <- RasterizerState.CullNone
+      devices.Device.BlendState <- BlendState.Opaque
 
-      if isNull shadowEffect then
-        ()
-      else
-        state.Frame.Frustum.GetCorners(state.Frame.FrustumCorners)
-        let corners = state.Frame.FrustumCorners
-        let mutable shadowMapIndex = 0
-        let devices = state.Devices
-        let frame = state.Frame
+      let renderShadowFace (view: Matrix) (proj: Matrix) =
+        if shadowMapIndex < atlas.MaxShadows then
+          let vp = ShadowAtlas.getViewport atlas shadowMapIndex
+          devices.Device.Viewport <- vp
+          frame.ShadowFrustum.Matrix <- view * proj
 
-        devices.Device.SetRenderTarget(atlas.RenderTarget)
+          binding.BindPerFace view proj
 
-        devices.Device.Clear(
-          ClearOptions.Target ||| ClearOptions.DepthBuffer,
-          Color.White,
-          1.0f,
-          0
-        )
+          for i in 0 .. frame.OpaqueDrawables.Count - 1 do
+            let struct (_, drawable) = frame.OpaqueDrawables.[i]
 
-        devices.Device.DepthStencilState <- DepthStencilState.Default
-        devices.Device.RasterizerState <- RasterizerState.CullNone
-        devices.Device.BlendState <- BlendState.Opaque
+            if
+              frame.ShadowFrustum.Contains(drawable.BoundingSphere)
+              <> ContainmentType.Disjoint
+            then
+              let mesh = drawable.Mesh
+              devices.Device.SetVertexBuffer(mesh.VertexBuffer)
+              devices.Device.Indices <- mesh.IndexBuffer
+              binding.BindPerInstance drawable.Transform drawable.Bones
 
-        let renderPass (view: Matrix) (proj: Matrix) =
-          if shadowMapIndex < atlas.MaxShadows then
-            let vp = ShadowAtlas.getViewport atlas shadowMapIndex
-            devices.Device.Viewport <- vp
-            frame.ShadowFrustum.Matrix <- view * proj
+              for pass in binding.Effect.CurrentTechnique.Passes do
+                pass.Apply()
 
-            for i in 0 .. frame.OpaqueDrawables.Count - 1 do
-              let struct (_, drawable) = frame.OpaqueDrawables.[i]
-
-              if
-                frame.ShadowFrustum.Contains(drawable.BoundingSphere)
-                <> ContainmentType.Disjoint
-              then
-                renderDrawableShadow
-                  devices
-                  frame
-                  drawable
-                  shadowEffect
-                  view
-                  proj
-
-        for light in frame.AccumulatedLights do
-          if shadowMapIndex < atlas.MaxShadows then
-            match light with
-            | Directional dl when ValueOption.isSome dl.Shadow ->
-              let mutable center = Vector3.Zero
-
-              for i in 0 .. corners.Length - 1 do
-                center <- center + corners.[i]
-
-              center <- center / float32 corners.Length
-              let mutable radius = 0f
-
-              for i in 0 .. corners.Length - 1 do
-                radius <- max radius (Vector3.Distance(center, corners.[i]))
-
-              let lightPos = center - dl.Direction * (radius + 100f)
-              let lightView = Matrix.CreateLookAt(lightPos, center, Vector3.Up)
-              let mutable minX, minY = infinityf, infinityf
-              let mutable maxX, maxY = -infinityf, -infinityf
-
-              for i in 0 .. corners.Length - 1 do
-                let lp = Vector3.Transform(corners.[i], lightView)
-                minX <- min minX lp.X
-                maxX <- max maxX lp.X
-                minY <- min minY lp.Y
-                maxY <- max maxY lp.Y
-
-              for i in 0 .. frame.OpaqueDrawables.Count - 1 do
-                let struct (_, d) = frame.OpaqueDrawables.[i]
-                let lp = Vector3.Transform(d.BoundingSphere.Center, lightView)
-                let r = d.BoundingSphere.Radius
-                minX <- min minX (lp.X - r)
-                maxX <- max maxX (lp.X + r)
-                minY <- min minY (lp.Y - r)
-                maxY <- max maxY (lp.Y + r)
-
-              let padding = 10f
-
-              let lightProj =
-                Matrix.CreateOrthographicOffCenter(
-                  minX - padding,
-                  maxX + padding,
-                  minY - padding,
-                  maxY + padding,
-                  0.1f,
-                  (radius + 100f) * 2f
+                devices.Device.DrawIndexedPrimitives(
+                  PrimitiveType.TriangleList,
+                  0,
+                  0,
+                  mesh.IndexCount / 3
                 )
 
-              renderPass lightView lightProj
-              frame.ShadowViewMatrices.Add(lightView)
-              frame.ShadowProjectionMatrices.Add(lightProj)
-              shadowMapIndex <- shadowMapIndex + 1
-            | Spot sl when ValueOption.isSome sl.Shadow ->
-              let struct (view, proj) = computeSpotShadowMatrices sl
-              renderPass view proj
-              frame.ShadowViewMatrices.Add(view)
-              frame.ShadowProjectionMatrices.Add(proj)
-              shadowMapIndex <- shadowMapIndex + 1
-            | Point pl when ValueOption.isSome pl.Shadow ->
-              if shadowMapIndex + 6 <= atlas.MaxShadows then
-                let proj =
-                  Matrix.CreatePerspectiveFieldOfView(
-                    MathHelper.PiOver2,
-                    1.0f,
-                    0.1f,
-                    pl.Range
-                  )
+      for light in frame.AccumulatedLights do
+        if shadowMapIndex < atlas.MaxShadows then
+          match light with
+          | Directional dl when ValueOption.isSome dl.Shadow ->
+            let mutable center = Vector3.Zero
 
-                for face = 0 to 5 do
-                  let struct (view, _) = computePointShadowMatrices pl face
-                  renderPass view proj
-                  frame.ShadowViewMatrices.Add(view)
-                  frame.ShadowProjectionMatrices.Add(proj)
-                  shadowMapIndex <- shadowMapIndex + 1
-            | _ -> ()
+            for i in 0 .. corners.Length - 1 do
+              center <- center + corners.[i]
 
-        devices.Device.RasterizerState <- RasterizerState.CullCounterClockwise
+            center <- center / float32 corners.Length
+            let mutable radius = 0f
 
-        match frame.MainSceneTarget with
-        | ValueSome rt -> devices.Device.SetRenderTarget(rt)
-        | ValueNone -> devices.Device.SetRenderTarget(null)
-    | ValueNone -> ()
+            for i in 0 .. corners.Length - 1 do
+              radius <- max radius (Vector3.Distance(center, corners.[i]))
+
+            let lightPos = center - dl.Direction * (radius + 100f)
+            let lightView = Matrix.CreateLookAt(lightPos, center, Vector3.Up)
+            let mutable minX, minY = infinityf, infinityf
+            let mutable maxX, maxY = -infinityf, -infinityf
+
+            for i in 0 .. corners.Length - 1 do
+              let lp = Vector3.Transform(corners.[i], lightView)
+              minX <- min minX lp.X
+              maxX <- max maxX lp.X
+              minY <- min minY lp.Y
+              maxY <- max maxY lp.Y
+
+            for i in 0 .. frame.OpaqueDrawables.Count - 1 do
+              let struct (_, d) = frame.OpaqueDrawables.[i]
+              let lp = Vector3.Transform(d.BoundingSphere.Center, lightView)
+              let r = d.BoundingSphere.Radius
+              minX <- min minX (lp.X - r)
+              maxX <- max maxX (lp.X + r)
+              minY <- min minY (lp.Y - r)
+              maxY <- max maxY (lp.Y + r)
+
+            let padding = 10f
+
+            let lightProj =
+              Matrix.CreateOrthographicOffCenter(
+                minX - padding,
+                maxX + padding,
+                minY - padding,
+                maxY + padding,
+                0.1f,
+                (radius + 100f) * 2f
+              )
+
+            renderShadowFace lightView lightProj
+            frame.ShadowViewMatrices.Add(lightView)
+            frame.ShadowProjectionMatrices.Add(lightProj)
+            shadowMapIndex <- shadowMapIndex + 1
+          | Spot sl when ValueOption.isSome sl.Shadow ->
+            let struct (view, proj) = computeSpotShadowMatrices sl
+            renderShadowFace view proj
+            frame.ShadowViewMatrices.Add(view)
+            frame.ShadowProjectionMatrices.Add(proj)
+            shadowMapIndex <- shadowMapIndex + 1
+          | Point pl when ValueOption.isSome pl.Shadow ->
+            if shadowMapIndex + 6 <= atlas.MaxShadows then
+              let proj =
+                Matrix.CreatePerspectiveFieldOfView(
+                  MathHelper.PiOver2,
+                  1.0f,
+                  0.1f,
+                  pl.Range
+                )
+
+              for face = 0 to 5 do
+                let struct (view, _) = computePointShadowMatrices pl face
+                renderShadowFace view proj
+                frame.ShadowViewMatrices.Add(view)
+                frame.ShadowProjectionMatrices.Add(proj)
+                shadowMapIndex <- shadowMapIndex + 1
+          | _ -> ()
+
+      devices.Device.RasterizerState <- RasterizerState.CullCounterClockwise
+
+      match frame.MainSceneTarget with
+      | ValueSome rt -> devices.Device.SetRenderTarget(rt)
+      | ValueNone -> devices.Device.SetRenderTarget(null)
+    | _ -> ()
 
 module PostProcess =
 
@@ -837,93 +792,64 @@ module PostProcess =
     (gameTime: GameTime)
     (sceneTarget: RenderTarget2D)
     =
-    match state.Config.PostProcess with
-    | ValueSome pp ->
+    match state.Config.PostProcessBinding with
+    | ValueSome ppBinding ->
       let devices = state.Devices
 
       let bloomTarget =
-        match pp.Bloom with
-        | ValueSome bloomCfg ->
-          match devices.CustomShaders.TryGetValue("Bloom") with
-          | true, bloomEffect ->
-            bloomEffect.SafeSetParam("Threshold", bloomCfg.Threshold)
-            bloomEffect.SafeSetParam("Intensity", bloomCfg.Intensity)
-            bloomEffect.SafeSetParam("SceneTexture", sceneTarget)
+        match state.Config.BloomBinding with
+        | ValueSome bloomBinding ->
+          let texelSize =
+            Vector2(
+              1f / float32 sceneTarget.Width,
+              1f / float32 sceneTarget.Height
+            )
 
-            let texelSize =
-              Vector2(
-                1f / float32 sceneTarget.Width,
-                1f / float32 sceneTarget.Height
-              )
+          bloomBinding.Bind {
+            SceneTexture = sceneTarget :> Texture2D
+            TexelSize = texelSize
+          }
 
-            bloomEffect.SafeSetParam("TexelSize", texelSize)
+          let spec = {
+            Width = sceneTarget.Width / 2
+            Height = sceneTarget.Height / 2
+            Format = SurfaceFormat.Color
+            DepthFormat = DepthFormat.None
+          }
 
-            let spec = {
-              Width = sceneTarget.Width / 2
-              Height = sceneTarget.Height / 2
-              Format = SurfaceFormat.Color
-              DepthFormat = DepthFormat.None
-            }
+          let rt = devices.RtPool.Acquire spec
+          devices.Device.SetRenderTarget(rt)
 
-            let rt = devices.RtPool.Acquire spec
-            devices.Device.SetRenderTarget(rt)
+          for pass in bloomBinding.Effect.CurrentTechnique.Passes do
+            pass.Apply()
 
-            for pass in bloomEffect.CurrentTechnique.Passes do
-              pass.Apply()
+            devices.Device.DrawUserPrimitives(
+              PrimitiveType.TriangleStrip,
+              quadVertices,
+              0,
+              2
+            )
 
-              devices.Device.DrawUserPrimitives(
-                PrimitiveType.TriangleStrip,
-                quadVertices,
-                0,
-                2
-              )
-
-            ValueSome rt
-          | false, _ -> ValueNone
+          ValueSome(rt :> Texture2D)
         | ValueNone -> ValueNone
 
-      let tmMode =
-        match pp.ToneMapping with
-        | ToneMappingConfig.NoToneMapping -> 0
-        | Reinhard -> 1
-        | ACES -> 2
-        | Filmic -> 3
-        | AgX -> 4
+      devices.Device.SetRenderTarget(null)
 
-      match devices.CustomShaders.TryGetValue("PostProcess") with
-      | true, ppEffect ->
-        devices.Device.SetRenderTarget(null)
-        ppEffect.SafeSetParam("SceneTexture", sceneTarget)
-        ppEffect.SafeSetParam("ToneMapping", float32 tmMode)
+      ppBinding.Bind {
+        SceneTexture = sceneTarget :> Texture2D
+        BloomTexture = bloomTarget
+        Time = float32 gameTime.TotalGameTime.TotalSeconds
+      }
 
-        ppEffect.SafeSetParam(
-          "Time",
-          float32 gameTime.TotalGameTime.TotalSeconds
+      for pass in ppBinding.Effect.CurrentTechnique.Passes do
+        pass.Apply()
+
+        devices.Device.DrawUserPrimitives(
+          PrimitiveType.TriangleStrip,
+          quadVertices,
+          0,
+          2
         )
-
-        bloomTarget
-        |> ValueOption.iter(fun rt ->
-          ppEffect.SafeSetParam("BloomTexture", rt :> Texture))
-
-        for pass in ppEffect.CurrentTechnique.Passes do
-          pass.Apply()
-
-          devices.Device.DrawUserPrimitives(
-            PrimitiveType.TriangleStrip,
-            quadVertices,
-            0,
-            2
-          )
-      | false, _ ->
-        devices.Device.SetRenderTarget(null)
-
-        match devices.SpriteBatch with
-        | null -> ()
-        | sprite ->
-          sprite.Begin(SpriteSortMode.Immediate, BlendState.Opaque)
-          devices.Device.SamplerStates.[0] <- SamplerState.PointClamp
-          sprite.Draw(sceneTarget, devices.Device.Viewport.Bounds, Color.White)
-          sprite.End()
     | ValueNone -> ()
 
 module Drawing =
@@ -1345,7 +1271,9 @@ module Orchestrate =
     state.UpdateFrustum()
 
     let needsTarget =
-      state.Config.PostProcess.IsSome || state.Config.Shadows.IsSome
+      state.Config.Shadows.IsSome
+      || state.Config.BloomBinding.IsSome
+      || state.Config.PostProcessBinding.IsSome
 
     let sceneTarget =
       if needsTarget then
@@ -1370,7 +1298,8 @@ module Orchestrate =
     Drawing.prepare state
     Drawing.apply state
 
-    match sceneTarget, state.Config.PostProcess with
+    match sceneTarget, state.Config.PostProcessBinding with
+    | ValueSome rt, ValueSome _ -> PostProcess.render state gameTime rt
     | ValueSome rt, ValueNone ->
       state.Devices.Device.SetRenderTarget(null)
 
@@ -1381,7 +1310,6 @@ module Orchestrate =
         state.Devices.Device.SamplerStates.[0] <- SamplerState.PointClamp
         sprite.Draw(rt, state.Devices.Device.Viewport.Bounds, Color.White)
         sprite.End()
-    | ValueSome rt, ValueSome _ -> PostProcess.render state gameTime rt
     | _ -> ()
 
     if not(isNull(box state.Devices.RtPool)) then

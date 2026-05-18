@@ -1,9 +1,9 @@
-namespace Mibo.Rendering3D
+namespace Mibo.Rendering.Graphics3D.V2
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
-open Mibo.Rendering3D.PipelineInternals
+open Mibo.Rendering.Graphics3D.V2.Internals
 
 type IRenderPipeline3D =
   abstract member Initialize: GraphicsDevice -> unit

@@ -1,11 +1,10 @@
-namespace Mibo.Rendering3D
+namespace Mibo.Rendering.Graphics3D.V2
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
 open Mibo.Rendering
 open Mibo.Rendering.Graphics3D
-open FSharp.UMX
 
 [<Measure>]
 type MaterialKey
@@ -24,70 +23,33 @@ type PBRMaterialData = {
 }
 
 module PBRMaterial =
+  val defaults: PBRMaterialData
+  val defaultsUnlit: PBRMaterialData
+  val inline withAlbedo: color: Color -> mat: PBRMaterialData -> PBRMaterialData
 
-  let defaults: PBRMaterialData = {
-    AlbedoColor = Color.White
-    AlbedoMap = ValueNone
-    Metallic = 0f
-    Roughness = 0.5f
-    EmissiveColor = Color.Black
-    EmissiveIntensity = 0f
-    NormalMap = ValueNone
-    MetallicRoughnessMap = ValueNone
-    AmbientOcclusionMap = ValueNone
-  }
+  val inline withAlbedoMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
 
-  let defaultsUnlit: PBRMaterialData = {
-    defaults with
-        Metallic = 0f
-        Roughness = 1f
-  }
+  val inline withMetallic:
+    value: float32 -> mat: PBRMaterialData -> PBRMaterialData
 
-  let inline withAlbedo (color: Color) (mat: PBRMaterialData) = {
-    mat with
-        AlbedoColor = color
-  }
+  val inline withRoughness:
+    value: float32 -> mat: PBRMaterialData -> PBRMaterialData
 
-  let inline withAlbedoMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        AlbedoMap = ValueSome tex
-  }
+  val inline withEmissive:
+    color: Color ->
+    intensity: float32 ->
+    mat: PBRMaterialData ->
+      PBRMaterialData
 
-  let inline withMetallic (value: float32) (mat: PBRMaterialData) = {
-    mat with
-        Metallic = value
-  }
+  val inline withNormalMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
 
-  let inline withRoughness (value: float32) (mat: PBRMaterialData) = {
-    mat with
-        Roughness = value
-  }
+  val inline withMetallicRoughnessMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
 
-  let inline withEmissive
-    (color: Color)
-    (intensity: float32)
-    (mat: PBRMaterialData)
-    =
-    {
-      mat with
-          EmissiveColor = color
-          EmissiveIntensity = intensity
-    }
-
-  let inline withNormalMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        NormalMap = ValueSome tex
-  }
-
-  let inline withMetallicRoughnessMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        MetallicRoughnessMap = ValueSome tex
-  }
-
-  let inline withAmbientOcclusionMap (tex: Texture2D) (mat: PBRMaterialData) = {
-    mat with
-        AmbientOcclusionMap = ValueSome tex
-  }
+  val inline withAmbientOcclusionMap:
+    tex: Texture2D -> mat: PBRMaterialData -> PBRMaterialData
 
 [<Struct>]
 type RenderContext = {
@@ -119,6 +81,35 @@ type EffectBinding = {
   BindPerInstance: Matrix -> Matrix[] voption -> unit
 }
 
+type ShadowCasterBinding = {
+  Effect: Effect
+  BindPerFace: Matrix -> Matrix -> unit
+  BindPerInstance: Matrix -> Matrix[] voption -> unit
+}
+
+[<Struct>]
+type BloomContext = {
+  SceneTexture: Texture2D
+  TexelSize: Vector2
+}
+
+type BloomBinding = {
+  Effect: Effect
+  Bind: BloomContext -> unit
+}
+
+[<Struct>]
+type PostProcessContext = {
+  SceneTexture: Texture2D
+  BloomTexture: Texture2D voption
+  Time: float32
+}
+
+type PostProcessBinding = {
+  Effect: Effect
+  Bind: PostProcessContext -> unit
+}
+
 [<Struct>]
 type Drawable = {
   Mesh: Mesh
@@ -140,27 +131,15 @@ type SortKey = {
 }
 
 module SortKey =
+  val inline create:
+    distance: float32 ->
+    pass: RenderPass ->
+    materialKey: int<MaterialKey> ->
+    effect: Effect ->
+      SortKey
 
-  let inline create (distance: float32) (pass: RenderPass) (materialKey: int<MaterialKey>) (effect: Effect) : SortKey = {
-    Distance = distance
-    Pass = pass
-    MaterialKey = materialKey
-    Effect = effect
-  }
-
-  let inline opaque (distance: float32) (effect: Effect) : SortKey = {
-    Distance = distance
-    Pass = RenderPass.Opaque
-    MaterialKey = 0<MaterialKey>
-    Effect = effect
-  }
-
-  let inline transparent (distance: float32) (effect: Effect) : SortKey = {
-    Distance = distance
-    Pass = RenderPass.Transparent
-    MaterialKey = 0<MaterialKey>
-    Effect = effect
-  }
+  val inline opaque: distance: float32 -> effect: Effect -> SortKey
+  val inline transparent: distance: float32 -> effect: Effect -> SortKey
 
 type RenderCommand =
   | SetCamera of camera: Camera

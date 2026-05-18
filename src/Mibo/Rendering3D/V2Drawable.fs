@@ -1,4 +1,4 @@
-namespace Mibo.Rendering3D
+namespace Mibo.Rendering.Graphics3D.V2
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
@@ -12,7 +12,7 @@ module Drawable =
     (mesh: Mesh)
     (transform: Matrix)
     (binding: EffectBinding)
-    : Mibo.Rendering3D.Drawable =
+    : Mibo.Rendering.Graphics3D.V2.Drawable =
     {
       Mesh = mesh
       Transform = transform
@@ -26,8 +26,8 @@ module Drawable =
 
   let inline withTransform
     (transform: Matrix)
-    (d: Mibo.Rendering3D.Drawable)
-    : Mibo.Rendering3D.Drawable =
+    (d: Mibo.Rendering.Graphics3D.V2.Drawable)
+    : Mibo.Rendering.Graphics3D.V2.Drawable =
     {
       d with
           Transform = transform
@@ -36,24 +36,24 @@ module Drawable =
 
   let inline withBones
     (bones: Matrix[])
-    (d: Mibo.Rendering3D.Drawable)
-    : Mibo.Rendering3D.Drawable =
+    (d: Mibo.Rendering.Graphics3D.V2.Drawable)
+    : Mibo.Rendering.Graphics3D.V2.Drawable =
     { d with Bones = ValueSome bones }
 
   let inline withPass
     (pass: RenderPass)
-    (d: Mibo.Rendering3D.Drawable)
-    : Mibo.Rendering3D.Drawable =
+    (d: Mibo.Rendering.Graphics3D.V2.Drawable)
+    : Mibo.Rendering.Graphics3D.V2.Drawable =
     { d with Pass = pass }
 
   let inline withMaterialKey
     (key: int<MaterialKey>)
-    (d: Mibo.Rendering3D.Drawable)
-    : Mibo.Rendering3D.Drawable =
+    (d: Mibo.Rendering.Graphics3D.V2.Drawable)
+    : Mibo.Rendering.Graphics3D.V2.Drawable =
     { d with MaterialKey = key }
 
   let inline withMaterialData
     (data: PBRMaterialData)
-    (d: Mibo.Rendering3D.Drawable)
-    : Mibo.Rendering3D.Drawable =
+    (d: Mibo.Rendering.Graphics3D.V2.Drawable)
+    : Mibo.Rendering.Graphics3D.V2.Drawable =
     { d with MaterialData = ValueSome data }

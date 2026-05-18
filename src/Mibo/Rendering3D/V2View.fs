@@ -1,4 +1,4 @@
-namespace Mibo.Rendering3D
+namespace Mibo.Rendering.Graphics3D.V2
 
 open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
@@ -43,7 +43,9 @@ module DrawState =
     | ValueSome parent -> local * parent
     | ValueNone -> local
 
-  let toDrawable(state: DrawState) : Mibo.Rendering3D.Drawable voption =
+  let toDrawable
+    (state: DrawState)
+    : Mibo.Rendering.Graphics3D.V2.Drawable voption =
     match state.Mesh, state.Binding with
     | ValueSome mesh, ValueSome binding ->
       let transform = computeTransform state
@@ -65,7 +67,9 @@ type DrawableBuilder() =
 
   member _.Yield() = DrawState.empty
 
-  member _.Run(state: DrawState) : Mibo.Rendering3D.Drawable voption =
+  member _.Run
+    (state: DrawState)
+    : Mibo.Rendering.Graphics3D.V2.Drawable voption =
     DrawState.toDrawable state
 
   [<CustomOperation("mesh")>]
@@ -169,12 +173,9 @@ type DrawableBuilder() =
   }
 
   [<CustomOperation("withEmissive")>]
-  member _.WithEmissive
-    (state: DrawState, color: Color, intensity: float32)
-    =
+  member _.WithEmissive(state: DrawState, color: Color, intensity: float32) =
     let data =
-      state.MaterialData
-      |> ValueOption.defaultValue PBRMaterial.defaults
+      state.MaterialData |> ValueOption.defaultValue PBRMaterial.defaults
 
     {
       state with
@@ -189,8 +190,7 @@ type DrawableBuilder() =
   [<CustomOperation("withAlbedo")>]
   member _.WithAlbedo(state: DrawState, color: Color) =
     let data =
-      state.MaterialData
-      |> ValueOption.defaultValue PBRMaterial.defaults
+      state.MaterialData |> ValueOption.defaultValue PBRMaterial.defaults
 
     {
       state with
@@ -200,8 +200,7 @@ type DrawableBuilder() =
   [<CustomOperation("withMetallic")>]
   member _.WithMetallic(state: DrawState, value: float32) =
     let data =
-      state.MaterialData
-      |> ValueOption.defaultValue PBRMaterial.defaults
+      state.MaterialData |> ValueOption.defaultValue PBRMaterial.defaults
 
     {
       state with
@@ -211,8 +210,7 @@ type DrawableBuilder() =
   [<CustomOperation("withRoughness")>]
   member _.WithRoughness(state: DrawState, value: float32) =
     let data =
-      state.MaterialData
-      |> ValueOption.defaultValue PBRMaterial.defaults
+      state.MaterialData |> ValueOption.defaultValue PBRMaterial.defaults
 
     {
       state with
@@ -412,7 +410,7 @@ type PipelineBufferExtensions =
   static member Draw
     (
       this: RenderBuffer<unit, RenderCommand>,
-      drawable: Mibo.Rendering3D.Drawable voption
+      drawable: Mibo.Rendering.Graphics3D.V2.Drawable voption
     ) =
     drawable |> ValueOption.iter(fun d -> this.Add((), RenderCommand.Draw d))
     this
@@ -421,7 +419,7 @@ type PipelineBufferExtensions =
   static member DrawMany
     (
       this: RenderBuffer<unit, RenderCommand>,
-      drawables: seq<Mibo.Rendering3D.Drawable voption>
+      drawables: seq<Mibo.Rendering.Graphics3D.V2.Drawable voption>
     ) =
     for d in drawables do
       d |> ValueOption.iter(fun dr -> this.Add((), RenderCommand.Draw dr))
@@ -488,7 +486,7 @@ module Buffer =
   let draw d (buffer: RenderBuffer<unit, RenderCommand>) = buffer.Draw(d)
 
   let drawMany
-    (ds: seq<Mibo.Rendering3D.Drawable voption>)
+    (ds: seq<Mibo.Rendering.Graphics3D.V2.Drawable voption>)
     (buffer: RenderBuffer<unit, RenderCommand>)
     =
     buffer.DrawMany(ds)

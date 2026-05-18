@@ -1,9 +1,9 @@
-namespace Mibo.Rendering3D.PipelineInternals
+namespace Mibo.Rendering.Graphics3D.V2.Internals
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
-open Mibo.Rendering3D
+open Mibo.Rendering.Graphics3D.V2
 
 [<Sealed>]
 type DeviceContext

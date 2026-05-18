@@ -1,4 +1,4 @@
-namespace Mibo.Rendering3D
+namespace Mibo.Rendering.Graphics3D.V2
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics

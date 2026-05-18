@@ -152,6 +152,7 @@ module DrawState =
 /// }
 /// </code>
 /// </example>
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.DrawableBuilder instead. The new builder uses EffectBinding instead of Material.")>]
 type DrawableBuilder() =
 
   member inline _.Yield(_: unit) = DrawState.empty
@@ -655,6 +656,7 @@ module SpriteHelpers =
 /// These extensions are optimized for the 3D pipeline and handle the transition
 /// between opaque and transparent rendering passes automatically.
 /// </remarks>
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.PipelineBufferExtensions instead.")>]
 [<Extension>]
 type PipelineBufferExtensions =
 
@@ -961,6 +963,7 @@ type PipelineBufferExtensions =
 /// Module for building a 3D frame by submitting commands to a RenderBuffer.
 /// Recommended usage: 'buffer |> Buffer.camera ... |> Buffer.draw ...'
 /// </summary>
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.Buffer instead.")>]
 module Buffer =
 
   let inline camera camera (buffer: PipelineBuffer<RenderCommand>) =
@@ -1043,6 +1046,7 @@ module Buffer =
 // ============================================================================
 
 [<AutoOpen>]
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.View.draw instead.")>]
 module View =
   /// <summary>
   /// Builder for creating individual 'Drawable' objects (Mesh + Transform + Material).

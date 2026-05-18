@@ -35,9 +35,6 @@
     <Compile Include="LineBatch.fs" />
     <Compile Include="Graphics2D.fs" />
     <Compile Include="Animation.fs" />
-    <Compile Include="Sprite3DTypes.fs" />
-    <Compile Include="SpriteQuadBatch.fs" />
-    <Compile Include="QuadBatch.fs" />
     <Compile Include="Rendering3D/Lighting.fs" />
     <Compile Include="Rendering3D/Types.fs" />
     <Compile Include="Rendering3D/Config.fs" />
@@ -46,7 +43,20 @@
     <Compile Include="Rendering3D/Pipeline.fs" />
     <Compile Include="Rendering3D/View.fs" />
     <Compile Include="Rendering3D/Program.fs" />
-    <Compile Include="Graphics3D.fs" />
+    <Compile Include="Rendering3D/V2Types.fsi" />
+    <Compile Include="Rendering3D/V2Types.fs" />
+    <Compile Include="Rendering3D/V2Bindings.fsi" />
+    <Compile Include="Rendering3D/V2Bindings.fs" />
+    <Compile Include="Rendering3D/V2Drawable.fsi" />
+    <Compile Include="Rendering3D/V2Drawable.fs" />
+    <Compile Include="Rendering3D/V2Config.fsi" />
+    <Compile Include="Rendering3D/V2Config.fs" />
+    <Compile Include="Rendering3D/V2View.fsi" />
+    <Compile Include="Rendering3D/V2View.fs" />
+    <Compile Include="Rendering3D/V2PipelineInternals.fsi" />
+    <Compile Include="Rendering3D/V2PipelineInternals.fs" />
+    <Compile Include="Rendering3D/V2Pipeline.fsi" />
+    <Compile Include="Rendering3D/V2Pipeline.fs" />
     <Compile Include="System.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

@@ -8,7 +8,7 @@ open Microsoft.Xna.Framework.Graphics
 /// <summary>
 /// A simple batcher for drawing line primitives in 3D.
 /// </summary>
-module internal LineBatch =
+module LineBatch =
 
   type State = {
     mutable Vertices: VertexPositionColor[]

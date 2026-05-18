@@ -1,7 +1,8 @@
-namespace Mibo.Rendering3D
+namespace Mibo.Rendering.Graphics3D.V2
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open Mibo.Elmish
 open Mibo.Rendering
 open Mibo.Rendering.Graphics3D
 
@@ -29,6 +30,9 @@ module Bindings =
     setIfExists param value (fun p v -> p.SetValue(v))
 
   let inline setVector3 (param: EffectParameter voption) (value: Vector3) =
+    setIfExists param value (fun p v -> p.SetValue(v))
+
+  let inline setVector2 (param: EffectParameter voption) (value: Vector2) =
     setIfExists param value (fun p v -> p.SetValue(v))
 
   let inline setTexture (param: EffectParameter voption) (value: Texture) =
@@ -201,4 +205,62 @@ module Bindings =
       BindGlobal = bindGlobal
       BindPerMaterial = bindPerMaterial
       BindPerInstance = bindPerInstance
+    }
+
+  let shadowCaster(effect: Effect) : ShadowCasterBinding =
+    let viewParam = resolveParam effect "View"
+    let projParam = resolveParam effect "Projection"
+    let worldParam = resolveParam effect "World"
+    let bonesParam = resolveParam effect "Bones"
+
+    {
+      Effect = effect
+      BindPerFace =
+        fun view proj ->
+          setMatrix viewParam view
+          setMatrix projParam proj
+      BindPerInstance =
+        fun transform bones ->
+          setMatrix worldParam transform
+          bones |> ValueOption.iter(fun b -> setMatrixArray bonesParam b)
+    }
+
+  let bloom
+    (threshold: float32)
+    (intensity: float32)
+    (effect: Effect)
+    : BloomBinding =
+    let thresholdParam = resolveParam effect "Threshold"
+    let intensityParam = resolveParam effect "Intensity"
+    let sceneTexParam = resolveParam effect "SceneTexture"
+    let texelSizeParam = resolveParam effect "TexelSize"
+
+    {
+      Effect = effect
+      Bind =
+        fun (ctx: BloomContext) ->
+          setFloat thresholdParam threshold
+          setFloat intensityParam intensity
+          setTexture sceneTexParam (ctx.SceneTexture :> Texture)
+          setVector2 texelSizeParam ctx.TexelSize
+    }
+
+  let postProcess (toneMappingMode: int) (effect: Effect) : PostProcessBinding =
+    let sceneTexParam = resolveParam effect "SceneTexture"
+    let bloomTexParam = resolveParam effect "BloomTexture"
+    let toneMappingParam = resolveParam effect "ToneMapping"
+    let timeParam = resolveParam effect "Time"
+
+    {
+      Effect = effect
+      Bind =
+        fun (ctx: PostProcessContext) ->
+          setTexture sceneTexParam (ctx.SceneTexture :> Texture)
+
+          ctx.BloomTexture
+          |> ValueOption.iter(fun bt ->
+            setTexture bloomTexParam (bt :> Texture))
+
+          setFloat toneMappingParam (float32 toneMappingMode)
+          setFloat timeParam ctx.Time
     }

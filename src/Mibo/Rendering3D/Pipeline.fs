@@ -15,6 +15,7 @@ open Mibo.Rendering
 /// Render pipeline interface for 3D rendering.
 /// Implementations process render commands and produce final frame output.
 /// </summary>
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.IRenderPipeline3D instead.")>]
 type IRenderPipeline =
   /// <summary>
   /// Initialize the pipeline with a graphics device.
@@ -34,6 +35,7 @@ type IRenderPipeline =
 
 module internal ShadowAtlas =
 
+  [<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.RenderPipeline3D instead.")>]
   type State = {
     RenderTarget: RenderTarget2D
     Size: int
@@ -1494,6 +1496,7 @@ module internal Orchestrate =
     if not(isNull(box state.RtPool)) then
       state.RtPool.ReleaseAll()
 
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.RenderPipeline3D instead.")>]
 module RenderPipeline =
   /// <summary>
   /// Create a 3D render pipeline with the specified configuration.

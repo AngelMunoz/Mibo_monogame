@@ -27,7 +27,7 @@ type EffectContext = {
 /// <summary>Callback for configuring an effect before a draw operation.</summary>
 type EffectSetup = Effect -> EffectContext -> unit
 
-/// Shader base types for override mapping
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.EffectBinding per drawable instead.")>]
 type ShaderBase =
   /// The default shadow casting shader (depth only).
   | ShadowCaster
@@ -366,7 +366,7 @@ module Mesh =
 // Material System
 // ============================================================================
 
-/// Material rendering flags
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.PBRMaterialData instead. Flags are replaced by per-drawable properties.")>]
 [<Flags>]
 type MaterialFlags =
   | None = 0
@@ -378,6 +378,7 @@ type MaterialFlags =
   | AlphaTest = 32
 
 /// PBR material properties
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.PBRMaterialData instead.")>]
 [<Struct>]
 type PBRMaterial = {
   AlbedoColor: Color
@@ -391,7 +392,7 @@ type PBRMaterial = {
   EmissiveIntensity: float32
 }
 
-/// Complete material definition
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.PBRMaterialData instead.")>]
 [<Struct>]
 type Material = {
   PBR: PBRMaterial
@@ -400,6 +401,7 @@ type Material = {
   RenderQueue: int
 }
 
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.PBRMaterialData instead.")>]
 module Material =
   let defaultPBR: PBRMaterial = {
     AlbedoColor = Color.White
@@ -483,7 +485,7 @@ module Material =
 // Drawable - The unit of rendering
 // ============================================================================
 
-/// A single drawable object ready for the pipeline
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.Drawable instead. The new Drawable uses EffectBinding instead of Material + EffectOverride.")>]
 [<Struct>]
 type Drawable = {
   Mesh: Mesh
@@ -496,6 +498,7 @@ type Drawable = {
 }
 
 module Drawable =
+  [<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.Drawable instead.")>]
   let create (mesh: Mesh) (transform: Matrix) (material: Material) : Drawable = {
     Mesh = mesh
     Transform = transform

@@ -12,6 +12,7 @@ open Mibo.Elmish
 /// Internal renderer that wraps IRenderPipeline for Elmish-style integration.
 /// Manages render buffer clearing and command submission each frame.
 /// </summary>
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.RenderPipeline3D and Mibo.Elmish.Program.withRenderer instead.")>]
 type internal PipelineRenderer<'Model>
   (
     pipeline: IRenderPipeline,
@@ -27,6 +28,7 @@ type internal PipelineRenderer<'Model>
       view ctx model buffer
       pipeline.Render(ctx, buffer, gameTime)
 
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.RenderPipeline3D instead.")>]
 module PipelineRenderer =
   /// <summary>
   /// Create a pipeline-based renderer that integrates with Mibo's Elmish-style game loop.

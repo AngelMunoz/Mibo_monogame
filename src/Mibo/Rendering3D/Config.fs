@@ -304,6 +304,7 @@ module PostProcessConfig =
 /// <summary>
 /// Main configuration for the 3D Render Pipeline.
 /// </summary>
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.Pipeline3DConfig instead.")>]
 [<Struct>]
 type PipelineConfig = {
   /// Shadow subsystem configuration (ValueNone to disable shadows).
@@ -327,6 +328,7 @@ type PipelineConfig = {
   TileSize: int
 }
 
+[<System.Obsolete("Use Mibo.Rendering.Graphics3D.V2.Pipeline3DConfig instead.")>]
 module PipelineConfig =
   /// <summary>
   /// Default pipeline configuration: No shadows, no post-process, no default lighting.
