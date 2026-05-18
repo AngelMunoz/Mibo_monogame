@@ -212,13 +212,21 @@ module Bindings =
     let projParam = resolveParam effect "Projection"
     let worldParam = resolveParam effect "World"
     let bonesParam = resolveParam effect "Bones"
+    let shadowBiasParam = resolveParam effect "ShadowBias"
+    let shadowNormalBiasParam = resolveParam effect "ShadowNormalBias"
+    let shadowAtlasTilesXParam = resolveParam effect "ShadowAtlasTilesX"
+    let shadowAtlasSizeParam = resolveParam effect "ShadowAtlasSize"
 
     {
       Effect = effect
       BindPerFace =
-        fun view proj ->
-          setMatrix viewParam view
-          setMatrix projParam proj
+        fun (ctx: ShadowCasterContext) ->
+          setMatrix viewParam ctx.View
+          setMatrix projParam ctx.Projection
+          setFloat shadowBiasParam ctx.ShadowBias
+          setFloat shadowNormalBiasParam ctx.ShadowNormalBias
+          setFloat shadowAtlasTilesXParam (float32 ctx.ShadowAtlasTilesX)
+          setFloat shadowAtlasSizeParam ctx.ShadowAtlasSize
       BindPerInstance =
         fun transform bones ->
           setMatrix worldParam transform

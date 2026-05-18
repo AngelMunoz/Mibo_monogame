@@ -119,15 +119,28 @@ type EffectBinding = {
   BindPerInstance: Matrix -> Matrix[] voption -> unit
 }
 
+[<Struct>]
+type ShadowCasterContext = {
+  View: Matrix
+  Projection: Matrix
+  ShadowBias: float32
+  ShadowNormalBias: float32
+  ShadowAtlasTilesX: int
+  ShadowAtlasSize: float32
+}
+
 type ShadowCasterBinding = {
   Effect: Effect
-  BindPerFace: Matrix -> Matrix -> unit
+  BindPerFace: ShadowCasterContext -> unit
   BindPerInstance: Matrix -> Matrix[] voption -> unit
 }
 
 [<Struct>]
 type BloomContext = {
+  RenderContext: RenderContext
   SceneTexture: Texture2D
+  SceneWidth: int
+  SceneHeight: int
   TexelSize: Vector2
 }
 
@@ -138,6 +151,7 @@ type BloomBinding = {
 
 [<Struct>]
 type PostProcessContext = {
+  RenderContext: RenderContext
   SceneTexture: Texture2D
   BloomTexture: Texture2D voption
   Time: float32

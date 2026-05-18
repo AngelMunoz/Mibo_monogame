@@ -652,6 +652,16 @@ module ShadowPass =
       let devices = state.Devices
       let frame = state.Frame
 
+      let shadowBias, shadowNormalBias =
+        state.Config.Shadows
+        |> ValueOption.map(fun cfg -> cfg.Bias, cfg.NormalBias)
+        |> ValueOption.defaultValue(0.005f, 0.01f)
+
+      let shadowAtlasTilesX, shadowAtlasSize =
+        state.ShadowAtlas
+        |> ValueOption.map(fun a -> a.TilesAcross, float32 a.Size)
+        |> ValueOption.defaultValue(0, 0f)
+
       devices.Device.SetRenderTarget(atlas.RenderTarget)
 
       devices.Device.Clear(
@@ -665,13 +675,13 @@ module ShadowPass =
       devices.Device.RasterizerState <- RasterizerState.CullNone
       devices.Device.BlendState <- BlendState.Opaque
 
-      let renderShadowFace (view: Matrix) (proj: Matrix) =
+      let renderShadowFace(shadowCtx: ShadowCasterContext) =
         if shadowMapIndex < atlas.MaxShadows then
           let vp = ShadowAtlas.getViewport atlas shadowMapIndex
           devices.Device.Viewport <- vp
-          frame.ShadowFrustum.Matrix <- view * proj
+          frame.ShadowFrustum.Matrix <- shadowCtx.View * shadowCtx.Projection
 
-          binding.BindPerFace view proj
+          binding.BindPerFace shadowCtx
 
           for i in 0 .. frame.OpaqueDrawables.Count - 1 do
             let struct (_, drawable) = frame.OpaqueDrawables.[i]
@@ -743,13 +753,32 @@ module ShadowPass =
                 (radius + 100f) * 2f
               )
 
-            renderShadowFace lightView lightProj
+            let shadowCtx = {
+              View = lightView
+              Projection = lightProj
+              ShadowBias = shadowBias
+              ShadowNormalBias = shadowNormalBias
+              ShadowAtlasTilesX = shadowAtlasTilesX
+              ShadowAtlasSize = shadowAtlasSize
+            }
+
+            renderShadowFace shadowCtx
             frame.ShadowViewMatrices.Add(lightView)
             frame.ShadowProjectionMatrices.Add(lightProj)
             shadowMapIndex <- shadowMapIndex + 1
           | Spot sl when ValueOption.isSome sl.Shadow ->
             let struct (view, proj) = computeSpotShadowMatrices sl
-            renderShadowFace view proj
+
+            let shadowCtx = {
+              View = view
+              Projection = proj
+              ShadowBias = shadowBias
+              ShadowNormalBias = shadowNormalBias
+              ShadowAtlasTilesX = shadowAtlasTilesX
+              ShadowAtlasSize = shadowAtlasSize
+            }
+
+            renderShadowFace shadowCtx
             frame.ShadowViewMatrices.Add(view)
             frame.ShadowProjectionMatrices.Add(proj)
             shadowMapIndex <- shadowMapIndex + 1
@@ -765,7 +794,17 @@ module ShadowPass =
 
               for face = 0 to 5 do
                 let struct (view, _) = computePointShadowMatrices pl face
-                renderShadowFace view proj
+
+                let shadowCtx = {
+                  View = view
+                  Projection = proj
+                  ShadowBias = shadowBias
+                  ShadowNormalBias = shadowNormalBias
+                  ShadowAtlasTilesX = shadowAtlasTilesX
+                  ShadowAtlasSize = shadowAtlasSize
+                }
+
+                renderShadowFace shadowCtx
                 frame.ShadowViewMatrices.Add(view)
                 frame.ShadowProjectionMatrices.Add(proj)
                 shadowMapIndex <- shadowMapIndex + 1
@@ -799,6 +838,10 @@ module PostProcess =
       let bloomTarget =
         match state.Config.BloomBinding with
         | ValueSome bloomBinding ->
+          let renderCtx =
+            state.Cache.RenderContext
+            |> ValueOption.defaultValue(state.BuildRenderContext())
+
           let texelSize =
             Vector2(
               1f / float32 sceneTarget.Width,
@@ -806,7 +849,10 @@ module PostProcess =
             )
 
           bloomBinding.Bind {
+            RenderContext = renderCtx
             SceneTexture = sceneTarget :> Texture2D
+            SceneWidth = sceneTarget.Width
+            SceneHeight = sceneTarget.Height
             TexelSize = texelSize
           }
 
@@ -835,7 +881,12 @@ module PostProcess =
 
       devices.Device.SetRenderTarget(null)
 
+      let renderCtx =
+        state.Cache.RenderContext
+        |> ValueOption.defaultValue(state.BuildRenderContext())
+
       ppBinding.Bind {
+        RenderContext = renderCtx
         SceneTexture = sceneTarget :> Texture2D
         BloomTexture = bloomTarget
         Time = float32 gameTime.TotalGameTime.TotalSeconds
