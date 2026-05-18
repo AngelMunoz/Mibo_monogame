@@ -908,9 +908,53 @@ module Drawing =
   let prepare(state: PipelineState) =
     if not state.Frame.LightingPrepared then
       ShadowPass.render state
-      LightPacking.packLightData state
-      LightPacking.packShadowMatrices state
-      Tiling.packTileData state
+
+      match state.Config.LightDataProvider with
+      | ValueSome provider ->
+        let output =
+          provider.Compute(
+            state.Frame.AccumulatedLights.ToArray(),
+            state.Frame.Camera,
+            state.Devices.Device.Viewport,
+            state.Devices.Device
+          )
+
+        state.Frame.LightDataTexture <- output.LightDataTexture
+        state.Frame.LightDataBuffer <- Array.empty
+        state.Frame.ShadowViewMatrices.Clear()
+
+        for m in output.ShadowViewMatrices do
+          state.Frame.ShadowViewMatrices.Add(m)
+
+        state.Frame.ShadowProjectionMatrices.Clear()
+
+        for m in output.ShadowProjectionMatrices do
+          state.Frame.ShadowProjectionMatrices.Add(m)
+
+        state.Frame.ShadowMatrixTexture <- output.ShadowMatrixTexture
+
+        state.Frame.Lighting <- {
+          state.Frame.Lighting with
+              Lights = state.Frame.AccumulatedLights.ToArray()
+        }
+      | ValueNone ->
+        LightPacking.packLightData state
+        LightPacking.packShadowMatrices state
+
+      match state.Config.TileCullingProvider with
+      | ValueSome provider ->
+        let output =
+          provider.Compute(
+            state.Frame.AccumulatedLights.ToArray(),
+            state.Frame.Camera,
+            state.Devices.Device.Viewport,
+            state.Config.TileSize,
+            state.Devices.Device
+          )
+
+        state.Frame.TileDataTexture <- output.TileDataTexture
+      | ValueNone -> Tiling.packTileData state
+
       state.Cache.RenderContext <- ValueSome(state.BuildRenderContext())
       state.Frame.LightingPrepared <- true
 
@@ -1197,6 +1241,21 @@ module Drawing =
         flushPendingBillboards()
 
       drawSpritesInList frame.OpaqueSpriteCommands Opaque
+
+      let customPasses = state.Config.CustomPasses
+
+      if customPasses.Length > 0 then
+        let sortedPasses = customPasses |> Array.sortBy(fun p -> p.Priority)
+
+        for customPass in sortedPasses do
+          let passDrawables =
+            frame.OpaqueDrawables
+            |> Seq.filter(fun struct (_, d) -> customPass.Filter d)
+            |> Seq.toArray
+
+          if passDrawables.Length > 0 then
+            for struct (_, drawable) in passDrawables do
+              drawDrawable drawable
 
       if
         frame.TransparentDrawables.Count > 0

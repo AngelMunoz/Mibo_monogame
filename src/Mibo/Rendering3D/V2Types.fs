@@ -120,49 +120,6 @@ type EffectBinding = {
 }
 
 [<Struct>]
-type ShadowCasterContext = {
-  View: Matrix
-  Projection: Matrix
-  ShadowBias: float32
-  ShadowNormalBias: float32
-  ShadowAtlasTilesX: int
-  ShadowAtlasSize: float32
-}
-
-type ShadowCasterBinding = {
-  Effect: Effect
-  BindPerFace: ShadowCasterContext -> unit
-  BindPerInstance: Matrix -> Matrix[] voption -> unit
-}
-
-[<Struct>]
-type BloomContext = {
-  RenderContext: RenderContext
-  SceneTexture: Texture2D
-  SceneWidth: int
-  SceneHeight: int
-  TexelSize: Vector2
-}
-
-type BloomBinding = {
-  Effect: Effect
-  Bind: BloomContext -> unit
-}
-
-[<Struct>]
-type PostProcessContext = {
-  RenderContext: RenderContext
-  SceneTexture: Texture2D
-  BloomTexture: Texture2D voption
-  Time: float32
-}
-
-type PostProcessBinding = {
-  Effect: Effect
-  Bind: PostProcessContext -> unit
-}
-
-[<Struct>]
 type Drawable = {
   Mesh: Mesh
   Transform: Matrix
@@ -210,6 +167,90 @@ module SortKey =
     MaterialKey = 0<MaterialKey>
     Effect = effect
   }
+
+[<Struct>]
+type ShadowCasterContext = {
+  View: Matrix
+  Projection: Matrix
+  ShadowBias: float32
+  ShadowNormalBias: float32
+  ShadowAtlasTilesX: int
+  ShadowAtlasSize: float32
+}
+
+type ShadowCasterBinding = {
+  Effect: Effect
+  BindPerFace: ShadowCasterContext -> unit
+  BindPerInstance: Matrix -> Matrix[] voption -> unit
+}
+
+[<Struct>]
+type BloomContext = {
+  RenderContext: RenderContext
+  SceneTexture: Texture2D
+  SceneWidth: int
+  SceneHeight: int
+  TexelSize: Vector2
+}
+
+type BloomBinding = {
+  Effect: Effect
+  Bind: BloomContext -> unit
+}
+
+[<Struct>]
+type PostProcessContext = {
+  RenderContext: RenderContext
+  SceneTexture: Texture2D
+  BloomTexture: Texture2D voption
+  Time: float32
+}
+
+type PostProcessBinding = {
+  Effect: Effect
+  Bind: PostProcessContext -> unit
+}
+
+[<Struct>]
+type CustomPass = {
+  Priority: int
+  Binding: EffectBinding
+  Filter: Drawable -> bool
+}
+
+[<Struct>]
+type LightDataProviderOutput = {
+  LightDataTexture: Texture2D voption
+  LightCount: int
+  ShadowViewMatrices: Matrix[]
+  ShadowProjectionMatrices: Matrix[]
+  ShadowMatrixTexture: Texture2D voption
+  ShadowMatrixCount: int
+}
+
+[<Struct>]
+type TileCullingOutput = {
+  TileDataTexture: Texture2D voption
+  TilesX: int
+  TilesY: int
+}
+
+type ILightDataProvider =
+  abstract member Compute:
+    lights: Light[] *
+    camera: Camera *
+    viewport: Viewport *
+    device: GraphicsDevice ->
+      LightDataProviderOutput
+
+type ITileCullingProvider =
+  abstract member Compute:
+    lights: Light[] *
+    camera: Camera *
+    viewport: Viewport *
+    tileSize: int *
+    device: GraphicsDevice ->
+      TileCullingOutput
 
 type RenderCommand =
   | SetCamera of camera: Camera

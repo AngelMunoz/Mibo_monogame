@@ -10,6 +10,9 @@ type Pipeline3DConfig = {
   ShadowCasterBinding: ShadowCasterBinding voption
   BloomBinding: BloomBinding voption
   PostProcessBinding: PostProcessBinding voption
+  CustomPasses: CustomPass[]
+  LightDataProvider: ILightDataProvider voption
+  TileCullingProvider: ITileCullingProvider voption
 }
 
 module Pipeline3DConfig =
@@ -21,6 +24,9 @@ module Pipeline3DConfig =
     ShadowCasterBinding = ValueNone
     BloomBinding = ValueNone
     PostProcessBinding = ValueNone
+    CustomPasses = [||]
+    LightDataProvider = ValueNone
+    TileCullingProvider = ValueNone
   }
 
   let inline withShadows (cfg: ShadowConfig) (pc: Pipeline3DConfig) = {
@@ -63,4 +69,27 @@ module Pipeline3DConfig =
     {
       pc with
           PostProcessBinding = ValueSome binding
+    }
+
+  let inline withCustomPasses (passes: CustomPass[]) (pc: Pipeline3DConfig) = {
+    pc with
+        CustomPasses = passes
+  }
+
+  let inline withLightDataProvider
+    (provider: ILightDataProvider)
+    (pc: Pipeline3DConfig)
+    =
+    {
+      pc with
+          LightDataProvider = ValueSome provider
+    }
+
+  let inline withTileCullingProvider
+    (provider: ITileCullingProvider)
+    (pc: Pipeline3DConfig)
+    =
+    {
+      pc with
+          TileCullingProvider = ValueSome provider
     }

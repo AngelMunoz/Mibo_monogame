@@ -82,6 +82,37 @@ type EffectBinding = {
 }
 
 [<Struct>]
+type Drawable = {
+  Mesh: Mesh
+  Transform: Matrix
+  Bones: Matrix[] voption
+  BoundingSphere: BoundingSphere
+  Pass: RenderPass
+  MaterialKey: int<MaterialKey>
+  MaterialData: PBRMaterialData voption
+  Binding: EffectBinding
+}
+
+[<Struct>]
+type SortKey = {
+  Distance: float32
+  Pass: RenderPass
+  MaterialKey: int<MaterialKey>
+  Effect: Effect
+}
+
+module SortKey =
+  val inline create:
+    distance: float32 ->
+    pass: RenderPass ->
+    materialKey: int<MaterialKey> ->
+    effect: Effect ->
+      SortKey
+
+  val inline opaque: distance: float32 -> effect: Effect -> SortKey
+  val inline transparent: distance: float32 -> effect: Effect -> SortKey
+
+[<Struct>]
 type ShadowCasterContext = {
   View: Matrix
   Projection: Matrix
@@ -125,35 +156,45 @@ type PostProcessBinding = {
 }
 
 [<Struct>]
-type Drawable = {
-  Mesh: Mesh
-  Transform: Matrix
-  Bones: Matrix[] voption
-  BoundingSphere: BoundingSphere
-  Pass: RenderPass
-  MaterialKey: int<MaterialKey>
-  MaterialData: PBRMaterialData voption
+type CustomPass = {
+  Priority: int
   Binding: EffectBinding
+  Filter: Drawable -> bool
 }
 
 [<Struct>]
-type SortKey = {
-  Distance: float32
-  Pass: RenderPass
-  MaterialKey: int<MaterialKey>
-  Effect: Effect
+type LightDataProviderOutput = {
+  LightDataTexture: Texture2D voption
+  LightCount: int
+  ShadowViewMatrices: Matrix[]
+  ShadowProjectionMatrices: Matrix[]
+  ShadowMatrixTexture: Texture2D voption
+  ShadowMatrixCount: int
 }
 
-module SortKey =
-  val inline create:
-    distance: float32 ->
-    pass: RenderPass ->
-    materialKey: int<MaterialKey> ->
-    effect: Effect ->
-      SortKey
+[<Struct>]
+type TileCullingOutput = {
+  TileDataTexture: Texture2D voption
+  TilesX: int
+  TilesY: int
+}
 
-  val inline opaque: distance: float32 -> effect: Effect -> SortKey
-  val inline transparent: distance: float32 -> effect: Effect -> SortKey
+type ILightDataProvider =
+  abstract member Compute:
+    lights: Light[] *
+    camera: Camera *
+    viewport: Viewport *
+    device: GraphicsDevice ->
+      LightDataProviderOutput
+
+type ITileCullingProvider =
+  abstract member Compute:
+    lights: Light[] *
+    camera: Camera *
+    viewport: Viewport *
+    tileSize: int *
+    device: GraphicsDevice ->
+      TileCullingOutput
 
 type RenderCommand =
   | SetCamera of camera: Camera
