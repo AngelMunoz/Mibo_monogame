@@ -1,15 +1,15 @@
-module _3DSample.Movement
+module _3DSample.Systems.Movement
 
 open Microsoft.Xna.Framework
 open Mibo.Elmish
 open Mibo.Input
-open _3DSample
+open _3DSample.Domain
 
-// ─────────────────────────────────────────────────────────────
+// ============================================================================
 // Movement System: Input → velocity with acceleration/friction
-// ─────────────────────────────────────────────────────────────
+// ============================================================================
 
-/// Compute movement direction from action state
+/// <summary>Compute movement direction from action state.</summary>
 let computeDirection(actions: ActionState<GameAction>) : Vector3 =
   let mutable dir = Vector3.Zero
 
@@ -30,7 +30,7 @@ let computeDirection(actions: ActionState<GameAction>) : Vector3 =
   else
     dir
 
-/// Apply acceleration towards target velocity or friction when no input
+/// <summary>Apply acceleration towards target velocity or friction when no input.</summary>
 let private applyAccelerationOrFriction
   (dt: float32)
   (moveDir: Vector3)
@@ -41,7 +41,6 @@ let private applyAccelerationOrFriction
 
   let newHorizontalVel =
     if hasInput then
-      // Accelerate towards target velocity
       let targetVel =
         Vector2(
           moveDir.X * Constants.moveSpeed,
@@ -56,7 +55,6 @@ let private applyAccelerationOrFriction
       else
         horizontalVel + Vector2.Normalize(diff) * accel
     else
-      // Apply friction to slow down
       let frictionAmount = Constants.friction * dt
       let speed = horizontalVel.Length()
 
@@ -67,7 +65,7 @@ let private applyAccelerationOrFriction
 
   Vector3(newHorizontalVel.X, currentVel.Y, newHorizontalVel.Y)
 
-/// Movement system update: processes input and applies acceleration/friction
+/// <summary>Movement system update: processes input and applies acceleration/friction.</summary>
 let update<'Msg> (dt: float32) (state: State) : struct (State * Cmd<'Msg>) =
   let moveDir = computeDirection state.Actions
   let newVelocity = applyAccelerationOrFriction dt moveDir state.Velocity

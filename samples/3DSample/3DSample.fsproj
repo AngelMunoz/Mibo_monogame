@@ -11,15 +11,28 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Domain.fs" />
-    <Compile Include="Rendering.fs" />
-    <Compile Include="Level.fs" />
-    <Compile Include="Platform.fs" />
-    <Compile Include="Movement.fs" />
-    <Compile Include="Physics.fs" />
-    <Compile Include="Rotation.fs" />
-    <Compile Include="Player.fs" />
-    <Compile Include="Grid.fs" />
+    <!-- Domain layer: core types -->
+    <Compile Include="Domain/Domain.Types.fs" />
+
+    <!-- Level layer: cell types → stamps → build -->
+    <Compile Include="Level/Level.Cells.fs" />
+    <Compile Include="Level/Level.Stamps.fs" />
+    <Compile Include="Level/Level.Build.fs" />
+
+    <!-- Systems layer: game logic -->
+    <Compile Include="Systems/Systems.Platform.fs" />
+    <Compile Include="Systems/Systems.Movement.fs" />
+    <Compile Include="Systems/Systems.Physics.fs" />
+    <Compile Include="Systems/Systems.Rotation.fs" />
+    <Compile Include="Systems/Systems.Respawn.fs" />
+
+    <!-- Rendering layer: commands → processor → features -->
+    <Compile Include="Rendering/Rendering.Commands.fs" />
+    <Compile Include="Rendering/Rendering.Processor.fs" />
+    <Compile Include="Rendering/Rendering.Grid.fs" />
+    <Compile Include="Rendering/Rendering.Player.fs" />
+
+    <!-- Entry point -->
     <Compile Include="Program.fs" />
   </ItemGroup>
 

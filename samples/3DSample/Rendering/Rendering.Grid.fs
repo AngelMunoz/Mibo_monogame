@@ -1,13 +1,19 @@
-module _3DSample.Grid
+module _3DSample.Rendering.Grid
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Rendering
 open Mibo.Rendering.Graphics3D
+open _3DSample.Domain
+open _3DSample.Rendering.Commands
 
-/// <summary>
-/// Pre-calculates grid vertices for a set of platform bounds.
-/// </summary>
+// ============================================================================
+// Grid Rendering
+// ============================================================================
+// Generates procedural grid lines around platform bounds and renders them
+// using a custom shader effect with distance-based fading.
+
+/// <summary>Pre-calculates grid vertices for a set of platform bounds.</summary>
 let create (platforms: PlatformData list) (padding: float32) (color: Color) =
   let vertices = ResizeArray<VertexPositionColor>()
 
@@ -40,9 +46,7 @@ let create (platforms: PlatformData list) (padding: float32) (color: Color) =
   let result = vertices.ToArray()
   result, result.Length / 2
 
-/// <summary>
-/// Draws the grid using a custom shader effect.
-/// </summary>
+/// <summary>Draws the grid using a custom shader effect.</summary>
 let draw
   (playerPos: Vector3)
   (maxDist: float32)
@@ -60,4 +64,4 @@ let draw
       e.Parameters.["PlayerPosition"].SetValue(playerPos)
       e.Parameters.["MaxDistance"].SetValue(maxDist)
 
-    buffer.AddCmd(SampleCmd.DrawLinesEffect(vertices, lineCount, effect, setup))
+    buffer.AddCmd(DrawLinesEffect(vertices, lineCount, effect, setup))

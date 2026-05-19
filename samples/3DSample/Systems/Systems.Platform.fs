@@ -1,13 +1,14 @@
-module _3DSample.Platform
+module _3DSample.Systems.Platform
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
+open _3DSample.Domain
 
-// ─────────────────────────────────────────────────────────────
+// ============================================================================
 // Platform System: Bounds computation and collision detection
-// ─────────────────────────────────────────────────────────────
+// ============================================================================
 
-/// Compute bounding box from a 3D Model using its bounding sphere
+/// <summary>Compute bounding box from a 3D Model using its bounding sphere.</summary>
 let computeBounds(model: Model) : BoundingBox =
   let mutable min = Vector3(infinityf, infinityf, infinityf)
   let mutable max = Vector3(-infinityf, -infinityf, -infinityf)
@@ -19,7 +20,7 @@ let computeBounds(model: Model) : BoundingBox =
 
   BoundingBox(min, max)
 
-/// Create platform at position with bounds offset from base bounds
+/// <summary>Create platform at position with bounds offset from base bounds.</summary>
 let create (baseBounds: BoundingBox) (pos: Vector3) : PlatformData =
   let min = baseBounds.Min + pos
   let max = baseBounds.Max + pos
@@ -29,8 +30,8 @@ let create (baseBounds: BoundingBox) (pos: Vector3) : PlatformData =
     Bounds = BoundingBox(min, max)
   }
 
-/// Check if player collides with any platform (from above, landing)
-/// Returns Some(topY) if landing on a platform, None otherwise
+/// <summary>Check if player collides with any platform (from above, landing).</summary>
+/// <returns>Some(topY) if landing on a platform, None otherwise.</returns>
 let checkCollision
   (playerRadius: float32)
   (prevPos: Vector3)
@@ -55,7 +56,7 @@ let checkCollision
     else
       None)
 
-/// Level platform positions
+/// <summary>Level platform positions (legacy, kept for compatibility).</summary>
 let positions: Vector3 list = [
   Vector3(0f, -1f, 0f)
   Vector3(6f, 0f, 0f)

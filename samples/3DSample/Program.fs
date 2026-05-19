@@ -8,6 +8,10 @@ open Mibo.Elmish
 open Mibo.Input
 open Mibo.Layout3D
 open Mibo.Rendering.Graphics3D
+open _3DSample.Domain
+open _3DSample.Systems
+open _3DSample.Level
+open _3DSample.Rendering
 
 module Program =
 
@@ -65,7 +69,7 @@ module Program =
     inputMapRef.Value <- inputMap
 
     // Create level grid using Layout3D DSL
-    let levelGrid = Level.create()
+    let levelGrid = Build.create()
 
     // Load player model and compute bounds
     let playerModel = Assets.model "Models/Platform/ball_blue" ctx
@@ -107,7 +111,7 @@ module Program =
     }
 
     {
-      PlayerPosition = Vector3(24f, 2f, 24f) // Start near center of 64x64 level
+      PlayerPosition = Vector3(24f, 2f, 24f)
       Velocity = Vector3.Zero
       Rotation = Quaternion.Identity
       IsGrounded = false
@@ -129,22 +133,21 @@ module Program =
     | Tick gt ->
       let dt = float32 gt.ElapsedGameTime.TotalSeconds
 
-      // Composable system pipeline using Mibo.Elmish.System
       System.start state
       |> System.pipe(Movement.update dt)
       |> System.pipe(Physics.update dt)
       |> System.pipe(Rotation.update dt)
-      |> System.pipe Player.checkRespawn
+      |> System.pipe Respawn.update
       |> System.finish id
 
   // ─────────────────────────────────────────────────────────────
-  // View: Render the 3D scene using grid iteration
+  // View: Render the 3D scene
   // ─────────────────────────────────────────────────────────────
 
   let view
     (ctx: GameContext)
     (state: State)
-    (buffer: RenderBuffer3D<SampleCmd>)
+    (buffer: RenderBuffer3D<Commands.SampleCmd>)
     =
     // Camera follows player
     let cameraOffset = Vector3(12f, 12f, 12f)
@@ -160,10 +163,10 @@ module Program =
         0.1f
         1000f
 
-    buffer.AddCmd(SampleCmd.SetCamera camera)
-    buffer.AddCmd(SampleCmd.Clear(Color.CornflowerBlue, true))
+    buffer.AddCmd(Commands.SampleCmd.SetCamera camera)
+    buffer.AddCmd(Commands.SampleCmd.Clear(Color.CornflowerBlue, true))
 
-    // Create view bounds for frustum culling (large radius around player)
+    // Create view bounds for frustum culling
     let viewRadius = 50f
 
     let viewBounds =
@@ -181,7 +184,6 @@ module Program =
       )
 
     // Render level geometry using iterVolume for frustum culling
-    // Only render anchor cells (Render = true), skip collision markers
     state.LevelGrid
     |> CellGrid3D.iterVolume viewBounds (fun x y z cell ->
       if cell.Render then
@@ -192,7 +194,7 @@ module Program =
           Matrix.CreateFromQuaternion(cell.Rotation)
           * Matrix.CreateTranslation(worldPos)
 
-        buffer.AddCmd(DrawMesh(model, matrix)))
+        buffer.AddCmd(Commands.DrawMesh(model, matrix)))
 
     // Draw the grid
     Grid.draw
@@ -204,7 +206,7 @@ module Program =
       buffer
 
     // Draw the player
-    Player.view ctx state buffer
+    Player.draw ctx state buffer
 
   // ─────────────────────────────────────────────────────────────
   // Subscribe
@@ -234,7 +236,7 @@ module Program =
       |> Program.withTick Tick
       |> Program.withSubscription subscribe
       |> Program.withRenderer(fun game ->
-        Batch3DRenderer.create game view SampleCommandProcessor.processCommands)
+        Batch3DRenderer.create game view Processor.processCommands)
 
     use game = new ElmishGame<State, Msg>(program)
     game.Run()
