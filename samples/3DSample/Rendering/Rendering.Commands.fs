@@ -3,6 +3,7 @@ module _3DSample.Rendering.Commands
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Rendering
+open _3DSample.Materials.Types
 
 // ============================================================================
 // Render Commands
@@ -15,8 +16,14 @@ open Mibo.Rendering
 type SampleCmd =
   /// <summary>Set the active camera (view + projection matrices).</summary>
   | SetCamera of camera: Mibo.Elmish.Camera
-  /// <summary>Draw a 3D model with a transform matrix.</summary>
+  /// <summary>Draw a 3D model using BasicEffect (simple, no custom shaders).</summary>
   | DrawMesh of model: Model * transform: Matrix
+  /// <summary>Draw a 3D model with a custom material and shader effect.</summary>
+  | DrawMeshWithMaterial of
+    effect: Effect *
+    material: Material *
+    model: Model *
+    transform: Matrix
   /// <summary>Draw lines using a custom shader effect.</summary>
   | DrawLinesEffect of
     vertices: VertexPositionColor[] *

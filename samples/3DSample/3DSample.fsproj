@@ -14,6 +14,11 @@
     <!-- Domain layer: core types -->
     <Compile Include="Domain/Domain.Types.fs" />
 
+    <!-- Materials layer: material types → shader binding -->
+    <Compile Include="Materials/Materials.Types.fs" />
+    <Compile Include="Materials/Materials.UnlitBinding.fs" />
+    <Compile Include="Materials/Materials.PBRBinding.fs" />
+
     <!-- Level layer: cell types → stamps → build -->
     <Compile Include="Level/Level.Cells.fs" />
     <Compile Include="Level/Level.Stamps.fs" />

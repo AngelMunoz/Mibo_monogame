@@ -5,6 +5,9 @@ open Microsoft.Xna.Framework.Graphics
 open Mibo.Rendering
 open Mibo.Rendering.Graphics3D
 open _3DSample.Rendering.Commands
+open _3DSample.Materials.Types
+open _3DSample.Materials.UnlitBinding
+open _3DSample.Materials.PBRBinding
 
 // ============================================================================
 // Command Processor
@@ -33,6 +36,24 @@ let private drawMeshWithBasicEffect
 
     mesh.Draw()
 
+/// <summary>Draws a model with a custom material, applying shader parameters first.</summary>
+let private drawMeshWithMaterial
+  (gd: GraphicsDevice)
+  (params: MaterialParams)
+  (effect: Effect)
+  (material: Material)
+  (model: Model)
+  (transform: Matrix)
+  =
+  // Apply material-specific shader parameters
+  match material with
+  | Unlit mat -> _3DSample.Materials.UnlitBinding.apply effect params mat
+  | PBR mat -> _3DSample.Materials.PBRBinding.apply effect params mat
+
+  // Draw the model - the effect is already bound
+  for mesh in model.Meshes do
+    mesh.Draw()
+
 /// <summary>Process all commands in the render buffer.</summary>
 /// <returns>The final camera state for the next frame.</returns>
 let processCommands
@@ -59,8 +80,17 @@ let processCommands
         model
         transform
 
+    | DrawMeshWithMaterial(effect, material, model, transform) ->
+      let matParams = {
+        World = transform
+        View = currentCamera.View
+        Projection = currentCamera.Projection
+      }
+
+      drawMeshWithMaterial gd matParams effect material model transform
+
     | DrawLinesEffect(vertices, lineCount, effect, setup) ->
-      let effectCtx = {
+      let effectCtx: EffectContext = {
         World = Matrix.Identity
         View = currentCamera.View
         Projection = currentCamera.Projection
