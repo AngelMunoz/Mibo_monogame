@@ -1,5 +1,6 @@
 namespace Mibo.Rendering.Graphics3D
 
+open System
 open Microsoft.Xna.Framework
 
 // ============================================================================
@@ -10,6 +11,7 @@ open Microsoft.Xna.Framework
 /// Shadow settings for a light.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type ShadowSettings = {
   /// <summary>
   /// Constant depth bias to prevent shadow acne.
@@ -21,6 +23,7 @@ type ShadowSettings = {
   NormalBias: float32
 }
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module ShadowSettings =
   /// <summary>
   /// Default shadow settings: 0.001 bias, 0.02 normal bias.
@@ -33,6 +36,7 @@ module ShadowSettings =
 /// Infinite distance, parallel rays. Covers the entire view frustum via cascades.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type DirectionalLight = {
   /// <summary>
   /// Direction light is pointing (should be normalized). Points toward objects.
@@ -75,6 +79,7 @@ type DirectionalLight = {
 /// Falls off with distance.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type PointLight = {
   /// <summary>
   /// World position of the light center.
@@ -113,6 +118,7 @@ type PointLight = {
 /// Directional point light with inner/outer cone falloff.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type SpotLight = {
   /// <summary>
   /// World position of light source (tip of the cone).
@@ -165,6 +171,7 @@ type SpotLight = {
 /// <summary>
 /// Discriminated union of all supported light types.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type Light =
   | Directional of DirectionalLight
   | Point of PointLight
@@ -175,6 +182,7 @@ type Light =
 /// Passed to the renderer via 'SetLighting' command.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type LightingState = {
   /// <summary>
   /// Global ambient color added to all surfaces regardless of light sources.
@@ -195,6 +203,7 @@ type LightingState = {
   Lights: Light[]
 }
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module Lighting =
   /// Minimal ambient-only lighting
   let ambient: LightingState = {

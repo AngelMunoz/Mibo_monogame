@@ -3,7 +3,6 @@ module Mibo.Tests.Sprite3D
 open Expecto
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
-open Mibo.Elmish.Graphics3D
 open Mibo.Rendering
 open Mibo.Elmish
 open Mibo.Rendering.Graphics3D
@@ -41,7 +40,7 @@ let spriteDslTests =
 
     testCase "RenderBuilder quad adds command"
     <| fun _ ->
-      let buffer = RenderBuffer<unit, RenderCommand>()
+      let buffer = PipelineBuffer<RenderCommand>()
       let tex = Unchecked.defaultof<Texture2D>
 
       let q = quad {
@@ -61,7 +60,7 @@ let spriteDslTests =
 
     testCase "billboard adds command to buffer"
     <| fun _ ->
-      let buffer = RenderBuffer<unit, RenderCommand>()
+      let buffer = PipelineBuffer<RenderCommand>()
       let tex = Unchecked.defaultof<Texture2D>
 
       let b = billboard {
@@ -83,7 +82,7 @@ let spriteDslTests =
 
     testCase "line adds command to buffer"
     <| fun _ ->
-      let buffer = RenderBuffer<unit, RenderCommand>()
+      let buffer = PipelineBuffer<RenderCommand>()
       Buffer.line Vector3.Zero Vector3.UnitX Color.Red buffer |> ignore
 
       Expect.equal buffer.Count 1 "Should have 1 command"

@@ -31,13 +31,11 @@
     <Compile Include="Culling.fs" />
     <Compile Include="Assets.fs" />
     <Compile Include="Render.Shared.fs" />
+    <Compile Include="Graphics3D.V3.fs" />
     <Compile Include="BillboardBatch.fs" />
     <Compile Include="LineBatch.fs" />
     <Compile Include="Graphics2D.fs" />
     <Compile Include="Animation.fs" />
-    <Compile Include="Sprite3DTypes.fs" />
-    <Compile Include="SpriteQuadBatch.fs" />
-    <Compile Include="QuadBatch.fs" />
     <Compile Include="Rendering3D/Lighting.fs" />
     <Compile Include="Rendering3D/Types.fs" />
     <Compile Include="Rendering3D/Config.fs" />
@@ -46,7 +44,6 @@
     <Compile Include="Rendering3D/Pipeline.fs" />
     <Compile Include="Rendering3D/View.fs" />
     <Compile Include="Rendering3D/Program.fs" />
-    <Compile Include="Graphics3D.fs" />
     <Compile Include="System.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

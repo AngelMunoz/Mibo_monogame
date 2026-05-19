@@ -1,5 +1,6 @@
 namespace Mibo.Rendering.Graphics3D
 
+open System
 open System.Collections.Generic
 open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
@@ -15,6 +16,7 @@ open Mibo.Rendering
 /// Render pipeline interface for 3D rendering.
 /// Implementations process render commands and produce final frame output.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type IRenderPipeline =
   /// <summary>
   /// Initialize the pipeline with a graphics device.
@@ -135,7 +137,17 @@ module internal State =
     LightDataTexture = ValueNone
     ShadowMatrixTexture = ValueNone
     MainSceneTarget = ValueNone
-    CurrentCamera = Camera.identity
+    CurrentCamera = {
+      View = Matrix.Identity
+      Projection = Matrix.Identity
+      Position = Vector3.Zero
+      Target = Vector3.Forward
+      Up = Vector3.Up
+      Fov = MathHelper.PiOver4
+      Aspect = 16f / 9f
+      Near = 0.1f
+      Far = 1000f
+    }
     CurrentLighting = Lighting.ambient
     CameraWasSet = false
     AccumulatedLights = ResizeArray<Light>(32)
@@ -164,7 +176,17 @@ module internal State =
   }
 
   let reset(state: PipelineState) =
-    state.CurrentCamera <- Camera.identity
+    state.CurrentCamera <- {
+      View = Matrix.Identity
+      Projection = Matrix.Identity
+      Position = Vector3.Zero
+      Target = Vector3.Forward
+      Up = Vector3.Up
+      Fov = MathHelper.PiOver4
+      Aspect = 16f / 9f
+      Near = 0.1f
+      Far = 1000f
+    }
 
     state.CurrentLighting <-
       state.Config.DefaultLighting |> ValueOption.defaultValue Lighting.ambient
@@ -433,7 +455,8 @@ module internal Culling =
     (camera: Mibo.Rendering.Graphics3D.Camera)
     (drawable: Drawable)
     =
-    Vector3.DistanceSquared(camera.Position, drawable.BoundingSphere.Center)
+    let camPos = Matrix.Invert(camera.View).Translation
+    Vector3.DistanceSquared(camPos, drawable.BoundingSphere.Center)
 
   let isTransparent(drawable: Drawable) =
     drawable.Material.Flags.HasFlag(MaterialFlags.Transparent)
@@ -1412,29 +1435,23 @@ module internal Orchestrate =
       state.Device.Clear(flags, color, 1f, 0)
     | Draw drawable -> Culling.batchDrawable state drawable
     | DrawSpriteQuad s ->
-      let distSq =
-        Vector3.DistanceSquared(state.CurrentCamera.Position, s.Quad.Center)
+      let camPos = Matrix.Invert(state.CurrentCamera.View).Translation
+      let distSq = Vector3.DistanceSquared(camPos, s.Quad.Center)
 
       Culling.batchSpriteCommand state s.Pass distSq cmd
     | DrawSpriteBillboard s ->
-      let distSq =
-        Vector3.DistanceSquared(
-          state.CurrentCamera.Position,
-          s.Billboard.Position
-        )
+      let camPos = Matrix.Invert(state.CurrentCamera.View).Translation
+      let distSq = Vector3.DistanceSquared(camPos, s.Billboard.Position)
 
       Culling.batchSpriteCommand state s.Pass distSq cmd
     | DrawQuadEffect e ->
-      let distSq =
-        Vector3.DistanceSquared(state.CurrentCamera.Position, e.Quad.Center)
+      let camPos = Matrix.Invert(state.CurrentCamera.View).Translation
+      let distSq = Vector3.DistanceSquared(camPos, e.Quad.Center)
 
       Culling.batchSpriteCommand state e.Pass distSq cmd
     | DrawBillboardEffect e ->
-      let distSq =
-        Vector3.DistanceSquared(
-          state.CurrentCamera.Position,
-          e.Billboard.Position
-        )
+      let camPos = Matrix.Invert(state.CurrentCamera.View).Translation
+      let distSq = Vector3.DistanceSquared(camPos, e.Billboard.Position)
 
       Culling.batchSpriteCommand state e.Pass distSq cmd
     | DrawLine(_, _, _, pass) -> Culling.batchSpriteCommand state pass 0f cmd

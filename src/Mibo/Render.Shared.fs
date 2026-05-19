@@ -1,5 +1,6 @@
 namespace Mibo.Rendering
 
+open System
 open System.Collections.Generic
 open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
@@ -213,3 +214,49 @@ module UvRect =
     U1 = 1.0f
     V1 = 1.0f
   }
+
+/// <summary>Coarse rendering pass selection for 3D.</summary>
+[<Struct>]
+type RenderPass =
+  | Opaque
+  | Transparent
+
+/// <summary>Standard transformation matrices used during effect setup.</summary>
+[<Struct>]
+type EffectContext = {
+  World: Matrix
+  View: Matrix
+  Projection: Matrix
+}
+
+/// <summary>Callback for configuring an effect before a draw operation.</summary>
+type EffectSetup = Effect -> EffectContext -> unit
+
+/// <summary>Billboard facing mode.</summary>
+[<Struct>]
+type BillboardMode =
+  /// Faces the camera fully.
+  | Spherical
+  /// Rotates around a fixed up axis (good for trees).
+  | Cylindrical of upAxis: Vector3
+
+/// <summary>A textured quad in 3D space, represented as center + basis half-extents.</summary>
+[<Struct>]
+type Quad3D = {
+  Center: Vector3
+  Right: Vector3
+  Up: Vector3
+  Color: Color
+  Uv: UvRect
+}
+
+/// <summary>A billboard (camera-facing quad) in 3D space.</summary>
+[<Struct>]
+type Billboard3D = {
+  Position: Vector3
+  Size: Vector2
+  Rotation: float32
+  Color: Color
+  Uv: UvRect
+  Mode: BillboardMode
+}

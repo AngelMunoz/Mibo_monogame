@@ -1,5 +1,6 @@
 namespace Mibo.Rendering.Graphics3D
 
+open System
 open Microsoft.Xna.Framework.Graphics
 
 // ============================================================================
@@ -10,6 +11,7 @@ open Microsoft.Xna.Framework.Graphics
 /// Configuration for soft shadow rendering (PCF/Poisson).
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type SoftShadowConfig = {
   /// <summary>
   /// The physical radius of the light source in world units.
@@ -23,6 +25,7 @@ type SoftShadowConfig = {
 /// Configuration for the Shadow Atlas system.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type ShadowConfig = {
   /// <summary>
   /// The resolution for a single shadow map slice (e.g., 2048 or 4096).
@@ -83,6 +86,7 @@ type ShadowConfig = {
   MaxAtlasSize: int
 }
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module ShadowConfig =
   /// Default shadow settings: 1024px, 3 Cascades, 4x4 Atlas (16 slots), 8k Max Texture.
   let defaults: ShadowConfig = {
@@ -167,6 +171,7 @@ module ShadowConfig =
 /// Adds depth perception by darkening corners and crevices where geometry is close together.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type SSAOConfig = {
   /// <summary>
   /// Sampling radius in world units. Larger values cover more area but may include distant geometry.
@@ -185,6 +190,7 @@ type SSAOConfig = {
   SampleCount: int
 }
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module SSAOConfig =
   /// <summary>
   /// Default SSAO settings: 0.5 radius, 1.0 intensity, 16 samples.
@@ -200,6 +206,7 @@ module SSAOConfig =
 /// Creates a soft glow around pixels that exceed the threshold brightness.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type BloomConfig = {
   /// <summary>
   /// Minimum brightness level for pixels to contribute to bloom. Pixels below this threshold are not blurred.
@@ -218,6 +225,7 @@ type BloomConfig = {
   Scatter: float32
 }
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module BloomConfig =
   /// <summary>
   /// Default bloom settings: 1.0 threshold, 0.5 intensity, 0.7 scatter.
@@ -232,6 +240,7 @@ module BloomConfig =
 /// Tone mapping algorithms for HDR -> LDR conversion.
 /// Controls how high dynamic range values are compressed to fit within displayable range.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type ToneMappingConfig =
   /// <summary>
   /// No tone mapping applied. Values may clip at white.
@@ -258,12 +267,14 @@ type ToneMappingConfig =
 /// Configuration for the Post-Processing pipeline phase.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type PostProcessConfig = {
   SSAO: SSAOConfig voption
   Bloom: BloomConfig voption
   ToneMapping: ToneMappingConfig
 }
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module PostProcessConfig =
   /// <summary>
   /// Default post-process configuration: No SSAO, No Bloom, ACES tone mapping.
@@ -305,6 +316,7 @@ module PostProcessConfig =
 /// Main configuration for the 3D Render Pipeline.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type PipelineConfig = {
   /// Shadow subsystem configuration (ValueNone to disable shadows).
   Shadows: ShadowConfig voption
@@ -327,6 +339,7 @@ type PipelineConfig = {
   TileSize: int
 }
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module PipelineConfig =
   /// <summary>
   /// Default pipeline configuration: No shadows, no post-process, no default lighting.

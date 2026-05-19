@@ -8,6 +8,7 @@ open Microsoft.Xna.Framework.Graphics
 /// <summary>
 /// A simple batcher for drawing line primitives in 3D.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module internal LineBatch =
 
   type State = {

@@ -1,5 +1,6 @@
 namespace Mibo.Rendering.Graphics3D
 
+open System
 open System.Runtime.CompilerServices
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
@@ -14,6 +15,7 @@ open Mibo.Rendering
 /// Usually created via the <see cref="T:Mibo.Rendering.Graphics3D.View.draw"/> computation expression.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type DrawState = {
   /// <summary>The geometric mesh to render.</summary>
   mutable Mesh: Mesh voption
@@ -38,6 +40,7 @@ type DrawState = {
 /// Usually created via the <see cref="T:Mibo.Rendering.Graphics3D.View.quad"/> computation expression.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type QuadState = {
   /// <summary>Center position of the quad.</summary>
   Center: Vector3
@@ -58,6 +61,7 @@ type QuadState = {
 /// Usually created via the <see cref="T:Mibo.Rendering.Graphics3D.View.billboard"/> computation expression.
 /// </summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type BillboardState = {
   /// <summary>Position of the billboard center.</summary>
   Position: Vector3
@@ -78,6 +82,7 @@ type BillboardState = {
 /// <summary>
 /// Internal helpers for managing <see cref="T:Mibo.Rendering.Graphics3D.DrawState"/>.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module DrawState =
   /// <summary>
   /// The default starting state for a drawable: identity transform, default opaque material, and no mesh.
@@ -142,16 +147,7 @@ module DrawState =
 /// Builder for creating individual <see cref="T:Mibo.Rendering.Graphics3D.Drawable"/> objects.
 /// Used via the <see cref="T:Mibo.Rendering.Graphics3D.View.draw"/> computation expression.
 /// </summary>
-/// <example>
-/// <code>
-/// draw {
-///     mesh myMesh
-///     at 0f 2f 0f
-///     withAlbedo Color.Gold
-///     withMetallic 1.0f
-/// }
-/// </code>
-/// </example>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type DrawableBuilder() =
 
   member inline _.Yield(_: unit) = DrawState.empty
@@ -410,6 +406,7 @@ type DrawableBuilder() =
 /// }
 /// </code>
 /// </example>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type QuadBuilder() =
 
   member inline _.Yield(_: unit) : QuadState = {
@@ -494,6 +491,7 @@ type QuadBuilder() =
 /// }
 /// </code>
 /// </example>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type BillboardBuilder() =
 
   member inline _.Yield(_: unit) : BillboardState = {
@@ -567,6 +565,7 @@ type BillboardBuilder() =
 /// <summary>
 /// Provides low-level functional helpers for creating Sprite3D primitives without using computation expressions.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module SpriteHelpers =
   /// <summary>
   /// Creates a raw <see cref="T:Mibo.Rendering.Graphics3D.Quad3D"/> definition from basis vectors.
@@ -656,6 +655,7 @@ module SpriteHelpers =
 /// between opaque and transparent rendering passes automatically.
 /// </remarks>
 [<Extension>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type PipelineBufferExtensions =
 
   /// <summary>
@@ -961,6 +961,7 @@ type PipelineBufferExtensions =
 /// Module for building a 3D frame by submitting commands to a RenderBuffer.
 /// Recommended usage: 'buffer |> Buffer.camera ... |> Buffer.draw ...'
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module Buffer =
 
   let inline camera camera (buffer: PipelineBuffer<RenderCommand>) =
@@ -1043,6 +1044,7 @@ module Buffer =
 // ============================================================================
 
 [<AutoOpen>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module View =
   /// <summary>
   /// Builder for creating individual 'Drawable' objects (Mesh + Transform + Material).

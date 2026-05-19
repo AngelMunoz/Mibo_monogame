@@ -1,5 +1,6 @@
 namespace Mibo.Rendering.Graphics3D
 
+open System
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Elmish
@@ -12,6 +13,7 @@ open Mibo.Elmish
 /// Internal renderer that wraps IRenderPipeline for Elmish-style integration.
 /// Manages render buffer clearing and command submission each frame.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type internal PipelineRenderer<'Model>
   (
     pipeline: IRenderPipeline,
@@ -27,6 +29,7 @@ type internal PipelineRenderer<'Model>
       view ctx model buffer
       pipeline.Render(ctx, buffer, gameTime)
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module PipelineRenderer =
   /// <summary>
   /// Create a pipeline-based renderer that integrates with Mibo's Elmish-style game loop.

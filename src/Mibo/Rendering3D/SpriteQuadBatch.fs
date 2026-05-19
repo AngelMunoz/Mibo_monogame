@@ -9,6 +9,7 @@ open Mibo.Rendering
 /// <summary>
 /// A simple batcher for drawing textured, vertex-colored quads in 3D.
 /// </summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 module internal SpriteQuadBatch =
 
   type State = {

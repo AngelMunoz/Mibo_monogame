@@ -5,43 +5,30 @@ open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Mibo.Rendering
 
-// ============================================================================
-// Core Types for the Rendering Pipeline
-// ============================================================================
-
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type PipelineBuffer<'Cmd> = Mibo.Elmish.RenderBuffer<unit, 'Cmd>
 
-/// <summary>Coarse rendering pass selection for 3D.</summary>
-type RenderPass =
-  | Opaque
-  | Transparent
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Rendering.RenderPass instead.")>]
+type RenderPass = Mibo.Rendering.RenderPass
 
-/// <summary>Standard transformation matrices used during effect setup.</summary>
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Rendering.EffectContext instead.")>]
+type EffectContext = Mibo.Rendering.EffectContext
+
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Rendering.EffectSetup instead.")>]
+type EffectSetup = Mibo.Rendering.EffectSetup
+
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Rendering.BillboardMode instead.")>]
+type BillboardMode = Mibo.Rendering.BillboardMode
+
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Rendering.Quad3D instead.")>]
+type Quad3D = Mibo.Rendering.Quad3D
+
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Rendering.Billboard3D instead.")>]
+type Billboard3D = Mibo.Rendering.Billboard3D
+
+/// <summary>Camera for 3D rendering (deprecated).</summary>
 [<Struct>]
-type EffectContext = {
-  World: Matrix
-  View: Matrix
-  Projection: Matrix
-}
-
-/// <summary>Callback for configuring an effect before a draw operation.</summary>
-type EffectSetup = Effect -> EffectContext -> unit
-
-/// Shader base types for override mapping
-type ShaderBase =
-  /// The default shadow casting shader (depth only).
-  | ShadowCaster
-  /// High-fidelity PBR shader (Albedo + Normal + MRA).
-  | PBRForward
-  /// Unlit shader (full brightness, no shadows).
-  | Unlit
-  /// Bloom extraction shader.
-  | Bloom
-  /// Final post-processing and tone mapping shader.
-  | PostProcess
-
-/// Camera for 3D rendering
-[<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Elmish.Camera instead.")>]
 type Camera = {
   View: Matrix
   Projection: Matrix
@@ -56,22 +43,14 @@ type Camera = {
 
   member this.Forward = Vector3.Normalize(this.Target - this.Position)
 
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated. Use Mibo.Elmish.Camera3D instead.")>]
 module Camera =
-  /// <summary>
-  /// Recomputes the view matrix based on Position, Target, and Up.
-  /// </summary>
   let rebuildView(c: Camera) =
     Matrix.CreateLookAt(c.Position, c.Target, c.Up)
 
-  /// <summary>
-  /// Recomputes the projection matrix based on Fov, Aspect, Near, and Far.
-  /// </summary>
   let rebuildProjection(c: Camera) =
     Matrix.CreatePerspectiveFieldOfView(c.Fov, c.Aspect, c.Near, c.Far)
 
-  /// <summary>
-  /// Standard perspective camera with sensible defaults.
-  /// </summary>
   let perspectiveDefaults: Camera =
     let c = {
       Position = Vector3(0f, 0f, 10f)
@@ -84,25 +63,9 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
+    { c with View = rebuildView c; Projection = rebuildProjection c }
 
-    {
-      c with
-          View = rebuildView c
-          Projection = rebuildProjection c
-    }
-
-  /// <summary>
-  /// Create a perspective camera. (Backward compatibility)
-  /// </summary>
-  let perspective
-    (position: Vector3)
-    (target: Vector3)
-    (up: Vector3)
-    (fov: float32)
-    (aspect: float32)
-    (near: float32)
-    (far: float32)
-    : Camera =
+  let perspective position target up fov aspect near far : Camera =
     let c = {
       Position = position
       Target = target
@@ -114,187 +77,8 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
+    { c with View = rebuildView c; Projection = rebuildProjection c }
 
-    {
-      c with
-          View = rebuildView c
-          Projection = rebuildProjection c
-    }
-
-  /// <summary>
-  /// Create an orthographic camera. (Backward compatibility)
-  /// </summary>
-  let orthographic
-    (position: Vector3)
-    (target: Vector3)
-    (up: Vector3)
-    (width: float32)
-    (height: float32)
-    (near: float32)
-    (far: float32)
-    : Camera =
-    let c = {
-      Position = position
-      Target = target
-      Up = up
-      Fov = 0f // Not used for orthographic but keeping struct consistent
-      Aspect = width / height
-      Near = near
-      Far = far
-      View = Matrix.Identity
-      Projection = Matrix.CreateOrthographic(width, height, near, far)
-    }
-
-    { c with View = rebuildView c }
-
-  /// <summary>Sets the Field of View in radians.</summary>
-  let inline withFov fov (c: Camera) =
-    let next = { c with Fov = fov }
-
-    {
-      next with
-          Projection = rebuildProjection next
-    }
-
-  /// <summary>Sets the aspect ratio (Width / Height).</summary>
-  let inline withAspect aspect (c: Camera) =
-    let next = { c with Aspect = aspect }
-
-    {
-      next with
-          Projection = rebuildProjection next
-    }
-
-  /// <summary>Sets the near and far clipping planes.</summary>
-  let inline withRange (near: float32) (far: float32) (c: Camera) =
-    let next = { c with Near = near; Far = far }
-
-    {
-      next with
-          Projection = rebuildProjection next
-    }
-
-  /// <summary>Sets the world-space position of the camera.</summary>
-  let inline at pos (c: Camera) =
-    let next = { c with Position = pos }
-    { next with View = rebuildView next }
-
-  /// <summary>Sets the target point the camera is looking at.</summary>
-  let inline lookingAt target (c: Camera) =
-    let next = { c with Target = target }
-    { next with View = rebuildView next }
-
-  /// <summary>Sets the world-space "up" vector (typically Vector3.Up).</summary>
-  let inline withUp up (c: Camera) =
-    let next = { c with Up = up }
-    { next with View = rebuildView next }
-
-  /// <summary>
-  /// Positions the camera to look at a target from a specific position.
-  /// </summary>
-  let lookAt position target (c: Camera) =
-    let next = {
-      c with
-          Position = position
-          Target = target
-    }
-
-    { next with View = rebuildView next }
-
-  /// <summary>
-  /// Offsets the camera position along its current forward axis by a distance from the target.
-  /// Useful for zooming or maintaining distance in an orbit.
-  /// </summary>
-  let withDistance distance (c: Camera) =
-    let dir = Vector3.Normalize(c.Position - c.Target)
-
-    let next = {
-      c with
-          Position = c.Target + dir * distance
-    }
-
-    { next with View = rebuildView next }
-
-  /// <summary>
-  /// Orbits the camera around its current target using spherical angles.
-  /// </summary>
-  /// <param name="yaw">Horizontal rotation in radians.</param>
-  /// <param name="pitch">Vertical rotation in radians.</param>
-  let withAngles (yaw: float32) (pitch: float32) (c: Camera) =
-    let distance = Vector3.Distance(c.Position, c.Target)
-
-    let pos =
-      Vector3(
-        distance * float32(Math.Sin(float yaw)) * float32(Math.Cos(float pitch)),
-        distance * float32(Math.Sin(float pitch)),
-        distance * float32(Math.Cos(float yaw)) * float32(Math.Cos(float pitch))
-      )
-      + c.Target
-
-    let next = { c with Position = pos }
-    { next with View = rebuildView next }
-
-  /// <summary>
-  /// Full orbit configuration around a target.
-  /// </summary>
-  let orbit target (yaw: float32) (pitch: float32) distance (c: Camera) =
-    let pos =
-      Vector3(
-        distance * float32(Math.Sin(float yaw)) * float32(Math.Cos(float pitch)),
-        distance * float32(Math.Sin(float pitch)),
-        distance * float32(Math.Cos(float yaw)) * float32(Math.Cos(float pitch))
-      )
-      + target
-
-    let next = {
-      c with
-          Position = pos
-          Target = target
-    }
-
-    { next with View = rebuildView next }
-
-  /// <summary>
-  /// Creates a ray from screen coordinates for mouse/touch picking.
-  /// </summary>
-  let screenPointToRay
-    (camera: Camera)
-    (screenPos: Vector2)
-    (viewport: Viewport)
-    : Ray =
-    let nearPoint = Vector3(screenPos.X, screenPos.Y, 0.0f)
-    let farPoint = Vector3(screenPos.X, screenPos.Y, 1.0f)
-
-    let nearSource =
-      viewport.Unproject(
-        nearPoint,
-        camera.Projection,
-        camera.View,
-        Matrix.Identity
-      )
-
-    let farSource =
-      viewport.Unproject(
-        farPoint,
-        camera.Projection,
-        camera.View,
-        Matrix.Identity
-      )
-
-    let direction = farSource - nearSource
-    direction.Normalize()
-
-    Ray(nearSource, direction)
-
-  /// <summary>
-  /// Calculates the BoundingFrustum for the camera.
-  /// </summary>
-  let boundingFrustum(camera: Camera) : BoundingFrustum =
-    BoundingFrustum(camera.View * camera.Projection)
-
-  /// <summary>
-  /// Identity camera (for testing).
-  /// </summary>
   let identity: Camera =
     let c = {
       Position = Vector3.Zero
@@ -307,15 +91,25 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
+    { c with View = rebuildView c; Projection = rebuildProjection c }
 
-    {
-      c with
-          View = rebuildView c
-          Projection = rebuildProjection c
-    }
+/// Shader base types for override mapping
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
+type ShaderBase =
+  /// The default shadow casting shader (depth only).
+  | ShadowCaster
+  /// High-fidelity PBR shader (Albedo + Normal + MRA).
+  | PBRForward
+  /// Unlit shader (full brightness, no shadows).
+  | Unlit
+  /// Bloom extraction shader.
+  | Bloom
+  /// Final post-processing and tone mapping shader.
+  | PostProcess
 
 /// Mesh geometry reference
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type Mesh = {
   VertexBuffer: VertexBuffer
   IndexBuffer: IndexBuffer
@@ -368,6 +162,7 @@ module Mesh =
 
 /// Material rendering flags
 [<Flags>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type MaterialFlags =
   | None = 0
   | CastsShadow = 1
@@ -379,6 +174,7 @@ type MaterialFlags =
 
 /// PBR material properties
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type PBRMaterial = {
   AlbedoColor: Color
   AlbedoMap: Texture2D voption
@@ -393,6 +189,7 @@ type PBRMaterial = {
 
 /// Complete material definition
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type Material = {
   PBR: PBRMaterial
   Flags: MaterialFlags
@@ -485,6 +282,7 @@ module Material =
 
 /// A single drawable object ready for the pipeline
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type Drawable = {
   Mesh: Mesh
   Transform: Matrix
@@ -510,37 +308,11 @@ module Drawable =
     Bones = ValueNone
   }
 
-// --- Sprite3D / Billboard Types ---
-
-/// <summary>Billboard facing mode.</summary>
-[<Struct>]
-type BillboardMode =
-  | Spherical
-  | Cylindrical of upAxis: Vector3
-
-/// <summary>A textured quad in 3D space, represented as center + basis half-extents.</summary>
-[<Struct>]
-type Quad3D = {
-  Center: Vector3
-  Right: Vector3
-  Up: Vector3
-  Color: Color
-  Uv: UvRect
-}
-
-/// <summary>A billboard (camera-facing quad) in 3D space.</summary>
-[<Struct>]
-type Billboard3D = {
-  Position: Vector3
-  Size: Vector2
-  Rotation: float32
-  Color: Color
-  Uv: UvRect
-  Mode: BillboardMode
-}
+// --- Sprite3D / Billboard Command Types ---
 
 /// <summary>Sprite-style quad draw.</summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type SpriteQuadCmd = {
   Pass: RenderPass
   Texture: Texture2D
@@ -549,6 +321,7 @@ type SpriteQuadCmd = {
 
 /// <summary>Sprite-style billboard draw.</summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type SpriteBillboardCmd = {
   Pass: RenderPass
   Texture: Texture2D
@@ -557,6 +330,7 @@ type SpriteBillboardCmd = {
 
 /// <summary>Effect-driven quad draw.</summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type EffectQuadCmd = {
   Pass: RenderPass
   Effect: Effect
@@ -566,6 +340,7 @@ type EffectQuadCmd = {
 
 /// <summary>Effect-driven billboard draw.</summary>
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type EffectBillboardCmd = {
   Pass: RenderPass
   Effect: Effect
@@ -579,6 +354,7 @@ type EffectBillboardCmd = {
 
 /// Render commands that the pipeline processes in order
 [<Struct>]
+[<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]
 type RenderCommand =
   | SetCamera of camera: Camera
   | SetLighting of lighting: LightingState
