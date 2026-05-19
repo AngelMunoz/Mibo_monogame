@@ -78,3 +78,12 @@ type RenderBuffer<'Key, 'Cmd when 'Key: comparison>
 
   /// Gets the command at the specified index as a (key, command) struct tuple.
   member _.Item(i) = items[i]
+
+  /// <summary>Returns a read-only span over all commands in the buffer.</summary>
+  /// <remarks>Use this for hot-path iteration. The JIT elides bounds checks inside the loop body.</remarks>
+  member _.AsSpan() : ReadOnlySpan<struct ('Key * 'Cmd)> =
+    System.ReadOnlySpan<struct ('Key * 'Cmd)>(items, 0, count)
+
+  /// <summary>Pre-allocates capacity for additional commands without resizing.</summary>
+  /// <remarks>Call this before a known burst of adds to avoid mid-frame reallocation.</remarks>
+  member _.Reserve(additional: int) = ensureCapacity additional

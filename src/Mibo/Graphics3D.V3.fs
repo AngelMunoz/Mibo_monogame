@@ -85,3 +85,30 @@ module RenderBuffer3DExtensions =
     [<Extension>]
     static member inline AddCmd(this: RenderBuffer3D<'Cmd>, cmd: 'Cmd) =
       this.Add((), cmd)
+
+/// <summary>Groups consecutive identical commands for draw-call batching.</summary>
+/// <remarks>
+/// Yields <c>(cmd, count)</c> pairs for each run of identical consecutive commands.
+/// Zero allocation, works with any <c>'Cmd</c> that supports equality.
+/// Use in <c>processCommands</c> to merge repeated draws into instanced or batched calls.
+/// </remarks>
+module ConsecutiveGrouper =
+  /// <summary>Iterates a 3D render buffer, yielding (command, consecutiveCount) for each group.</summary>
+  let inline iter3D
+    ([<InlineIfLambda>] action: 'Cmd -> int -> unit)
+    (buffer: RenderBuffer3D<'Cmd>)
+    : unit when 'Cmd: equality =
+    let span = buffer.AsSpan()
+    let mutable i = 0
+    let len = span.Length
+
+    while i < len do
+      let struct (_, cmd) = span[i]
+      let mutable j = i + 1
+
+      while j < len do
+        let struct (_, next) = span[j]
+        if next = cmd then j <- j + 1 else j <- len
+
+      action cmd (j - i)
+      i <- j

@@ -59,9 +59,8 @@ module SampleCommandProcessor =
     : CameraState3D =
     let mutable currentCamera = cameraState
 
-    for i = 0 to buffer.Count - 1 do
-      let struct (_, cmd) = buffer.[i]
-
+    // Use AsSpan() for bounds-check-elided iteration in the hot path
+    for struct (_, cmd) in buffer.AsSpan() do
       match cmd with
       | SetCamera cam ->
         currentCamera <- {
