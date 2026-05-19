@@ -19,19 +19,6 @@ let apply (effect: Effect) (mp: MaterialParams) (mat: PBRMaterial) =
   // Albedo
   effect.Parameters.["AlbedoColor"].SetValue(mat.AlbedoColor)
 
-  match mat.AlbedoTexture with
-  | Some tex ->
-    effect.Parameters.["HasAlbedoMap"].SetValue(1.0f)
-    effect.Parameters.["AlbedoMap"].SetValue(tex)
-  | None -> effect.Parameters.["HasAlbedoMap"].SetValue(0.0f)
-
-  // Normal map
-  match mat.NormalTexture with
-  | Some tex ->
-    effect.Parameters.["HasNormalMap"].SetValue(1.0f)
-    effect.Parameters.["NormalMap"].SetValue(tex)
-  | None -> effect.Parameters.["HasNormalMap"].SetValue(0.0f)
-
   // PBR properties
   effect.Parameters.["Metallic"].SetValue(mat.Metallic)
   effect.Parameters.["Roughness"].SetValue(mat.Roughness)

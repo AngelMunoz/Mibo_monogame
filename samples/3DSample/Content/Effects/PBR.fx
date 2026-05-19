@@ -13,24 +13,9 @@ matrix Projection;
 
 // Albedo
 float4 AlbedoColor = float4(1, 1, 1, 1);
-float HasAlbedoMap = 0.0;
-texture AlbedoMap;
-sampler AlbedoSampler = sampler_state
-{
-	Texture = <AlbedoMap>;
-	MagFilter = Linear; MinFilter = Linear; MipFilter = Linear;
-	AddressU = Wrap; AddressV = Wrap;
-};
 
 // Normal map
 float HasNormalMap = 0.0;
-texture NormalMap;
-sampler NormalSampler = sampler_state
-{
-	Texture = <NormalMap>;
-	MagFilter = Linear; MinFilter = Linear; MipFilter = Linear;
-	AddressU = Wrap; AddressV = Wrap;
-};
 
 // Metallic / Roughness
 float Metallic = 0.0;
@@ -84,18 +69,10 @@ VertexShaderOutput MainVS(
 float4 MainPS(VertexShaderOutput input) : COLOR0
 {
 	// Albedo
-	float4 albedo = (HasAlbedoMap > 0.5)
-		? tex2D(AlbedoSampler, input.TexCoord) * AlbedoColor
-		: AlbedoColor;
+	float4 albedo = AlbedoColor;
 
 	// Normal
 	float3 N = input.Normal;
-	if (HasNormalMap > 0.5)
-	{
-		float3 normalTex = tex2D(NormalSampler, input.TexCoord).rgb * 2.0 - 1.0;
-		float3x3 TBN = float3x3(input.Tangent, input.Bitangent, input.Normal);
-		N = normalize(mul(normalTex, TBN));
-	}
 
 	// Lighting
 	float3 L = normalize(-LightDirection);

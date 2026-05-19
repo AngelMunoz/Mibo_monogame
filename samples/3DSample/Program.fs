@@ -191,8 +191,6 @@ module Program =
     let pbrMat =
       Materials.Types.PBR {
         AlbedoColor = Vector4.One
-        AlbedoTexture = None
-        NormalTexture = None
         Metallic = 0.3f
         Roughness = 0.7f
         EmissiveColor = Vector4.Zero

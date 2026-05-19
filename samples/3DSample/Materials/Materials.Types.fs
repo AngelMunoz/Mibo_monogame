@@ -25,12 +25,10 @@ type UnlitMaterial = {
   Intensity: float32
 }
 
-/// <summary>PBR material: albedo, normal, metallic/roughness, emissive.</summary>
+/// <summary>PBR material: albedo, metallic/roughness, emissive.</summary>
 [<Struct>]
 type PBRMaterial = {
   AlbedoColor: Vector4
-  AlbedoTexture: Texture2D option
-  NormalTexture: Texture2D option
   Metallic: float32
   Roughness: float32
   EmissiveColor: Vector4

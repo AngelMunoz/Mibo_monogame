@@ -38,8 +38,6 @@ let draw
   let pbrMat =
     PBR {
       AlbedoColor = Vector4(0.2f, 0.5f, 1.0f, 1.0f)
-      AlbedoTexture = None
-      NormalTexture = None
       Metallic = 0.8f
       Roughness = 0.3f
       EmissiveColor = Vector4.Zero
