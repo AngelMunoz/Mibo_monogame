@@ -5,9 +5,9 @@ open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open Mibo
 open Mibo.Elmish
-open Mibo.Elmish.Graphics3D
 open Mibo.Input
 open Mibo.Layout3D
+open Mibo.Rendering.Graphics3D
 
 module Program =
 
@@ -71,16 +71,38 @@ module Program =
     let playerModel = Assets.model "Models/Platform/ball_blue" ctx
     let playerBounds = Platform.computeBounds playerModel
 
-    // Placeholder for grid rendering (can be removed or simplified)
+    // Load grid effect
     let gridEffect = Assets.effect "Effects/Grid" ctx
+
+    // Extract platform data from level grid for grid rendering
+    let platforms =
+      let acc = ResizeArray<PlatformData>()
+
+      CellGrid3D.iter
+        (fun x y z cell ->
+          if cell.Render then
+            let worldPos = CellGrid3D.getWorldPos x y z levelGrid
+
+            acc.Add(
+              {
+                Position = worldPos
+                Bounds = BoundingBox(worldPos, worldPos + cell.Size)
+              }
+            ))
+        levelGrid
+
+      Seq.toList acc
+
+    // Create grid vertices
+    let gridVertices, gridLineCount = Grid.create platforms 0.5f Color.White
 
     let assets = {
       PlayerModel = playerModel
       PlayerBounds = playerBounds
-      PlatformModel = playerModel // Not used now, kept for compatibility
+      PlatformModel = playerModel
       PlatformBounds = playerBounds
-      PlatformGrid = [||]
-      PlatformGridLineCount = 0
+      PlatformGrid = gridVertices
+      PlatformGridLineCount = gridLineCount
       GridEffect = gridEffect
     }
 
@@ -122,7 +144,7 @@ module Program =
   let view
     (ctx: GameContext)
     (state: State)
-    (buffer: RenderBuffer<RenderCmd3D>)
+    (buffer: RenderBuffer3D<SampleCmd>)
     =
     // Camera follows player
     let cameraOffset = Vector3(12f, 12f, 12f)
@@ -138,7 +160,8 @@ module Program =
         0.1f
         1000f
 
-    Draw3D.camera camera buffer
+    buffer.AddCmd(SampleCmd.SetCamera camera)
+    buffer.AddCmd(SampleCmd.Clear(Color.CornflowerBlue, true))
 
     // Create view bounds for frustum culling (large radius around player)
     let viewRadius = 50f
@@ -169,7 +192,16 @@ module Program =
           Matrix.CreateFromQuaternion(cell.Rotation)
           * Matrix.CreateTranslation(worldPos)
 
-        Draw3D.mesh model matrix |> Draw3D.submit buffer)
+        buffer.AddCmd(DrawMesh(model, matrix)))
+
+    // Draw the grid
+    Grid.draw
+      state.PlayerPosition
+      50f
+      state.Assets.GridEffect
+      state.Assets.PlatformGrid
+      state.Assets.PlatformGridLineCount
+      buffer
 
     // Draw the player
     Player.view ctx state buffer
@@ -201,14 +233,8 @@ module Program =
       |> Program.withAssets
       |> Program.withTick Tick
       |> Program.withSubscription subscribe
-      |> Program.withRenderer(
-        Batch3DRenderer.createWithConfig
-          {
-            Batch3DConfig.defaults with
-                ClearColor = ValueSome Color.CornflowerBlue
-          }
-          view
-      )
+      |> Program.withRenderer(fun game ->
+        Batch3DRenderer.create game view SampleCommandProcessor.processCommands)
 
     use game = new ElmishGame<State, Msg>(program)
     game.Run()

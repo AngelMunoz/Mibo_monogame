@@ -2,7 +2,8 @@ module _3DSample.Grid
 
 open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
-open Mibo.Elmish.Graphics3D
+open Mibo.Rendering
+open Mibo.Rendering.Graphics3D
 
 /// <summary>
 /// Pre-calculates grid vertices for a set of platform bounds.
@@ -48,7 +49,7 @@ let draw
   (effect: Effect)
   (vertices: VertexPositionColor[])
   (lineCount: int)
-  (buffer: RenderBuffer<RenderCmd3D>)
+  (buffer: RenderBuffer3D<SampleCmd>)
   =
 
   if lineCount > 0 then
@@ -59,10 +60,4 @@ let draw
       e.Parameters.["PlayerPosition"].SetValue(playerPos)
       e.Parameters.["MaxDistance"].SetValue(maxDist)
 
-    Draw3D.linesEffect
-      Transparent
-      effect
-      (ValueSome setup)
-      vertices
-      lineCount
-      buffer
+    buffer.AddCmd(SampleCmd.DrawLinesEffect(vertices, lineCount, effect, setup))

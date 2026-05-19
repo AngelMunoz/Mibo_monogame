@@ -63,7 +63,12 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
-    { c with View = rebuildView c; Projection = rebuildProjection c }
+
+    {
+      c with
+          View = rebuildView c
+          Projection = rebuildProjection c
+    }
 
   let perspective position target up fov aspect near far : Camera =
     let c = {
@@ -77,7 +82,12 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
-    { c with View = rebuildView c; Projection = rebuildProjection c }
+
+    {
+      c with
+          View = rebuildView c
+          Projection = rebuildProjection c
+    }
 
   let identity: Camera =
     let c = {
@@ -91,7 +101,12 @@ module Camera =
       View = Matrix.Identity
       Projection = Matrix.Identity
     }
-    { c with View = rebuildView c; Projection = rebuildProjection c }
+
+    {
+      c with
+          View = rebuildView c
+          Projection = rebuildProjection c
+    }
 
 /// Shader base types for override mapping
 [<Obsolete("Mibo.Rendering.Graphics3D is deprecated and will be removed. Use Mibo.Rendering.Graphics3D.V3 instead.")>]

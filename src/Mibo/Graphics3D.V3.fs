@@ -17,14 +17,11 @@ type RenderBuffer3D<'Cmd> = RenderBuffer<unit, 'Cmd>
 
 /// <summary>Runtime camera state tracked during command processing.</summary>
 [<Struct>]
-type CameraState3D = {
-  View: Matrix
-  Projection: Matrix
-}
+type CameraState3D = { View: Matrix; Projection: Matrix }
 
 module CameraState3D =
   /// <summary>Creates camera state from a camera's view/projection.</summary>
-  let inline from (cam: Camera) : CameraState3D = {
+  let inline from(cam: Camera) : CameraState3D = {
     View = cam.View
     Projection = cam.Projection
   }
@@ -43,8 +40,10 @@ module CameraState3D =
 type Batch3DRenderer<'Model, 'Cmd>
   (
     game: Game,
-    [<InlineIfLambda>] view: GameContext -> 'Model -> RenderBuffer3D<'Cmd> -> unit,
-    [<InlineIfLambda>] processCommands: CameraState3D -> GraphicsDevice -> RenderBuffer3D<'Cmd> -> CameraState3D
+    [<InlineIfLambda>] view:
+      GameContext -> 'Model -> RenderBuffer3D<'Cmd> -> unit,
+    [<InlineIfLambda>] processCommands:
+      CameraState3D -> GraphicsDevice -> RenderBuffer3D<'Cmd> -> CameraState3D
   ) =
 
   let buffer = RenderBuffer3D<'Cmd>()
@@ -67,7 +66,22 @@ module Batch3DRenderer =
   /// <param name="processCommands">User function that processes render commands and returns final camera state.</param>
   let inline create<'Model, 'Cmd>
     (game: Game)
-    ([<InlineIfLambda>] view: GameContext -> 'Model -> RenderBuffer3D<'Cmd> -> unit)
-    ([<InlineIfLambda>] processCommands: CameraState3D -> GraphicsDevice -> RenderBuffer3D<'Cmd> -> CameraState3D)
+    ([<InlineIfLambda>] view:
+      GameContext -> 'Model -> RenderBuffer3D<'Cmd> -> unit)
+    ([<InlineIfLambda>] processCommands:
+      CameraState3D -> GraphicsDevice -> RenderBuffer3D<'Cmd> -> CameraState3D)
     : IRenderer<'Model> =
-    new Batch3DRenderer<'Model, 'Cmd>(game, view, processCommands) :> IRenderer<'Model>
+    new Batch3DRenderer<'Model, 'Cmd>(game, view, processCommands)
+    :> IRenderer<'Model>
+
+[<AutoOpen>]
+module RenderBuffer3DExtensions =
+  open System.Runtime.CompilerServices
+
+  /// <summary>Extension methods for <see cref="T:Mibo.Rendering.Graphics3D.RenderBuffer3D`1"/>.</summary>
+  [<Extension>]
+  type RenderBuffer3DExtensions =
+    /// <summary>Adds a command to a 3D render buffer. Since 3D buffers use <c>unit</c> as the key, this overload lets you omit it.</summary>
+    [<Extension>]
+    static member inline AddCmd(this: RenderBuffer3D<'Cmd>, cmd: 'Cmd) =
+      this.Add((), cmd)

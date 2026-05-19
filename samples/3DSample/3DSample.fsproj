@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <Compile Include="Domain.fs" />
+    <Compile Include="Rendering.fs" />
     <Compile Include="Level.fs" />
     <Compile Include="Platform.fs" />
     <Compile Include="Movement.fs" />
