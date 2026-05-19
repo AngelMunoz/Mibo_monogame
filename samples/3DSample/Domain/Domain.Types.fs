@@ -53,7 +53,6 @@ type GameAssets = {
   PlatformGrid: VertexPositionColor[]
   PlatformGridLineCount: int
   GridEffect: Effect
-  PbrEffect: Effect
 }
 
 /// <summary>Game state - fully immutable, idiomatic F#.</summary>
