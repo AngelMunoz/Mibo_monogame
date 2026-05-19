@@ -78,9 +78,8 @@ module Program =
     // Load grid effect
     let gridEffect = Assets.effect "Effects/Grid" ctx
 
-    // Load PBR effect directly from file (not through content pipeline)
-    let pbrEffectPath = System.IO.Path.Combine(ctx.Content.RootDirectory, "Effects/PBR.fx")
-    let pbrEffect = new Effect(ctx.GraphicsDevice, System.IO.File.ReadAllBytes(pbrEffectPath))
+    // Load PBR effect
+    let pbrEffect = Assets.effect "Effects/PBR" ctx
 
     // Extract platform data from level grid for grid rendering
     let platforms =
