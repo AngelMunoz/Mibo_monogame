@@ -57,7 +57,7 @@ let draw
   =
 
   if lineCount > 0 then
-    let setup (e: Effect) (ctx: EffectContext) =
+    let setup (e: Effect) (ctx: Mibo.Rendering.EffectContext) =
       e.Parameters.["World"].SetValue(ctx.World)
       e.Parameters.["View"].SetValue(ctx.View)
       e.Parameters.["Projection"].SetValue(ctx.Projection)

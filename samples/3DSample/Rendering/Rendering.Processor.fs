@@ -90,7 +90,7 @@ let processCommands
       drawMeshWithMaterial gd matParams effect material model transform
 
     | DrawLinesEffect(vertices, lineCount, effect, setup) ->
-      let effectCtx: EffectContext = {
+      let effectCtx: Mibo.Rendering.EffectContext = {
         World = Matrix.Identity
         View = currentCamera.View
         Projection = currentCamera.Projection
