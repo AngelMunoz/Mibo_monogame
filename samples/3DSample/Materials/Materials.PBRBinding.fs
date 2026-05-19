@@ -32,5 +32,3 @@ let apply (effect: Effect) (mp: MaterialParams) (mat: PBRMaterial) =
   effect.Parameters.["LightColor"].SetValue(mat.LightColor)
   effect.Parameters.["LightIntensity"].SetValue(mat.LightIntensity)
   effect.Parameters.["AmbientColor"].SetValue(mat.AmbientColor)
-
-  effect.CurrentTechnique.Passes.[0].Apply()

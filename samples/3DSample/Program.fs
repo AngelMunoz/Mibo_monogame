@@ -78,6 +78,9 @@ module Program =
     // Load grid effect
     let gridEffect = Assets.effect "Effects/Grid" ctx
 
+    // Load PBR effect
+    let pbrEffect = Assets.effect "Effects/PBR" ctx
+
     // Extract platform data from level grid for grid rendering
     let platforms =
       let acc = ResizeArray<PlatformData>()
@@ -108,6 +111,7 @@ module Program =
       PlatformGrid = gridVertices
       PlatformGridLineCount = gridLineCount
       GridEffect = gridEffect
+      PbrEffect = pbrEffect
     }
 
     {
@@ -184,6 +188,19 @@ module Program =
       )
 
     // Render level geometry using iterVolume for frustum culling
+    let pbrMat =
+      Materials.Types.PBR {
+        AlbedoColor = Vector4.One
+        Metallic = 0.3f
+        Roughness = 0.7f
+        EmissiveColor = Vector4.Zero
+        EmissiveIntensity = 0.0f
+        LightDirection = Vector3.Normalize(Vector3(0.5f, -1.0f, 0.3f))
+        LightColor = Vector3.One
+        LightIntensity = 1.2f
+        AmbientColor = Vector3(0.15f, 0.15f, 0.2f)
+      }
+
     state.LevelGrid
     |> CellGrid3D.iterVolume viewBounds (fun x y z cell ->
       if cell.Render then
@@ -194,7 +211,14 @@ module Program =
           Matrix.CreateFromQuaternion(cell.Rotation)
           * Matrix.CreateTranslation(worldPos)
 
-        buffer.AddCmd(Commands.DrawMesh(model, matrix)))
+        buffer.AddCmd(
+          Commands.DrawMeshWithMaterial(
+            state.Assets.PbrEffect,
+            pbrMat,
+            model,
+            matrix
+          )
+        ))
 
     // Draw the grid
     Grid.draw

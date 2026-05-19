@@ -45,14 +45,17 @@ let private drawMeshWithMaterial
   (model: Model)
   (transform: Matrix)
   =
-  // Apply material-specific shader parameters
   match material with
   | Unlit mat -> _3DSample.Materials.UnlitBinding.apply effect mp mat
   | PBR mat -> _3DSample.Materials.PBRBinding.apply effect mp mat
 
-  // Draw the model - the effect is already bound
-  for mesh in model.Meshes do
-    mesh.Draw()
+  for mesh in Mesh.fromModel model do
+    gd.SetVertexBuffer(mesh.VertexBuffer)
+    gd.Indices <- mesh.IndexBuffer
+
+    for pass in effect.CurrentTechnique.Passes do
+      pass.Apply()
+      gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, mesh.IndexCount / 3)
 
 /// <summary>Process all commands in the render buffer.</summary>
 /// <returns>The final camera state for the next frame.</returns>

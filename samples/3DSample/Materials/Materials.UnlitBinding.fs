@@ -23,5 +23,3 @@ let apply (effect: Effect) (mp: MaterialParams) (mat: UnlitMaterial) =
     effect.Parameters.["HasAlbedoMap"].SetValue(1.0f)
     effect.Parameters.["AlbedoMap"].SetValue(tex)
   | None -> effect.Parameters.["HasAlbedoMap"].SetValue(0.0f)
-
-  effect.CurrentTechnique.Passes.[0].Apply()
