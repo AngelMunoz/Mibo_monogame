@@ -11,10 +11,10 @@ open _3DSample.Materials.Types
 // Call `Apply` before drawing geometry with this material.
 
 /// <summary>Applies unlit material parameters to the effect.</summary>
-let apply (effect: Effect) (params: MaterialParams) (mat: UnlitMaterial) =
-  effect.Parameters.["World"].SetValue(params.World)
-  effect.Parameters.["View"].SetValue(params.View)
-  effect.Parameters.["Projection"].SetValue(params.Projection)
+let apply (effect: Effect) (mp: MaterialParams) (mat: UnlitMaterial) =
+  effect.Parameters.["World"].SetValue(mp.World)
+  effect.Parameters.["View"].SetValue(mp.View)
+  effect.Parameters.["Projection"].SetValue(mp.Projection)
   effect.Parameters.["AlbedoColor"].SetValue(mat.AlbedoColor)
   effect.Parameters.["Intensity"].SetValue(mat.Intensity)
 

@@ -39,7 +39,7 @@ let private drawMeshWithBasicEffect
 /// <summary>Draws a model with a custom material, applying shader parameters first.</summary>
 let private drawMeshWithMaterial
   (gd: GraphicsDevice)
-  (params: MaterialParams)
+  (mp: MaterialParams)
   (effect: Effect)
   (material: Material)
   (model: Model)
@@ -47,8 +47,8 @@ let private drawMeshWithMaterial
   =
   // Apply material-specific shader parameters
   match material with
-  | Unlit mat -> _3DSample.Materials.UnlitBinding.apply effect params mat
-  | PBR mat -> _3DSample.Materials.PBRBinding.apply effect params mat
+  | Unlit mat -> _3DSample.Materials.UnlitBinding.apply effect mp mat
+  | PBR mat -> _3DSample.Materials.PBRBinding.apply effect mp mat
 
   // Draw the model - the effect is already bound
   for mesh in model.Meshes do
