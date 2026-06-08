@@ -293,5 +293,6 @@ Mibo includes pre-built stamps for common game types:
 
 - **[Platformer](platformer.html)** - Boxes, platforms, ledges, walls, pillars, stairs, slopes, pits
 - **[TopDown](topdown.html)** - Rooms, corridors, wall segments, doorways
+- **[Hexagonal Grid](hex.html)** - Hex grids with 6-way adjacency and spatial algorithms
 
 These serve as examples and starting points. Copy and modify them for your game's needs.

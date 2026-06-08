@@ -18,15 +18,18 @@ Mibo provides grid-based layout engines for designing game levels programmatical
 
 ## 2D vs 3D Layout
 
-Mibo provides separate layout engines for 2D and 3D games:
+Mibo provides separate layout engines for 2D and 3D games, each with square and hex variants:
 
-| Feature | 2D Layout | 3D Layout |
-|---------|-----------|-----------|
-| **Module** | `Mibo.Layout` | `Mibo.Layout3D` |
-| **Dimensions** | X, Y | X, Y, Z |
-| **Storage** | `CellGrid2D<'T>` | `CellGrid3D<'T>` |
-| **Cursor** | `GridSection2D<'T>` | `GridSection3D<'T>` |
-| **World Space** | `Vector2` | `Vector3` |
+| Feature | Square Grid | Hex Grid |
+|---------|-------------|----------|
+| **2D Storage** | `CellGrid2D<'T>` | `HexGrid<'T>` |
+| **2D Cursor** | `GridSection2D<'T>` | `HexGridSection<'T>` |
+| **2D DSL** | `Layout` | `HexLayout` |
+| **3D Storage** | `CellGrid3D<'T>` | `HexGrid3D<'T>` |
+| **3D Cursor** | `GridSection3D<'T>` | `HexGrid3DSection<'T>` |
+| **3D DSL** | `Layout3D` | `HexLayout3D` |
+| **Neighbors** | 4 or 8 | 6 (2D) or 8 (3D) |
+| **World Space** | `Vector2` / `Vector3` | `Vector2` / `Vector3` |
 
 ## Common Patterns
 
@@ -175,6 +178,25 @@ Mibo includes pre-built stamps for common game types:
 - **[Interior](3d/interior.html)** - Rooms, corridors, doorways, stairs, shafts, pillars, windows
 - **[Terrain](3d/terrain.html)** - Ground, plateaus, pits, ramps, paths, heightmaps
 
+### Hex Grids
+
+- **[Hexagonal 2D Grid](2d/hex.html)** - Hex grids with 6-way adjacency, spatial algorithms, A* pathfinding
+- **[Hexagonal 3D Grid](3d/hex.html)** - 3D hex grids with vertical layering
+
+## Choosing Between Square and Hex
+
+Use **square grids** for:
+- Platformers and side-scrollers
+- Games with axis-aligned movement
+- Simpler collision detection
+- Lower computational overhead
+
+Use **hex grids** for:
+- Strategy and tactics games (Civ-like)
+- Games where uniform neighbor distance matters
+- Board game adaptations
+- Games with 6-directional movement
+
 ## Choosing Between 2D and 3D
 
 Use **2D Layout** for:
@@ -192,8 +214,10 @@ Use **3D Layout** for:
 ## Getting Started
 
 - **[2D Layout Engine](2d/core.html)** - Core 2D concepts and DSL
+- **[Hexagonal 2D Grid](2d/hex.html)** - Hex grids for 2D games
 - **[Platformer Stamps](2d/platformer.html)** - 2D platformer examples
 - **[TopDown Stamps](2d/topdown.html)** - 2D top-down examples
 - **[3D Layout Engine](3d/core.html)** - Core 3D concepts and DSL
+- **[Hexagonal 3D Grid](3d/hex.html)** - Hex grids for 3D games
 - **[Interior Stamps](3d/interior.html)** - 3D interior examples
 - **[Terrain Stamps](3d/terrain.html)** - 3D terrain examples

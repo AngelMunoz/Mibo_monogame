@@ -281,6 +281,7 @@ Mibo includes pre-built stamps for common 3D game types:
 
 - **[Interior](interior.html)** - Rooms, corridors, doorways, stairs, shafts, pillars, windows
 - **[Terrain](terrain.html)** - Ground, plateaus, pits, ramps, paths, heightmaps
+- **[Hexagonal Grid](hex.html)** - 3D hex grids with vertical layering and spatial algorithms
 
 These serve as examples and starting points. Copy and modify them for your game's needs.
 
