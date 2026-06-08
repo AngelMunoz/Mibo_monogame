@@ -2,12 +2,14 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-08
+
 ### Added
 
 - Level Design: **Hexagonal 2D Grid Support**. Added `HexGrid`, `HexLayout`, `LayeredHexGrid`, and `LayeredHexLayout` to `Mibo.Layout` for hexagonal tile-based level design with pointy-top and flat-top orientations.
 - Level Design: **Hexagonal 3D Grid Support**. Added `HexGrid3D`, `HexLayout3D`, `LayeredHexGrid3D`, and `LayeredHexLayout3D` to `Mibo.Layout3D` for hexagonal voxel-based level design.
-- Level Design: **2D Spatial Algorithms**. Added `Grid2DSpatial` and `Hex2DSpatial` modules with neighbor queries, distance metrics, world-to-cell conversion, line-of-sight, flood fill, and A* pathfinding for both square and hex grids.
-- Level Design: **3D Spatial Algorithms**. Added `Grid3DSpatial` and `Hex3DSpatial` modules with neighbor queries, distance metrics, world-to-cell conversion, line-of-sight, flood fill, and A* pathfinding for both voxel and hex3D grids.
+- Level Design: **2D Spatial Algorithms**. Added `Grid2DSpatial` and `Hex2DSpatial` modules with neighbor queries, distance metrics, world-to-cell conversion, line-of-sight, flood fill, and A\* pathfinding for both square and hex grids.
+- Level Design: **3D Spatial Algorithms**. Added `Grid3DSpatial` and `Hex3DSpatial` modules with neighbor queries, distance metrics, world-to-cell conversion, line-of-sight, flood fill, and A\* pathfinding for both voxel and hex3D grids.
 
 ## [1.6.0] - 2026-02-07
 
