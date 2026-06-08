@@ -435,14 +435,14 @@ module Layout =
     for bx in 0 .. width - 1 do
       let top = if bx % 2 = 0 then odd else even
       let bottom = if (bx + height - 1) % 2 = 0 then odd else even
-      setLocal (x + bx) y top section |> ignore
-      setLocal (x + bx) (y + height - 1) bottom section |> ignore
+      setLocal (x + bx) y top section
+      setLocal (x + bx) (y + height - 1) bottom section
 
     for by in 1 .. height - 2 do
       let left = if by % 2 = 0 then odd else even
       let right = if (by + width - 1) % 2 = 0 then odd else even
-      setLocal x (y + by) left section |> ignore
-      setLocal (x + width - 1) (y + by) right section |> ignore
+      setLocal x (y + by) left section
+      setLocal (x + width - 1) (y + by) right section
 
     section
 

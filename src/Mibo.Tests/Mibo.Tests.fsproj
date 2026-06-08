@@ -17,7 +17,15 @@
     <Compile Include="Sprite3DTests.fs" />
     <Compile Include="RenderBufferTests.fs" />
     <Compile Include="LayoutTests.fs" />
+    <Compile Include="HexGridTests.fs" />
+    <Compile Include="HexLayoutTests.fs" />
+    <Compile Include="LayeredHexTests.fs" />
+    <Compile Include="Spatial2DTests.fs" />
     <Compile Include="Layout3DTests.fs" />
+    <Compile Include="HexGrid3DTests.fs" />
+    <Compile Include="HexLayout3DTests.fs" />
+    <Compile Include="LayeredHex3DTests.fs" />
+    <Compile Include="Spatial3DTests.fs" />
     <Compile Include="Main.fs" />
   </ItemGroup>
 
