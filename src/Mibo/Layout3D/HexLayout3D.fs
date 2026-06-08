@@ -503,17 +503,13 @@ module HexLayout3D =
     content
     (section: HexGrid3DSection<'T>)
     : HexGrid3DSection<'T> =
-    section |> floorHex col row layer w d content |> ignore
-
-    section |> floorHex col (row) (layer + h - 1) w d content |> ignore
-
-    section |> wallXY col row layer w h content |> ignore
-
-    section |> wallXY col row (layer + d - 1) w h content |> ignore
-
-    section |> wallYZ col row layer h d content |> ignore
-
-    section |> wallYZ (col + w - 1) row layer h d content
+    section
+    |> floorHex col row layer w d content
+    |> floorHex col row (layer + h - 1) w d content
+    |> wallXY col row layer w h content
+    |> wallXY col row (layer + d - 1) w h content
+    |> wallYZ col row layer h d content
+    |> wallYZ (col + w - 1) row layer h d content
 
   /// <summary>Draws only the 12 edges of a box.</summary>
   let edges
@@ -1383,17 +1379,13 @@ module HexLayout3D =
     (section: HexGrid3DSection<'T>)
     : HexGrid3DSection<'T> =
     if w > 0 && h > 0 && d > 0 then
-      section |> floorHex col row layer w d content |> ignore
-
-      section |> floorHex col row (layer + h - 1) w d content |> ignore
-
-      section |> wallXY col row layer w h content |> ignore
-
-      section |> wallXY col (row + d - 1) layer w h content |> ignore
-
-      section |> wallYZ col row layer h d content |> ignore
-
-      section |> wallYZ (col + w - 1) row layer h d content
+      section
+      |> floorHex col row layer w d content
+      |> floorHex col row (layer + h - 1) w d content
+      |> wallXY col row layer w h content
+      |> wallXY col (row + d - 1) layer w h content
+      |> wallYZ col row layer h d content
+      |> wallYZ (col + w - 1) row layer h d content
     else
       section
 
@@ -1516,28 +1508,22 @@ module HexLayout3D =
       for bd in 0 .. d - 1 do
         let top = if (bc + bd) % 2 = 0 then odd else even
         let bottom = if (bc + bd + h - 1) % 2 = 0 then odd else even
-        setHex3DLocal (col + bc) row (layer + bd) top section |> ignore
-
+        setHex3DLocal (col + bc) row (layer + bd) top section
         setHex3DLocal (col + bc) (row + h - 1) (layer + bd) bottom section
-        |> ignore
 
     for br in 1 .. h - 2 do
       for bd in 0 .. d - 1 do
         let left = if (br + bd) % 2 = 0 then odd else even
         let right = if (br + bd + w - 1) % 2 = 0 then odd else even
-        setHex3DLocal col (row + br) (layer + bd) left section |> ignore
-
+        setHex3DLocal col (row + br) (layer + bd) left section
         setHex3DLocal (col + w - 1) (row + br) (layer + bd) right section
-        |> ignore
 
     for bc in 0 .. w - 1 do
       for br in 0 .. h - 1 do
         let front = if (bc + br) % 2 = 0 then odd else even
         let back = if (bc + br + d - 1) % 2 = 0 then odd else even
-        setHex3DLocal (col + bc) (row + br) layer front section |> ignore
-
+        setHex3DLocal (col + bc) (row + br) layer front section
         setHex3DLocal (col + bc) (row + br) (layer + d - 1) back section
-        |> ignore
 
     section
 

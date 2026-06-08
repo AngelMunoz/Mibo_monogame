@@ -387,14 +387,14 @@ module HexLayout =
     for bc in 0 .. width - 1 do
       let top = if bc % 2 = 0 then odd else even
       let bottom = if (bc + height - 1) % 2 = 0 then odd else even
-      setHexLocal (col + bc) row top section |> ignore
-      setHexLocal (col + bc) (row + height - 1) bottom section |> ignore
+      setHexLocal (col + bc) row top section
+      setHexLocal (col + bc) (row + height - 1) bottom section
 
     for br in 1 .. height - 2 do
       let left = if br % 2 = 0 then odd else even
       let right = if (br + width - 1) % 2 = 0 then odd else even
-      setHexLocal col (row + br) left section |> ignore
-      setHexLocal (col + width - 1) (row + br) right section |> ignore
+      setHexLocal col (row + br) left section
+      setHexLocal (col + width - 1) (row + br) right section
 
     section
 
