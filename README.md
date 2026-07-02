@@ -1,5 +1,11 @@
 # Mibo
 
+# This Project is deprecated please check Issue #19
+
+> This project has been deprecated in favor of https://github.com/AngelMunoz/Mibo
+> The new project contains full MonoGame support as well as Raylib. Further details in [#19](https://github.com/AngelMunoz/Mibo_monogame/issues/19)
+
+
 Mibo is a lightweight, Elmish-inspired **micro-framework** for **F#** that helps you build games on top of **MonoGame** (the underlying game framework).
 It’s designed to stay fun for small games while still providing an upgrade path for bigger projects (ARPG/RTS-style complexity) without forcing you to rewrite your engine.
 
